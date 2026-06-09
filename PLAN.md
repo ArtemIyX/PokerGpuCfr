@@ -66,9 +66,9 @@ How to use:
 - [x] Define abstraction interface
 - [x] Implement baseline bet sizing set
 - [x] Implement min-raise and stack-aware sizing filters
-- [ ] Implement street-specific action templates
-- [ ] Implement configurable abstraction profiles
-- [ ] Add tests for legal generated actions
+- [x] Implement street-specific action templates
+- [x] Implement configurable abstraction profiles
+- [x] Add tests for legal generated actions
 
 ## 7. Card abstraction and ranges
 

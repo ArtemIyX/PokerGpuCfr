@@ -46,6 +46,39 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:51 - Added street templates, abstraction profiles, and recursive tree expansion
+**Goal**
+- Add street-specific action templates.
+- Add configurable abstraction profiles.
+- Extend the tree builder beyond one ply.
+
+**Work done**
+- Extended `src/pokergpu/abstraction/actions.py`.
+- Added `StreetActionTemplate`, `AbstractionProfile`, `make_default_profile()`, and `make_compact_profile()`.
+- Updated `BaselineActionAbstraction` to select bet and raise sizes by street.
+- Extended `src/pokergpu/tree/builder.py` with `TreeBuildConfig` and `build_public_tree(...)`.
+- Added bounded recursive expansion with `max_depth` and `max_nodes`.
+- Added tests for profile behavior and multi-ply expansion in `tests/test_action_abstraction.py` and `tests/test_tree_builder.py`.
+- Updated `PLAN.md` to mark the remaining section 6 items done.
+
+**Result**
+- ✅ Success
+- Action abstraction is now street-aware and profile-driven.
+- Public tree building can now expand beyond one ply with explicit limits.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 45 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `79 passed in 3.68s`
+
+**Why it worked / failed**
+- Separating street templates from the abstraction engine makes future tuning easier.
+- Explicit depth and node caps keep recursive tree growth predictable and safe.
+
+**Follow-ups**
+- Start section 7 card abstraction and ranges.
+- Or extend tree building with chance/street-transition nodes before CFR traversal starts.
+
 ### 2026-06-09 11:47 - Added baseline action abstraction and first tree builder
 **Goal**
 - Start section 6 action abstraction.
