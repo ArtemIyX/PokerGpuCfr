@@ -46,6 +46,32 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:50 - Updated SKILL.md for repo structure and typed Python workflow
+**Goal**
+- Align `SKILL.md` with the real project conventions.
+- Document subfolder usage, current packages, and typed Python rules.
+
+**Work done**
+- Updated `SKILL.md`.
+- Added project-specific implementation rules section.
+- Documented that subfolders should be used under `src/pokergpu/`.
+- Documented current package choices: `numpy`, `scipy`, `numba`, `torch`, `pokerkit`, `treys`, `pytest`, `ruff`, `mypy`, `pytest-benchmark`.
+- Documented typed Python expectations and suggested package layout by domain.
+
+**Result**
+- ✅ Success
+- `SKILL.md` now reflects the actual repo direction instead of only general solver architecture.
+
+**Evidence**
+- `SKILL.md` contains a new `0) Project-specific implementation rules` section.
+
+**Why it worked / failed**
+- The project had already converged on typed Python and package-based structure, so the doc needed to catch up.
+
+**Follow-ups**
+- Move future domain modules into subfolders such as `core/`, `eval/`, and `cfr/`.
+- Keep `SKILL.md` updated when architecture decisions change.
+
 ### 2026-06-09 10:47 - Implemented typed card model and deck utilities
 **Goal**
 - Start section 2 core poker model.

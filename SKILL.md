@@ -4,6 +4,54 @@ This skill describes how to design and implement a CFR-based poker solver that a
 
 ---
 
+## 0) Project-specific implementation rules
+
+This repository is a typed Python implementation.
+
+Current package and tooling choices:
+- `numpy`, `scipy`, `numba` for numeric and performance-critical CPU work
+- `torch` for the first GPU/value-network path
+- `pokerkit` for poker rules/state reference support where helpful
+- `treys` for early hand evaluation support
+- `pytest`, `ruff`, `mypy`, `pytest-benchmark` for quality and measurement
+
+Code style rules for this project:
+- Use Python type hints everywhere practical
+- Prefer `dataclass`, `Enum`/`StrEnum`, `Protocol`, `Literal`, `TypedDict`, and small typed APIs
+- Keep `mypy` strict and keep new code passing it
+- Favor immutable domain models first unless mutation is clearly needed for performance
+- Hide third-party package details behind our own interfaces
+
+Folder structure:
+- Yes, use subfolders
+- Do not keep everything in one flat `src/pokergpu/` directory
+- Group code by domain so solver internals can grow cleanly
+
+Recommended package layout:
+- `src/pokergpu/core/`
+  - cards, board, actions, state, rules
+- `src/pokergpu/eval/`
+  - hand evaluators, wrappers around `treys`, future batch eval APIs
+- `src/pokergpu/cfr/`
+  - regrets, strategies, traversal, variants
+- `src/pokergpu/tree/`
+  - public tree builder, node arrays, infoset indexing
+- `src/pokergpu/abstraction/`
+  - action abstraction, card buckets, ranges
+- `src/pokergpu/gpu/`
+  - batch builders, device logic, inference path
+- `src/pokergpu/training/`
+  - datasets, value-model training, export
+- `src/pokergpu/bench/`
+  - benchmark helpers and scenarios
+- `src/pokergpu/io/`
+  - config, serialization, artifact loading/saving
+
+Working rule:
+- Start simple, but place new modules in the right subfolder early
+- Keep public APIs small and typed
+- Optimize only after correctness, tests, and benchmarks exist
+
 ## 1) Outcome
 
 You will be able to implement a solver that supports:
