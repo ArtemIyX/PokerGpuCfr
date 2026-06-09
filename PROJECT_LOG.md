@@ -46,6 +46,45 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:42 - Added levelized parallel node traversal
+**Goal**
+- Continue section 10 by adding parallel node traversal where it fits the flat-array passes.
+
+**Work done**
+- Updated `src/pokergpu/cfr/traversal.py`.
+- Added:
+  - `TreeLevels`
+  - `build_tree_levels(...)`
+  - `compute_reach_probabilities_parallel(...)`
+  - `compute_counterfactual_values_parallel(...)`
+- Implemented level-based parallel execution:
+  - forward pass processes nodes by increasing depth
+  - backward pass processes nodes by decreasing depth
+- Added internal per-node worker helpers for forward and backward updates.
+- Exported the new APIs from `src/pokergpu/cfr/__init__.py`.
+- Extended `tests/test_traversal.py` with:
+  - tree-level construction checks
+  - serial-vs-parallel forward pass equivalence
+  - serial-vs-parallel backward pass equivalence
+- Updated `PLAN.md` to mark parallel node traversal done.
+
+**Result**
+- ✅ Success
+- The flat-array traversal core now supports levelized parallel node processing for both forward reach propagation and backward value propagation.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 62 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_traversal.py -q` -> `7 passed in 0.10s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `133 passed, 4 skipped in 95.33s`
+
+**Why it worked / failed**
+- The tree structure is acyclic and already stored in flat arrays, so depth levels provided a clean synchronization boundary for parallel node work without introducing write races.
+
+**Follow-ups**
+- Add a deterministic reduction strategy.
+- Then benchmark single-thread vs multi-thread behavior on the traversal core.
+
 ### 2026-06-09 18:26 - Added parallel infoset update path
 **Goal**
 - Continue section 10 by adding parallel infoset updates on top of the separated traversal passes.

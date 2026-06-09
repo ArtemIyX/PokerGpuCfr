@@ -104,7 +104,7 @@ How to use:
 - [x] Refactor traversal around flat arrays
 - [x] Separate forward pass, backward pass, and regret update
 - [x] Add parallel infoset updates
-- [ ] Add parallel node traversal where useful
+- [x] Add parallel node traversal where useful
 - [ ] Add deterministic reduction strategy
 - [ ] Benchmark single-thread vs multi-thread
 
