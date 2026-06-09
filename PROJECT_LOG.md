@@ -46,6 +46,58 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:33 - Replaced eval7 after pip build failure
+**Goal**
+- Fix dependency install friction in the evaluation stack.
+
+**Work done**
+- Removed `eval7` from `requirements.txt`.
+- Added `treys` as the initial hand evaluation package instead.
+
+**Result**
+- ✅ Success
+- Requirements are now less likely to fail on wheel build during manual install.
+
+**Evidence**
+- Pip failed while building `eval7`.
+- `requirements.txt` now uses `treys>=0.1.8`.
+
+**Why it worked / failed**
+- `eval7` can require build steps that are less convenient across environments.
+- `treys` is a simpler path for early project progress.
+
+**Follow-ups**
+- Re-run `pip install -r requirements.txt`.
+- If evaluator speed becomes a bottleneck later, switch to a faster backend behind an internal evaluator interface.
+
+### 2026-06-09 10:31 - Updated Python dependencies
+**Goal**
+- Align `requirements.txt` with the actual project plan.
+- Choose packages that speed up poker logic, evaluation, benchmarking, and future GPU work.
+
+**Work done**
+- Updated `requirements.txt`.
+- Kept core numeric stack: `numpy`, `scipy`, `numba`.
+- Kept `pokerkit` for rules/state support.
+- Added `eval7` for poker hand evaluation.
+- Added `torch` as the first practical Python GPU/value-model path.
+- Added `matplotlib` and `pytest-benchmark` for reporting and measurement.
+
+**Result**
+- ✅ Success
+- Dependency list is now closer to the planned architecture and implementation order.
+
+**Evidence**
+- Edited `requirements.txt` at repo root.
+- Packages now cover core math, poker logic, evaluator, ML/GPU path, tests, and benchmarks.
+
+**Why it worked / failed**
+- These packages support the planned build order without forcing an early jump into a more fragile GPU stack.
+
+**Follow-ups**
+- Run `pip install -r requirements.txt`.
+- If `torch` install path is inconvenient on your machine, split GPU extras into a separate requirements file later.
+
 ### 2026-06-09 10:28 - Added tracked implementation plan
 **Goal**
 - Create a full project plan from zero to end state.

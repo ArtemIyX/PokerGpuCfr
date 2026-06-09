@@ -1,18 +1,24 @@
-# --- Core ---
+# Core
 numpy>=1.26
 scipy>=1.11
 numba>=0.59
 tqdm>=4.66
-
-# --- Poker / cards / evaluation ---
-pokerkit>=0.4
-
-# --- Data / tooling ---
-pandas>=2.2
 pyyaml>=6.0
 orjson>=3.10
 
-# --- Testing / dev ---
+# Poker / evaluation
+pokerkit>=0.5
+treys>=0.1.8
+
+# ML / GPU path
+torch>=2.3
+
+# Data / experiments
+pandas>=2.2
+matplotlib>=3.8
+
+# Testing / dev
 pytest>=8.0
+pytest-benchmark>=4.0
 ruff>=0.6
 mypy>=1.10
