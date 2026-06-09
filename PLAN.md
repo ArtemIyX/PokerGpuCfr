@@ -97,7 +97,8 @@ How to use:
 - [x] Implement DCFR
 - [x] Make solver variant configurable
 - [x] Compare convergence on toy games
-- [ ] Record benchmark results
+- [x] Record benchmark results
+
 
 ## 10. Parallel CPU solver core
 
@@ -106,7 +107,7 @@ How to use:
 - [x] Add parallel infoset updates
 - [x] Add parallel node traversal where useful
 - [x] Add deterministic reduction strategy
-- [ ] Benchmark single-thread vs multi-thread
+- [x] Benchmark single-thread vs multi-thread
 
 ## 11. Depth-limited solving
 
