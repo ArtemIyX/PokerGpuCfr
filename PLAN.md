@@ -81,8 +81,8 @@ How to use:
 
 ## 8. Tiny CFR baseline
 
-- [ ] Implement dense-array infoset storage
-- [ ] Implement regret matching
+- [x] Implement dense-array infoset storage
+- [x] Implement regret matching
 - [ ] Implement CFR iteration loop
 - [ ] Implement average strategy accumulation
 - [ ] Implement exploitability or sanity metrics for toy games

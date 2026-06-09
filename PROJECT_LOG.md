@@ -46,6 +46,36 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:25 - Added dense infoset storage and regret matching
+**Goal**
+- Start section 8 tiny CFR baseline.
+- Add the dense infoset storage layout and regret-matching primitive the solver loop will need.
+
+**Work done**
+- Added `src/pokergpu/cfr/`.
+- Added `src/pokergpu/cfr/infosets.py` with `InfosetLayout`, `InfosetStore`, and `regret_matching(...)`.
+- Implemented contiguous offsets from per-infoset action counts.
+- Implemented regret and strategy-sum flat arrays with per-infoset slice helpers.
+- Implemented current-strategy and average-strategy normalization behavior.
+- Added `tests/test_infosets.py`.
+- Updated `PLAN.md` to mark the first two section 8 items done.
+
+**Result**
+- ✅ Success
+- The project now has a typed dense-array infoset container and a working regret-matching baseline for later CFR iterations.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 52 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `96 passed, 4 skipped in 0.24s`
+
+**Why it worked / failed**
+- A flat contiguous infoset layout matches the project's tree and GPU-oriented design and avoids introducing map-based storage in the hot path.
+
+**Follow-ups**
+- Implement the CFR iteration loop.
+- Add a minimal toy-game harness so convergence and sanity checks can start.
+
 ### 2026-06-09 17:21 - Added postflop bucket interface and baseline strength tiers
 **Goal**
 - Finish the remaining section 7 bucket work on top of the new range vectors.
