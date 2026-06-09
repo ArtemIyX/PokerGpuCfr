@@ -46,6 +46,30 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:28 - Added tracked implementation plan
+**Goal**
+- Create a full project plan from zero to end state.
+- Make plan items easy to mark done later.
+
+**Work done**
+- Added `PLAN.md`.
+- Structured the plan as phased checklists from project setup through toy CFR, GPU batching, postflop re-solving, model training, scaling, and validation.
+
+**Result**
+- ✅ Success
+- Repository now has a trackable execution plan with `[ ]`, `[-]`, and `[x]` states.
+
+**Evidence**
+- `PLAN.md` exists at repo root.
+- Plan includes both implementation order and future progress tracking.
+
+**Why it worked / failed**
+- The project already had architecture notes, so it was possible to convert them into an execution checklist.
+
+**Follow-ups**
+- Start phase 1 by creating the Python package layout and minimal entrypoint.
+- Mark completed items in `PLAN.md` as work progresses.
+
 ### 2026-06-09 10:27 - Scanned existing GPU CFR repositories
 **Goal**
 - Review reference repos for existing GPU CFR implementations.
