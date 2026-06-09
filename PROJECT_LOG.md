@@ -46,6 +46,72 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:54 - Added `python -m pokergpu leduc` CLI command
+**Goal**
+- Make the Leduc CFR output easy to inspect manually from the command line.
+
+**Work done**
+- Updated `src/pokergpu/cli.py`.
+- Added `leduc` CLI subcommand with optional iteration count argument.
+- Printed:
+  - iteration count
+  - average self-play value for player 0
+  - root betting frequencies for `J`, `Q`, and `K`
+- Extended `tests/test_cli.py` to validate the new output shape.
+
+**Result**
+- ✅ Success
+- You can now run `python -m pokergpu leduc` directly from the repo and inspect the current Leduc strategy summary.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 59 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_cli.py -q` -> `2 passed in 1.00s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `121 passed, 4 skipped in 89.76s`
+
+**Why it worked / failed**
+- The Leduc training path already exposed the needed summary metrics, so the CLI addition was a small wrapper similar to the existing Kuhn command.
+
+**Follow-ups**
+- Start section 9 CFR variants.
+- Optionally add richer CLI output for full infoset strategy dumps later.
+
+### 2026-06-09 17:49 - Added Leduc Poker and validated CFR convergence
+**Goal**
+- Finish the remaining section 8 toy-game work by adding Leduc Poker.
+- Validate that the current CFR stack also works on a two-round game with a public card.
+
+**Work done**
+- Added `src/pokergpu/cfr/leduc.py`.
+- Implemented:
+  - `LeducRank`, `LeducCard`, `LeducAction`, `LeducState`, `LeducInfoset`
+  - full private-deal and public-card chance enumeration
+  - canonical infoset discovery and dense layout
+  - `expected_action_utilities_leduc(...)`
+  - `train_leduc_cfr(...)`
+  - average-strategy evaluation helpers for Leduc
+- Exported the Leduc APIs from `src/pokergpu/cfr/__init__.py`.
+- Added `tests/test_leduc.py`.
+- Updated `PLAN.md` to mark Leduc implementation and validation done.
+
+**Result**
+- ✅ Success
+- Section 8 is now complete.
+- The project now has a second exact toy game with a public board card and two betting rounds, and the same dense CFR path runs on it.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 59 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_leduc.py -q` -> `8 passed in 92.13s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `120 passed, 4 skipped in 88.69s`
+
+**Why it worked / failed**
+- Reusing the Kuhn dense-infoset pattern worked well once Leduc-specific chance handling and round transitions were made explicit in the state machine.
+
+**Follow-ups**
+- Start section 9 CFR variants.
+- Add CFR+ first, then DCFR, and compare convergence on Kuhn and Leduc.
+
 ### 2026-06-09 17:41 - Added `python -m pokergpu kuhn` CLI command
 **Goal**
 - Make the Kuhn CFR output easy to inspect manually without writing one-off Python commands.

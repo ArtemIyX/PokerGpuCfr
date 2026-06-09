@@ -88,8 +88,8 @@ How to use:
 - [x] Implement exploitability or sanity metrics for toy games
 - [x] Add Kuhn Poker implementation
 - [x] Validate convergence on Kuhn Poker
-- [ ] Add Leduc Poker implementation
-- [ ] Validate convergence on Leduc
+- [x] Add Leduc Poker implementation
+- [x] Validate convergence on Leduc
 
 ## 9. CFR variants
 
