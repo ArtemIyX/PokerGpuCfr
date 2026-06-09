@@ -54,12 +54,12 @@ How to use:
 
 ## 5. Public tree representation
 
-- [ ] Define flat-array public tree data model
-- [ ] Implement node indexing and child ranges
-- [ ] Implement terminal and chance node encoding
-- [ ] Implement infoset references from public nodes
-- [ ] Add tree validation checks
-- [ ] Add tests for tree structure integrity
+- [x] Define flat-array public tree data model
+- [x] Implement node indexing and child ranges
+- [x] Implement terminal and chance node encoding
+- [x] Implement infoset references from public nodes
+- [x] Add tree validation checks
+- [x] Add tests for tree structure integrity
 
 ## 6. Action abstraction
 

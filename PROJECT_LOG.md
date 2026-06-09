@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:44 - Added flat-array public tree model
+**Goal**
+- Start section 5 with the core public tree representation.
+
+**Work done**
+- Added `src/pokergpu/tree/`.
+- Added `src/pokergpu/tree/public_tree.py`.
+- Implemented `NodeId`, `InfosetId`, `NodeType`, `ChildLink`, and `PublicTree`.
+- Implemented flat per-node arrays for node types, child ranges, infoset ids, and terminal payoffs.
+- Implemented chance-node probability validation and child-range bounds validation.
+- Added tests in `tests/test_public_tree.py`.
+- Updated `PLAN.md` to mark the section 5 tree-model items done.
+
+**Result**
+- ✅ Success
+- Project now has a typed flat-array public tree container suitable for later tree building and traversal work.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 40 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `72 passed in 3.75s`
+
+**Why it worked / failed**
+- A flat validated tree container gives us a stable memory layout before adding builders and traversal logic.
+
+**Follow-ups**
+- Start section 6 action abstraction.
+- Or, if preferred, add a first tree builder that converts a `GameState` into a shallow public subtree.
+
 ### 2026-06-09 11:37 - Added public-state signature and side-pot payouts
 **Goal**
 - Add a public-state signature for caching/tree work.
