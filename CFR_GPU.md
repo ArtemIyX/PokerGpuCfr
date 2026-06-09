@@ -12,13 +12,21 @@ Important reality check:
 
 ---
 
+## Github repo used
+
+- [GPU-accelerated GTO poker solver](https://github.com/a9876543245/DEEPFOLD-SOLVER)
+- [GPU CFR](https://github.com/janrvdolf/gpucfr)
+- [Counterfactual Regret Minimization in Jax.](https://github.com/Egiob/cfrx)
+- [CFR-Explained](https://github.com/brianberns/CFR-Explained#parallelization)
+
 ## Docs used
 
-- [CFR-Explained](https://github.com/brianberns/CFR-Explained#parallelization)
-- [A GPU implementation ofCounterfactual Regret Minimization](https://repositorio-aberto.up.pt/bitstream/10216/83517/2/35409.pdf#7#5)
+- [A GPU implementation of Counterfactual Regret Minimization](https://repositorio-aberto.up.pt/bitstream/10216/83517/2/35409.pdf#7#5)
 - [Real-Time Parallel Counterfactual Regret Minimization](https://export.arxiv.org/pdf/2605.19928)
 - [GPU-ACCELERATED COUNTERFACTUAL REGRET
 MINIMIZATION](https://arxiv-org.ezproxy.obspm.fr/pdf/2408.14778v1)
+
+
 ## 1) What CFR is doing (the compute you must accelerate)
 
 CFR iterates:
