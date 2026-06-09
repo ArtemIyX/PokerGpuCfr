@@ -46,6 +46,36 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:24 - Implemented immutable transition engine
+**Goal**
+- Add action application and undo support on top of the typed game state model.
+
+**Work done**
+- Added `src/pokergpu/core/transitions.py`.
+- Implemented `AppliedTransition`, `apply_action`, `apply_action_with_record`, and `undo_transition`.
+- Added action application for `fold`, `check`, `call`, `bet`, and `raise`.
+- Added next-player selection, showdown/terminal phase updates, and stack/commitment updates.
+- Added tests in `tests/test_transitions.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark the transition engine item done.
+
+**Result**
+- ✅ Success
+- Project now has immutable action transitions and a simple undo path for future traversal logic.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 31 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `60 passed in 3.76s`
+
+**Why it worked / failed**
+- Immutable transitions make correctness easier now and give us a clean base for later search and CFR traversal.
+
+**Follow-ups**
+- Implement terminal detection explicitly.
+- Add payout computation.
+- Add public-state signature.
+
 ### 2026-06-09 11:20 - Added typed game state model
 **Goal**
 - Start section 4 with an immutable typed game state model.

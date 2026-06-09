@@ -46,7 +46,7 @@ How to use:
 ## 4. Game state and transitions
 
 - [x] Implement immutable or controlled-mutation game state model
-- [ ] Implement action apply/undo or state transition engine
+- [x] Implement action apply/undo or state transition engine
 - [ ] Implement terminal detection
 - [ ] Implement payout computation
 - [ ] Implement public-state signature

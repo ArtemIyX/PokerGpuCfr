@@ -32,10 +32,17 @@ from .rules import (
     stack_after_call,
 )
 from .state import GameState, HandPhase, PlayerState
+from .transitions import (
+    AppliedTransition,
+    apply_action,
+    apply_action_with_record,
+    undo_transition,
+)
 
 __all__ = [
     "Action",
     "ActionType",
+    "AppliedTransition",
     "Board",
     "BettingRoundState",
     "BlindStructure",
@@ -56,6 +63,8 @@ __all__ = [
     "card_from_str",
     "chips",
     "cards_from_str",
+    "apply_action",
+    "apply_action_with_record",
     "can_bet",
     "can_call",
     "can_check",
@@ -72,4 +81,5 @@ __all__ = [
     "raise_bounds",
     "shuffled_deck",
     "stack_after_call",
+    "undo_transition",
 ]
