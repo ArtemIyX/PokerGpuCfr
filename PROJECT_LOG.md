@@ -46,6 +46,34 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:46 - Added benchmark harness scaffold
+**Goal**
+- Finish section 1 of `PLAN.md`.
+- Add a minimal benchmark path we can reuse for evaluator and solver performance work.
+
+**Work done**
+- Added `src/pokergpu/benchmarks.py` with typed benchmark helpers.
+- Added a `benchmark` CLI mode in `src/pokergpu/cli.py`.
+- Added `tests/test_benchmarks.py`.
+- Updated `PLAN.md` to mark benchmark harness scaffold done.
+
+**Result**
+- ✅ Success
+- Project now has a working baseline benchmark entrypoint and test coverage for it.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 11 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `3 passed in 0.01s`
+- `$env:PYTHONPATH='src'; .\\.venv\\Scripts\\python.exe -m pokergpu benchmark` -> prints benchmark timing output
+
+**Why it worked / failed**
+- A tiny benchmark abstraction is enough for now and keeps future performance checks consistent.
+
+**Follow-ups**
+- Start section 2: core poker model.
+- First implement typed cards, suits, ranks, and deck utilities.
+
 ### 2026-06-09 10:42 - Added linting and strict typing setup
 **Goal**
 - Finish the tooling part of section 1.

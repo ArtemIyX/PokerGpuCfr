@@ -21,7 +21,7 @@ How to use:
 - [x] Add logging setup
 - [x] Add test setup
 - [x] Add formatting, lint, and type-check tooling
-- [ ] Add benchmark harness scaffold
+- [x] Add benchmark harness scaffold
 
 ## 2. Core game model
 
