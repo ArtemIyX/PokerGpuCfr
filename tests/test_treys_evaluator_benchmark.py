@@ -1,7 +1,11 @@
 from typing import Any
 
+import pytest
+
 from pokergpu.core.cards import cards_from_str
 from pokergpu.eval.treys_evaluator import TreysHandEvaluator
+
+pytestmark = pytest.mark.benchmark_suite
 
 FIVE_CARD_HAND = cards_from_str("AhKhQhJhTh")
 SEVEN_CARD_HAND = cards_from_str("AhKhQhJhTh2d3c")

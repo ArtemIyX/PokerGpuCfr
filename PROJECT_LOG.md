@@ -46,6 +46,33 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:57 - Made benchmark tests opt-in
+**Goal**
+- Keep normal `pytest` runs fast by skipping benchmark tests unless explicitly requested.
+
+**Work done**
+- Updated `tests/conftest.py`.
+- Added pytest option `--run-benchmarks`.
+- Added benchmark marker registration and skip-by-default collection behavior.
+- Marked `tests/test_treys_evaluator_benchmark.py` as a benchmark suite.
+
+**Result**
+- ✅ Success
+- Normal `pytest` now skips benchmark tests.
+- Benchmarks still run when explicitly requested.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `75 passed, 4 skipped in 0.14s`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_treys_evaluator_benchmark.py --run-benchmarks -q` -> `4 passed` with benchmark output
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 45 source files`
+
+**Why it worked / failed**
+- Benchmark tests are useful, but they should be opt-in so ordinary feedback loops stay short.
+
+**Follow-ups**
+- Keep future benchmark files under the same marker pattern.
+
 ### 2026-06-09 11:51 - Added street templates, abstraction profiles, and recursive tree expansion
 **Goal**
 - Add street-specific action templates.
