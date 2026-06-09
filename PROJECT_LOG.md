@@ -46,6 +46,36 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:18 - Added private-hand indexing and dense range vectors
+**Goal**
+- Start section 7 card abstraction and ranges.
+- Add a dense private-hand indexing scheme and first range math API.
+
+**Work done**
+- Added `src/pokergpu/abstraction/hands.py`.
+- Implemented `PrivateHand`, `PrivateHandIndex`, full 1326-combo indexing, reverse lookup, and dead-card masks.
+- Implemented `RangeVector` with typed construction, normalization, masking, and weight lookup helpers.
+- Exported the new APIs from `src/pokergpu/abstraction/__init__.py`.
+- Added `tests/test_hand_ranges.py`.
+- Updated `PLAN.md` to mark the first section 7 items done.
+
+**Result**
+- ✅ Success
+- The project now has a canonical two-card combo index and a dense float32 range container for later CFR and bucket work.
+- Range masking against public/dead cards is covered by tests.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 47 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `85 passed, 4 skipped in 0.20s`
+
+**Why it worked / failed**
+- A canonical 1326-combo layout matches Hold'em needs and gives later solver layers a dense indexed representation instead of maps.
+
+**Follow-ups**
+- Implement the postflop bucket interface.
+- Add a simple baseline bucketing scheme on top of the new range vectors.
+
 ### 2026-06-09 11:57 - Made benchmark tests opt-in
 **Goal**
 - Keep normal `pytest` runs fast by skipping benchmark tests unless explicitly requested.

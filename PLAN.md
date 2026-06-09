@@ -72,12 +72,12 @@ How to use:
 
 ## 7. Card abstraction and ranges
 
-- [ ] Define private-hand indexing scheme
-- [ ] Implement range representation API
-- [ ] Implement range normalization and masking
+- [x] Define private-hand indexing scheme
+- [x] Implement range representation API
+- [x] Implement range normalization and masking
 - [ ] Implement postflop bucket interface
 - [ ] Start with simple bucket baseline
-- [ ] Add tests for range math and masking
+- [x] Add tests for range math and masking
 
 ## 8. Tiny CFR baseline
 
