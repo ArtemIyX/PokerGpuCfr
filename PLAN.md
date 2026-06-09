@@ -15,11 +15,11 @@ How to use:
 
 ## 1. Project foundation
 
-- [ ] Define package layout under `src/`
-- [ ] Add runnable entrypoint for local development
-- [ ] Add config system for paths, device, and solver settings
-- [ ] Add logging setup
-- [ ] Add test setup
+- [x] Define package layout under `src/`
+- [x] Add runnable entrypoint for local development
+- [x] Add config system for paths, device, and solver settings
+- [x] Add logging setup
+- [x] Add test setup
 - [ ] Add formatting, lint, and type-check tooling
 - [ ] Add benchmark harness scaffold
 
@@ -226,4 +226,3 @@ How to use:
 - [ ] Heads-up postflop re-solver works within target time budget
 - [ ] Benchmarks prove meaningful GPU advantage
 - [ ] Docs are enough for another engineer or LLM to continue
-

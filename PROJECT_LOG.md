@@ -46,6 +46,33 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:39 - Scaffolded Python project foundation
+**Goal**
+- Start section 1 of `PLAN.md`.
+- Create the initial Python package, entrypoint, config, logging, and tests.
+
+**Work done**
+- Added package scaffold under `src/pokergpu`.
+- Added `__main__.py`, `cli.py`, `app.py`, `config.py`, and `logging_utils.py`.
+- Added `pyproject.toml` for package metadata and `tests/conftest.py` for local import path setup.
+- Added `pytest.ini` and basic tests in `tests/test_config.py` and `tests/test_smoke.py`.
+- Updated `PLAN.md` to mark completed foundation items.
+
+**Result**
+- ✅ Success
+- Project now has a minimal runnable Python app and working test baseline.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `2 passed in 0.02s`
+- `$env:PYTHONPATH='src'; .\\.venv\\Scripts\\python.exe -m pokergpu` -> `PokerGPU ready on device=auto`
+
+**Why it worked / failed**
+- A small package-first scaffold gives us a stable base for adding solver modules without reworking imports later.
+
+**Follow-ups**
+- Add formatting, lint, and type-check configuration.
+- Start section 2: core poker types and NLHE rules.
+
 ### 2026-06-09 10:33 - Replaced eval7 after pip build failure
 **Goal**
 - Fix dependency install friction in the evaluation stack.
