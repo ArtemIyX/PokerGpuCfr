@@ -32,6 +32,13 @@ from .rules import (
     stack_after_call,
 )
 from .state import GameState, HandPhase, PlayerState
+from .terminal import (
+    active_players,
+    is_hand_complete,
+    is_showdown_state,
+    is_terminal_state,
+    non_all_in_active_players,
+)
 from .transitions import (
     AppliedTransition,
     apply_action,
@@ -71,11 +78,16 @@ __all__ = [
     "can_fold",
     "can_raise",
     "format_cards",
+    "active_players",
+    "is_hand_complete",
     "is_legal_action",
+    "is_showdown_state",
+    "is_terminal_state",
     "max_raise_to",
     "make_deck",
     "min_raise_increment",
     "min_raise_to",
+    "non_all_in_active_players",
     "player_committed",
     "player_stack",
     "raise_bounds",

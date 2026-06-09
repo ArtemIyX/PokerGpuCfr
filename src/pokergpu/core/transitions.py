@@ -6,6 +6,7 @@ from .actions import Action, ActionType
 from .betting import BettingRoundState, Chips, PlayerBet, PlayerIndex, PlayerStack
 from .legality import is_legal_action
 from .state import GameState, HandPhase, PlayerState
+from .terminal import non_all_in_active_players
 
 
 @dataclass(slots=True, frozen=True)
@@ -161,15 +162,20 @@ def _finalize_state(
     players: tuple[PlayerState, ...],
     betting_round: BettingRoundState,
 ) -> GameState:
-    active_players = tuple(player for player in players if not player.folded)
-    if len(active_players) <= 1:
+    active_player_states = tuple(player for player in players if not player.folded)
+    if len(active_player_states) <= 1:
         phase = HandPhase.TERMINAL
         to_act = betting_round.to_act
     else:
+        candidate_state = GameState(
+            board=state.board,
+            players=players,
+            betting_round=betting_round,
+            phase=state.phase,
+            dealer=state.dealer,
+        )
         eligible_players = tuple(
-            player.player
-            for player in players
-            if not player.folded and not player.all_in
+            player.player for player in non_all_in_active_players(candidate_state)
         )
         if len(eligible_players) <= 1:
             phase = HandPhase.SHOWDOWN

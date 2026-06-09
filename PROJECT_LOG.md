@@ -46,6 +46,34 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:27 - Implemented terminal detection helpers
+**Goal**
+- Add explicit terminal and showdown detection on top of the game state model.
+
+**Work done**
+- Added `src/pokergpu/core/terminal.py`.
+- Implemented helpers for active players, non-all-in active players, terminal detection, showdown detection, and hand completion detection.
+- Added tests in `tests/test_terminal.py`.
+- Integrated terminal helpers into `src/pokergpu/core/transitions.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark terminal detection done.
+
+**Result**
+- ✅ Success
+- Terminal and showdown logic now lives in one reusable place instead of being implicit inside transitions only.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 33 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `63 passed in 3.22s`
+
+**Why it worked / failed**
+- Extracting the logic makes payout computation and solver leaf checks simpler and less error-prone.
+
+**Follow-ups**
+- Implement payout computation.
+- Then add public-state signature.
+
 ### 2026-06-09 11:24 - Implemented immutable transition engine
 **Goal**
 - Add action application and undo support on top of the typed game state model.
