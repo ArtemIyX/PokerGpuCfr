@@ -46,6 +46,34 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:15 - Added evaluator correctness regression tests
+**Goal**
+- Add broader correctness tests against known hand rankings and class names.
+
+**Work done**
+- Extended `tests/test_treys_evaluator.py`.
+- Added 5-card known hand-class cases from high card through royal flush.
+- Added ordering regression across the main 5-card hand categories.
+- Added a 7-card test confirming the evaluator selects the best 5-card hand.
+- Cleaned the mypy `treys` override in `pyproject.toml`.
+- Updated `PLAN.md` to mark correctness tests done.
+
+**Result**
+- ✅ Success
+- Evaluator coverage now checks both hand-class labels and score ordering behavior.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 26 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `46 passed in 0.10s`
+
+**Why it worked / failed**
+- Using fixed known hands gives stable regression coverage without depending on solver code yet.
+
+**Follow-ups**
+- Add evaluator performance benchmark.
+- Then move to section 4 game state and transitions.
+
 ### 2026-06-09 11:13 - Added batch hand evaluation API
 **Goal**
 - Add batch 5-card and 7-card evaluation APIs on top of the typed `treys` wrapper.

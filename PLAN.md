@@ -40,7 +40,7 @@ How to use:
 - [x] Implement 5-card hand evaluation
 - [x] Implement 7-card hand evaluation
 - [x] Add batch evaluation API
-- [ ] Add correctness tests against known hand rankings
+- [x] Add correctness tests against known hand rankings
 - [ ] Add performance benchmark for evaluator
 
 ## 4. Game state and transitions

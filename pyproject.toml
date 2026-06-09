@@ -33,7 +33,7 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["treys", "treys.*"]
+module = ["treys"]
 ignore_missing_imports = true
 
 [tool.setuptools]
