@@ -83,8 +83,8 @@ How to use:
 
 - [x] Implement dense-array infoset storage
 - [x] Implement regret matching
-- [ ] Implement CFR iteration loop
-- [ ] Implement average strategy accumulation
+- [x] Implement CFR iteration loop
+- [x] Implement average strategy accumulation
 - [ ] Implement exploitability or sanity metrics for toy games
 - [ ] Add Kuhn Poker implementation
 - [ ] Validate convergence on Kuhn Poker

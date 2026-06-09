@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:27 - Added tiny CFR iteration loop
+**Goal**
+- Implement the first CFR iteration loop on top of the dense infoset store.
+- Cover regret updates and average-strategy accumulation before adding toy-game traversal.
+
+**Work done**
+- Added `src/pokergpu/cfr/iteration.py`.
+- Implemented `CFRIterationResult` and `run_cfr_iteration(...)`.
+- Added per-infoset strategy extraction, infoset value computation, regret updates, and strategy-sum accumulation.
+- Exported the new APIs from `src/pokergpu/cfr/__init__.py`.
+- Added `tests/test_cfr_iteration.py`.
+- Updated `PLAN.md` to mark CFR iteration and average-strategy accumulation done.
+
+**Result**
+- ✅ Success
+- The project now has a minimal typed CFR iteration primitive that updates regrets and average strategy from per-infoset action utilities.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 54 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `101 passed, 4 skipped in 0.23s`
+
+**Why it worked / failed**
+- Starting with a local infoset-based iteration API keeps the solver core small and lets toy games supply action utilities later without committing to a larger traversal design yet.
+
+**Follow-ups**
+- Add Kuhn Poker implementation.
+- Use it to validate repeated CFR iterations and add basic sanity or convergence metrics.
+
 ### 2026-06-09 17:25 - Added dense infoset storage and regret matching
 **Goal**
 - Start section 8 tiny CFR baseline.
