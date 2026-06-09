@@ -39,6 +39,7 @@ from .traversal import (
     compute_counterfactual_values,
     compute_reach_probabilities,
     update_regrets_from_traversal,
+    update_regrets_from_traversal_parallel,
 )
 
 __all__ = [
@@ -84,4 +85,5 @@ __all__ = [
     "compute_counterfactual_values",
     "compute_reach_probabilities",
     "update_regrets_from_traversal",
+    "update_regrets_from_traversal_parallel",
 ]

@@ -8,6 +8,7 @@ from pokergpu.cfr import (
     compute_counterfactual_values,
     compute_reach_probabilities,
     update_regrets_from_traversal,
+    update_regrets_from_traversal_parallel,
 )
 from pokergpu.core.betting import Chips
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
@@ -111,3 +112,52 @@ def test_chance_nodes_are_handled_in_forward_and_backward_passes() -> None:
     assert math.isclose(float(forward.player0_reach[1]), 0.25, abs_tol=1e-6)
     assert math.isclose(float(forward.player0_reach[2]), 0.75, abs_tol=1e-6)
     assert math.isclose(float(backward.node_values_player0[0]), -1.0, abs_tol=1e-6)
+
+
+def test_parallel_infoset_updates_match_serial_updates() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.LEAF,
+            NodeType.PLAYER0,
+            NodeType.LEAF,
+            NodeType.LEAF,
+        ),
+        first_child=(0, 4, 2, 4, 4),
+        child_count=(2, 0, 2, 0, 0),
+        children=(
+            ChildLink(NodeId(1)),
+            ChildLink(NodeId(2)),
+            ChildLink(NodeId(3)),
+            ChildLink(NodeId(4)),
+        ),
+        infoset_ids=(InfosetId(0), None, InfosetId(1), None, None),
+        terminal_payoffs=(None, None, None, None, None),
+    )
+    serial_store = InfosetStore.zeros(InfosetLayout.from_action_counts([2, 2]))
+    parallel_store = InfosetStore.zeros(InfosetLayout.from_action_counts([2, 2]))
+    leaf_values = np.array([0.0, 1.0, 0.0, 3.0, -1.0], dtype=np.float32)
+    backward = compute_counterfactual_values(
+        tree,
+        serial_store,
+        leaf_values_player0=leaf_values,
+    )
+
+    serial = update_regrets_from_traversal(
+        tree,
+        serial_store,
+        backward,
+        active_player=0,
+    )
+    parallel = update_regrets_from_traversal_parallel(
+        tree,
+        parallel_store,
+        backward,
+        active_player=0,
+        max_workers=2,
+    )
+
+    assert serial.updated_infosets == parallel.updated_infosets
+    assert np.allclose(serial.infoset_values, parallel.infoset_values)
+    assert np.allclose(serial_store.regrets, parallel_store.regrets)
+    assert np.allclose(serial_store.strategy_sums, parallel_store.strategy_sums)

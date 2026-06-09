@@ -46,6 +46,38 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:26 - Added parallel infoset update path
+**Goal**
+- Continue section 10 by adding parallel infoset updates on top of the separated traversal passes.
+
+**Work done**
+- Updated `src/pokergpu/cfr/traversal.py`.
+- Added `update_regrets_from_traversal_parallel(...)`.
+- Implemented a chunked worker model:
+  - worker threads compute per-infoset regret and strategy-sum deltas
+  - the main thread applies those deltas in deterministic infoset order
+- Added helper functions for active-infoset selection and chunk update computation.
+- Exported the new API from `src/pokergpu/cfr/__init__.py`.
+- Extended `tests/test_traversal.py` with a serial-vs-parallel equivalence check.
+- Updated `PLAN.md` to mark parallel infoset updates done.
+
+**Result**
+- ✅ Success
+- The flat-array traversal core now has a parallel infoset-update path that preserves deterministic final writes.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 62 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_traversal.py -q` -> `5 passed in 0.10s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `131 passed, 4 skipped in 89.57s`
+
+**Why it worked / failed**
+- Computing local deltas in parallel and committing them serially matches the project’s planned "privatize + reduce" update pattern without introducing nondeterministic shared writes.
+
+**Follow-ups**
+- Add parallel node traversal where it is useful.
+- Add a deterministic reduction strategy for broader multi-worker traversal work.
+
 ### 2026-06-09 18:22 - Added flat-array traversal core with separated passes
 **Goal**
 - Start section 10 parallel CPU solver core.

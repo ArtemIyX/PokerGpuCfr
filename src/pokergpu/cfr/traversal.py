@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
@@ -205,3 +206,106 @@ def update_regrets_from_traversal(
         infoset_values=infoset_values,
         updated_infosets=tuple(updated_infosets),
     )
+
+
+def update_regrets_from_traversal_parallel(
+    tree: PublicTree,
+    store: InfosetStore,
+    backward_pass: BackwardPassResult,
+    *,
+    active_player: int,
+    strategy_weight: float = 1.0,
+    max_workers: int = 1,
+) -> RegretUpdateResult:
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
+
+    infoset_indices = _active_infoset_indices(tree, active_player)
+    if max_workers == 1 or len(infoset_indices) <= 1:
+        return update_regrets_from_traversal(
+            tree,
+            store,
+            backward_pass,
+            active_player=active_player,
+            strategy_weight=strategy_weight,
+        )
+
+    chunk_size = max(1, (len(infoset_indices) + max_workers - 1) // max_workers)
+    chunks = tuple(
+        infoset_indices[start : start + chunk_size]
+        for start in range(0, len(infoset_indices), chunk_size)
+    )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        chunk_results = tuple(
+            executor.map(
+                lambda chunk: _compute_chunk_updates(
+                    store,
+                    backward_pass,
+                    chunk,
+                    strategy_weight,
+                ),
+                chunks,
+            )
+        )
+
+    infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
+    updated_infosets: list[int] = []
+    for chunk_infoset_values, regret_updates, strategy_updates, chunk_infosets in (
+        chunk_results
+    ):
+        infoset_values += chunk_infoset_values
+        for infoset_index in chunk_infosets:
+            store.regrets_for_infoset(infoset_index)[:] += regret_updates[infoset_index]
+            store.strategy_sums_for_infoset(infoset_index)[:] += strategy_updates[
+                infoset_index
+            ]
+            updated_infosets.append(infoset_index)
+
+    return RegretUpdateResult(
+        infoset_values=infoset_values,
+        updated_infosets=tuple(updated_infosets),
+    )
+
+
+def _active_infoset_indices(tree: PublicTree, active_player: int) -> tuple[int, ...]:
+    if active_player not in {0, 1}:
+        raise ValueError("active_player must be 0 or 1")
+
+    infoset_indices: list[int] = []
+    for node_index, infoset_id in enumerate(tree.infoset_ids):
+        if infoset_id is None:
+            continue
+        node_type = tree.node_types[node_index]
+        if active_player == 0 and node_type is not NodeType.PLAYER0:
+            continue
+        if active_player == 1 and node_type is not NodeType.PLAYER1:
+            continue
+        infoset_indices.append(int(infoset_id))
+    return tuple(infoset_indices)
+
+
+def _compute_chunk_updates(
+    store: InfosetStore,
+    backward_pass: BackwardPassResult,
+    infoset_indices: tuple[int, ...],
+    strategy_weight: float,
+) -> tuple[
+    NDArray[np.float32],
+    dict[int, NDArray[np.float32]],
+    dict[int, NDArray[np.float32]],
+    tuple[int, ...],
+]:
+    infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
+    regret_updates: dict[int, NDArray[np.float32]] = {}
+    strategy_updates: dict[int, NDArray[np.float32]] = {}
+
+    for infoset_index in infoset_indices:
+        action_values = backward_pass.infoset_action_values[infoset_index]
+        strategy = store.current_strategy(infoset_index)
+        infoset_value = np.float32(np.sum(strategy * action_values, dtype=np.float64))
+        regret_updates[infoset_index] = action_values - infoset_value
+        strategy_updates[infoset_index] = strategy * np.float32(strategy_weight)
+        infoset_values[infoset_index] = infoset_value
+
+    return infoset_values, regret_updates, strategy_updates, infoset_indices
