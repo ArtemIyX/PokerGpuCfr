@@ -46,6 +46,34 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:00 - Implemented typed betting state models
+**Goal**
+- Add stack, pot, blind, and betting-round state types in `core`.
+
+**Work done**
+- Added `src/pokergpu/core/betting.py`.
+- Implemented `Chips`, `PlayerIndex`, `BlindStructure`, `PlayerStack`, `Pot`, `PlayerBet`, and `BettingRoundState`.
+- Added chip validation helpers and basic derived state such as `highest_bet` and `amount_to_call`.
+- Added tests in `tests/test_betting.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark the betting state item done.
+
+**Result**
+- ✅ Success
+- Project now has typed betting-state models ready for NLHE action rules and legality checks.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 18 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `20 passed in 0.03s`
+
+**Why it worked / failed**
+- Separating neutral betting state from action rules keeps the next legality layer simpler and easier to test.
+
+**Follow-ups**
+- Implement NLHE betting rules.
+- Then implement action legality checks against this state model.
+
 ### 2026-06-09 10:56 - Implemented board representation
 **Goal**
 - Add typed board representation in the new `core` package.

@@ -29,7 +29,7 @@ How to use:
 - [x] Implement deck generation and shuffle utilities
 - [x] Implement hand parsing and formatting
 - [x] Implement board representation
-- [ ] Implement stack, pot, blind, and bet state types
+- [x] Implement stack, pot, blind, and bet state types
 - [ ] Implement NLHE betting rules
 - [ ] Implement action legality checks
 - [ ] Add unit tests for rules and edge cases
