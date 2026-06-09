@@ -1,5 +1,5 @@
 from .infosets import InfosetLayout, InfosetStore, regret_matching
-from .iteration import CFRIterationResult, run_cfr_iteration
+from .iteration import CFRIterationResult, CFRVariant, run_cfr_iteration
 from .kuhn import (
     KuhnAction,
     KuhnCard,
@@ -34,6 +34,7 @@ from .leduc import (
 
 __all__ = [
     "CFRIterationResult",
+    "CFRVariant",
     "InfosetLayout",
     "InfosetStore",
     "LeducAction",

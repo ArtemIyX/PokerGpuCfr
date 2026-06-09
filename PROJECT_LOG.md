@@ -46,6 +46,36 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:59 - Added CFR+ variant
+**Goal**
+- Start section 9 by adding CFR+ on top of the existing vanilla CFR baseline.
+
+**Work done**
+- Updated `src/pokergpu/cfr/iteration.py`.
+- Added `CFRVariant` with `vanilla` and `cfr_plus`.
+- Implemented CFR+ regret clamping after each regret update.
+- Threaded the variant option through `train_kuhn_cfr(...)` and `train_leduc_cfr(...)`.
+- Exported the variant from `src/pokergpu/cfr/__init__.py`.
+- Added tests in `tests/test_cfr_iteration.py` and `tests/test_kuhn.py`.
+- Updated `PLAN.md` to mark CFR+ done.
+
+**Result**
+- ✅ Success
+- The project now supports both vanilla CFR and CFR+ using the same dense-array iteration path.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 59 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_cfr_iteration.py tests\\test_kuhn.py -q` -> `17 passed in 3.91s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `123 passed, 4 skipped in 91.03s`
+
+**Why it worked / failed**
+- CFR+ only needed a local change to the regret update rule, so it fit cleanly into the existing generic iteration helper.
+
+**Follow-ups**
+- Add DCFR.
+- Then make the solver variant configurable from the CLI and compare toy-game convergence behavior.
+
 ### 2026-06-09 17:54 - Added `python -m pokergpu leduc` CLI command
 **Goal**
 - Make the Leduc CFR output easy to inspect manually from the command line.

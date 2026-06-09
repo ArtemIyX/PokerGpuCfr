@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .infosets import InfosetStore
+
+
+class CFRVariant(StrEnum):
+    VANILLA = "vanilla"
+    CFR_PLUS = "cfr_plus"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +26,7 @@ def run_cfr_iteration(
     action_utilities: Sequence[NDArray[np.float32] | Sequence[float]],
     strategy_weight: float = 1.0,
     active_infosets: Sequence[int] | None = None,
+    variant: CFRVariant = CFRVariant.VANILLA,
 ) -> CFRIterationResult:
     if len(action_utilities) != store.layout.infoset_count:
         raise ValueError("action utilities must match infoset count")
@@ -53,6 +60,8 @@ def run_cfr_iteration(
             np.sum(strategy * utility_values, dtype=np.float64)
         )
         regrets += utility_values - infoset_value
+        if variant is CFRVariant.CFR_PLUS:
+            np.maximum(regrets, np.float32(0.0), out=regrets)
         strategy_sums += strategy * strategy_scale
 
         strategies.append(strategy)

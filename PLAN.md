@@ -93,7 +93,7 @@ How to use:
 
 ## 9. CFR variants
 
-- [ ] Implement CFR+
+- [x] Implement CFR+
 - [ ] Implement DCFR
 - [ ] Make solver variant configurable
 - [ ] Compare convergence on toy games

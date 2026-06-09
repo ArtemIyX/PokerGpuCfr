@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from pokergpu.cfr import InfosetLayout, InfosetStore, run_cfr_iteration
+from pokergpu.cfr import CFRVariant, InfosetLayout, InfosetStore, run_cfr_iteration
 
 
 def test_cfr_iteration_updates_regrets_and_strategy_sums() -> None:
@@ -90,3 +90,15 @@ def test_cfr_iteration_can_limit_updates_to_active_infosets() -> None:
     assert np.allclose(store.regrets[:2], np.zeros(2, dtype=np.float32))
     assert np.allclose(store.strategy_sums[:2], np.zeros(2, dtype=np.float32))
     assert np.allclose(store.regrets[2:], np.array([4.0, -4.0], dtype=np.float32))
+
+
+def test_cfr_plus_clamps_negative_regrets() -> None:
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([2]))
+
+    run_cfr_iteration(
+        store,
+        [np.array([1.0, -1.0], dtype=np.float32)],
+        variant=CFRVariant.CFR_PLUS,
+    )
+
+    assert np.allclose(store.regrets, np.array([1.0, 0.0], dtype=np.float32))

@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .infosets import InfosetLayout, InfosetStore
-from .iteration import run_cfr_iteration
+from .iteration import CFRVariant, run_cfr_iteration
 
 
 class KuhnCard(IntEnum):
@@ -165,7 +165,10 @@ def expected_action_utilities(
     return tuple(utilities)
 
 
-def train_kuhn_cfr(iterations: int) -> InfosetStore:
+def train_kuhn_cfr(
+    iterations: int,
+    variant: CFRVariant = CFRVariant.VANILLA,
+) -> InfosetStore:
     if iterations < 0:
         raise ValueError("iterations must be non-negative")
 
@@ -176,6 +179,7 @@ def train_kuhn_cfr(iterations: int) -> InfosetStore:
                 store=store,
                 action_utilities=expected_action_utilities(store, player),
                 active_infosets=kuhn_infoset_indices_for_player(player),
+                variant=variant,
             )
     return store
 

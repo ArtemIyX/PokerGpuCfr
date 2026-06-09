@@ -3,6 +3,7 @@ import math
 import numpy as np
 
 from pokergpu.cfr import (
+    CFRVariant,
     KuhnAction,
     KuhnCard,
     KuhnState,
@@ -106,3 +107,11 @@ def test_kuhn_cfr_root_betting_profile_matches_sanity_pattern() -> None:
     king_bet = average_strategy_root_bet_probability(store, KuhnCard.KING)
 
     assert 0.0 <= queen_bet < jack_bet < king_bet <= 1.0
+
+
+def test_kuhn_cfr_plus_average_strategy_value_approaches_known_game_value() -> None:
+    store = train_kuhn_cfr(2000, variant=CFRVariant.CFR_PLUS)
+
+    value = expected_game_value_for_average_strategy(store)
+
+    assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
