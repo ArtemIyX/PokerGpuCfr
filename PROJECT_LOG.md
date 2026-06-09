@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:20 - Added typed game state model
+**Goal**
+- Start section 4 with an immutable typed game state model.
+
+**Work done**
+- Added `src/pokergpu/core/state.py`.
+- Implemented `HandPhase`, `PlayerState`, and `GameState`.
+- Linked game state to `Board`, `BettingRoundState`, and per-player hole cards/status.
+- Added validation for duplicate players, duplicate cards, dealer validity, and player alignment with betting state.
+- Added tests in `tests/test_state.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark the game state model item done.
+
+**Result**
+- ✅ Success
+- Project now has a typed immutable hand state object ready for transitions and terminal logic.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 29 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `54 passed in 3.81s`
+
+**Why it worked / failed**
+- Keeping game state separate from transition logic makes the next action-apply layer easier to build and test.
+
+**Follow-ups**
+- Implement action apply/undo or state transition engine.
+- Then add terminal detection and payout computation.
+
 ### 2026-06-09 11:17 - Added evaluator performance benchmarks
 **Goal**
 - Add benchmark coverage for evaluator single-hand and batch-hand performance.
