@@ -25,9 +25,9 @@ How to use:
 
 ## 2. Core game model
 
-- [ ] Implement core poker types: cards, suits, ranks
-- [ ] Implement deck generation and shuffle utilities
-- [ ] Implement hand parsing and formatting
+- [x] Implement core poker types: cards, suits, ranks
+- [x] Implement deck generation and shuffle utilities
+- [x] Implement hand parsing and formatting
 - [ ] Implement board representation
 - [ ] Implement stack, pot, blind, and bet state types
 - [ ] Implement NLHE betting rules

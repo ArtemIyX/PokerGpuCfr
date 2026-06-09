@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:47 - Implemented typed card model and deck utilities
+**Goal**
+- Start section 2 core poker model.
+- Add strong typed foundations for cards, ranks, suits, deck generation, and parsing.
+
+**Work done**
+- Added `src/pokergpu/cards.py`.
+- Implemented `Suit` and `Rank` as `StrEnum`.
+- Implemented immutable `Card` with parsing and string formatting.
+- Added helpers for parsing multiple cards, formatting card lists, building a 52-card deck, and deterministic shuffling with a provided RNG.
+- Added tests in `tests/test_cards.py`.
+- Updated `PLAN.md` to mark the first three section 2 items done.
+
+**Result**
+- ✅ Success
+- Project now has a typed card layer suitable for later board, range, and solver state code.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 13 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `9 passed in 0.02s`
+
+**Why it worked / failed**
+- Starting with immutable typed card objects gives us a clean domain base without committing to solver-specific storage yet.
+
+**Follow-ups**
+- Implement board representation next.
+- Then add stack, pot, blind, and bet state types.
+
 ### 2026-06-09 10:46 - Added benchmark harness scaffold
 **Goal**
 - Finish section 1 of `PLAN.md`.
