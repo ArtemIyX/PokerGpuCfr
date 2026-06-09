@@ -1,3 +1,4 @@
+from .compare import ComparisonRow, run_toy_game_comparison
 from .infosets import InfosetLayout, InfosetStore, regret_matching
 from .iteration import CFRIterationResult, CFRVariant, DCFRConfig, run_cfr_iteration
 from .kuhn import (
@@ -33,6 +34,7 @@ from .leduc import (
 )
 
 __all__ = [
+    "ComparisonRow",
     "CFRIterationResult",
     "CFRVariant",
     "DCFRConfig",
@@ -64,6 +66,7 @@ __all__ = [
     "new_leduc_infoset_store",
     "new_kuhn_infoset_store",
     "regret_matching",
+    "run_toy_game_comparison",
     "run_cfr_iteration",
     "train_leduc_cfr",
     "train_kuhn_cfr",

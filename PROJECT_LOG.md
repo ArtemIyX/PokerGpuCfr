@@ -46,6 +46,45 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:14 - Added toy-game convergence comparison CSV runner
+**Goal**
+- Automate convergence comparison across vanilla CFR, CFR+, and DCFR.
+- Save results to disk and show visible progress while the runs execute.
+
+**Work done**
+- Added `src/pokergpu/cfr/compare.py`.
+- Implemented a comparison runner that:
+  - runs Kuhn and Leduc grids across selected variants
+  - collects average value and root betting frequencies
+  - writes a CSV table to disk
+- Exported the comparison runner from `src/pokergpu/cfr/__init__.py`.
+- Updated `src/pokergpu/cli.py` with `compare-toy`.
+- Added configurable CLI options:
+  - `--output`
+  - `--kuhn`
+  - `--leduc`
+  - `--variants`
+- Added a simple live progress bar in the CLI output.
+- Extended `tests/test_cli.py`.
+- Updated `PLAN.md` to mark toy-game comparison done.
+
+**Result**
+- ✅ Success
+- You can now run one command to generate a comparison CSV for Kuhn and Leduc across solver variants.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 60 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_cli.py -q` -> `3 passed in 1.07s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `126 passed, 4 skipped in 90.18s`
+
+**Why it worked / failed**
+- The solver outputs already exposed consistent summary metrics, so the comparison tool only needed orchestration, CSV writing, and lightweight progress reporting.
+
+**Follow-ups**
+- Record actual comparison outputs for the default grids.
+- Optionally add a report or plotting script on top of the CSV later.
+
 ### 2026-06-09 18:07 - Made CFR variant selectable from the CLI
 **Goal**
 - Make the new CFR variants usable from the existing manual CLI entrypoints.

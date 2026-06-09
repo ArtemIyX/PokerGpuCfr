@@ -96,7 +96,7 @@ How to use:
 - [x] Implement CFR+
 - [x] Implement DCFR
 - [x] Make solver variant configurable
-- [ ] Compare convergence on toy games
+- [x] Compare convergence on toy games
 - [ ] Record benchmark results
 
 ## 10. Parallel CPU solver core
