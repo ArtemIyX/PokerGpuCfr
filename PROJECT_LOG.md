@@ -46,6 +46,37 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:04 - Added DCFR variant
+**Goal**
+- Add DCFR as the second CFR variant in section 9.
+
+**Work done**
+- Updated `src/pokergpu/cfr/iteration.py`.
+- Added `CFRVariant.DCFR`.
+- Added `DCFRConfig` with default positive-regret, negative-regret, and strategy discount parameters.
+- Applied iteration-dependent DCFR discounting before each regret update.
+- Threaded `iteration` and optional `dcfr_config` through `train_kuhn_cfr(...)` and `train_leduc_cfr(...)`.
+- Exported `DCFRConfig` from `src/pokergpu/cfr/__init__.py`.
+- Added tests in `tests/test_cfr_iteration.py` and `tests/test_kuhn.py`.
+- Updated `PLAN.md` to mark DCFR done.
+
+**Result**
+- ✅ Success
+- The project now supports vanilla CFR, CFR+, and DCFR through the same training path.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 59 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_cfr_iteration.py tests\\test_kuhn.py -q` -> `19 passed in 5.50s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `125 passed, 4 skipped in 92.74s`
+
+**Why it worked / failed**
+- DCFR fit naturally once the generic iteration helper accepted iteration-aware update behavior instead of only local regret math.
+
+**Follow-ups**
+- Make the solver variant configurable from the CLI.
+- Compare convergence behavior across vanilla CFR, CFR+, and DCFR on Kuhn and Leduc.
+
 ### 2026-06-09 17:59 - Added CFR+ variant
 **Goal**
 - Start section 9 by adding CFR+ on top of the existing vanilla CFR baseline.

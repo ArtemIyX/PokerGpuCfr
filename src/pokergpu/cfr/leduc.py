@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .infosets import InfosetLayout, InfosetStore
-from .iteration import CFRVariant, run_cfr_iteration
+from .iteration import CFRVariant, DCFRConfig, run_cfr_iteration
 
 
 class LeducRank(IntEnum):
@@ -326,17 +326,20 @@ def expected_action_utilities_leduc(
 def train_leduc_cfr(
     iterations: int,
     variant: CFRVariant = CFRVariant.VANILLA,
+    dcfr_config: DCFRConfig | None = None,
 ) -> InfosetStore:
     if iterations < 0:
         raise ValueError("iterations must be non-negative")
     store = new_leduc_infoset_store()
-    for _ in range(iterations):
+    for iteration_index in range(1, iterations + 1):
         for player in (0, 1):
             run_cfr_iteration(
                 store=store,
                 action_utilities=expected_action_utilities_leduc(store, player),
                 active_infosets=leduc_infoset_indices_for_player(player),
                 variant=variant,
+                iteration=iteration_index,
+                dcfr_config=dcfr_config,
             )
     return store
 

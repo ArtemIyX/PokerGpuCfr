@@ -115,3 +115,11 @@ def test_kuhn_cfr_plus_average_strategy_value_approaches_known_game_value() -> N
     value = expected_game_value_for_average_strategy(store)
 
     assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
+
+
+def test_kuhn_dcfr_average_strategy_value_approaches_known_game_value() -> None:
+    store = train_kuhn_cfr(2000, variant=CFRVariant.DCFR)
+
+    value = expected_game_value_for_average_strategy(store)
+
+    assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)

@@ -3,7 +3,12 @@ import math
 import numpy as np
 import pytest
 
-from pokergpu.cfr import CFRVariant, InfosetLayout, InfosetStore, run_cfr_iteration
+from pokergpu.cfr import (
+    CFRVariant,
+    InfosetLayout,
+    InfosetStore,
+    run_cfr_iteration,
+)
 
 
 def test_cfr_iteration_updates_regrets_and_strategy_sums() -> None:
@@ -102,3 +107,22 @@ def test_cfr_plus_clamps_negative_regrets() -> None:
     )
 
     assert np.allclose(store.regrets, np.array([1.0, 0.0], dtype=np.float32))
+
+
+def test_dcfr_discounts_regrets_and_strategy_sums() -> None:
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([2]))
+    store.regrets[:] = np.array([4.0, -4.0], dtype=np.float32)
+    store.strategy_sums[:] = np.array([2.0, 6.0], dtype=np.float32)
+
+    run_cfr_iteration(
+        store,
+        [np.array([1.0, -1.0], dtype=np.float32)],
+        variant=CFRVariant.DCFR,
+        iteration=2,
+    )
+
+    assert np.all(store.regrets >= np.array([0.0, -10.0], dtype=np.float32))
+    assert float(store.regrets[0]) < 5.0
+    assert float(store.regrets[1]) > -6.0
+    assert float(store.strategy_sums[0]) < 3.0
+    assert float(store.strategy_sums[1]) < 7.0
