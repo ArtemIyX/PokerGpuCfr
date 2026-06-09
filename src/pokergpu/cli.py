@@ -4,6 +4,7 @@ import sys
 from .app import create_app
 from .benchmarks import run_benchmark
 from .cfr import (
+    CFRVariant,
     KuhnCard,
     LeducRank,
     average_strategy_root_bet_probability,
@@ -28,8 +29,9 @@ def main() -> int:
         )
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "kuhn":
-        iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
-        store = train_kuhn_cfr(iterations)
+        iterations, variant = _parse_solver_args(sys.argv[2:], default_iterations=2000)
+        store = train_kuhn_cfr(iterations, variant=variant)
+        print(f"variant={variant.value}")
         print(f"iterations={iterations}")
         print(
             "avg_value_p0="
@@ -49,14 +51,15 @@ def main() -> int:
         )
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "leduc":
-        iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 800
-        store = train_leduc_cfr(iterations)
+        iterations, variant = _parse_solver_args(sys.argv[2:], default_iterations=800)
+        store = train_leduc_cfr(iterations, variant=variant)
         jack_bet = average_strategy_root_bet_probability_leduc(store, LeducRank.JACK)
         queen_bet = average_strategy_root_bet_probability_leduc(
             store,
             LeducRank.QUEEN,
         )
         king_bet = average_strategy_root_bet_probability_leduc(store, LeducRank.KING)
+        print(f"variant={variant.value}")
         print(f"iterations={iterations}")
         print(
             "avg_value_p0="
@@ -69,3 +72,21 @@ def main() -> int:
     logger.info("PokerGPU initialized")
     print(f"PokerGPU ready on device={settings.device}")
     return 0
+
+
+def _parse_solver_args(
+    args: list[str],
+    default_iterations: int,
+) -> tuple[int, CFRVariant]:
+    iterations = default_iterations
+    variant = CFRVariant.VANILLA
+    index = 0
+    if index < len(args) and not args[index].startswith("--"):
+        iterations = int(args[index])
+        index += 1
+    while index < len(args):
+        if args[index] != "--variant" or index + 1 >= len(args):
+            raise ValueError(f"invalid solver arguments: {args!r}")
+        variant = CFRVariant(args[index + 1])
+        index += 2
+    return iterations, variant

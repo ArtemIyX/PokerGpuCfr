@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:07 - Made CFR variant selectable from the CLI
+**Goal**
+- Make the new CFR variants usable from the existing manual CLI entrypoints.
+
+**Work done**
+- Updated `src/pokergpu/cli.py`.
+- Added shared solver-arg parsing for `kuhn` and `leduc`.
+- Added optional `--variant <vanilla|cfr_plus|dcfr>` support.
+- Added `variant=...` to the printed output for both commands.
+- Updated `tests/test_cli.py` to cover variant selection on both CLI commands.
+- Updated `PLAN.md` to mark solver variant configurability done.
+
+**Result**
+- ✅ Success
+- You can now choose the solver variant directly from the command line for both toy games.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 59 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_cli.py -q` -> `2 passed in 1.00s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `125 passed, 4 skipped in 92.25s`
+
+**Why it worked / failed**
+- The training helpers already accepted a variant parameter, so the CLI change only needed lightweight argument parsing.
+
+**Follow-ups**
+- Compare convergence on toy games across vanilla CFR, CFR+, and DCFR.
+- Optionally add CLI flags for DCFR parameter tuning later.
+
 ### 2026-06-09 18:04 - Added DCFR variant
 **Goal**
 - Add DCFR as the second CFR variant in section 9.
