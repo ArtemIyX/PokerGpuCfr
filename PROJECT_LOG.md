@@ -46,6 +46,42 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:22 - Added flat-array traversal core with separated passes
+**Goal**
+- Start section 10 parallel CPU solver core.
+- Move toward the planned flat-array solver architecture by separating forward reach, backward value, and regret update work.
+
+**Work done**
+- Added `src/pokergpu/cfr/traversal.py`.
+- Implemented:
+  - `compute_reach_probabilities(...)`
+  - `compute_counterfactual_values(...)`
+  - `update_regrets_from_traversal(...)`
+  - typed result objects for each pass
+- Wired the traversal API into `src/pokergpu/cfr/__init__.py`.
+- Added `tests/test_traversal.py` with hand-built flat trees covering:
+  - player-node reach propagation
+  - chance-node propagation
+  - backward expected values
+  - separate regret updates
+- Updated `PLAN.md` to mark the first two section 10 items done.
+
+**Result**
+- ✅ Success
+- The project now has a generic flat-array traversal core over `PublicTree`, with explicit forward and backward phases separated from regret updates.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 62 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_traversal.py -q` -> `4 passed in 0.09s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `130 passed, 4 skipped in 91.15s`
+
+**Why it worked / failed**
+- The existing `PublicTree` layout already encoded child ranges and infoset ids cleanly, so it was possible to build the generic CPU traversal layer without changing the tree container first.
+
+**Follow-ups**
+- Add parallel infoset updates.
+- Add parallel node traversal where it meaningfully fits the flat-array passes.
+
 ### 2026-06-09 18:14 - Added toy-game convergence comparison CSV runner
 **Goal**
 - Automate convergence comparison across vanilla CFR, CFR+, and DCFR.

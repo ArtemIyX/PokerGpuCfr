@@ -32,12 +32,22 @@ from .leduc import (
     new_leduc_infoset_store,
     train_leduc_cfr,
 )
+from .traversal import (
+    BackwardPassResult,
+    ForwardPassResult,
+    RegretUpdateResult,
+    compute_counterfactual_values,
+    compute_reach_probabilities,
+    update_regrets_from_traversal,
+)
 
 __all__ = [
     "ComparisonRow",
     "CFRIterationResult",
     "CFRVariant",
     "DCFRConfig",
+    "BackwardPassResult",
+    "ForwardPassResult",
     "InfosetLayout",
     "InfosetStore",
     "LeducAction",
@@ -66,8 +76,12 @@ __all__ = [
     "new_leduc_infoset_store",
     "new_kuhn_infoset_store",
     "regret_matching",
+    "RegretUpdateResult",
     "run_toy_game_comparison",
     "run_cfr_iteration",
     "train_leduc_cfr",
     "train_kuhn_cfr",
+    "compute_counterfactual_values",
+    "compute_reach_probabilities",
+    "update_regrets_from_traversal",
 ]

@@ -101,8 +101,8 @@ How to use:
 
 ## 10. Parallel CPU solver core
 
-- [ ] Refactor traversal around flat arrays
-- [ ] Separate forward pass, backward pass, and regret update
+- [x] Refactor traversal around flat arrays
+- [x] Separate forward pass, backward pass, and regret update
 - [ ] Add parallel infoset updates
 - [ ] Add parallel node traversal where useful
 - [ ] Add deterministic reduction strategy
