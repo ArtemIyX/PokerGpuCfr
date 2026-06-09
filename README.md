@@ -18,6 +18,32 @@ The project is not trying to exactly solve full 6-max no-limit Hold'em. That gam
 > [!NOTE]
 > This is a vibe-coding / AI-assisted research project. The code is primarily written with AI help and should be reviewed carefully before serious use. Correctness, numerical stability, and performance claims must be validated with tests and reproducible benchmarks.
 
+## Requirements
+
+- **Core**
+  - [![numpy](https://img.shields.io/badge/numpy-%3E%3D1.26-blue?logo=numpy)](https://pypi.org/project/numpy/)
+  - [![scipy](https://img.shields.io/badge/scipy-%3E%3D1.11-blue?logo=scipy)](https://pypi.org/project/scipy/)
+  - [![numba](https://img.shields.io/badge/numba-%3E%3D0.59-blue)](https://pypi.org/project/numba/)
+  - [![tqdm](https://img.shields.io/badge/tqdm-%3E%3D4.66-blue)](https://pypi.org/project/tqdm/)
+  - [![PyYAML](https://img.shields.io/badge/PyYAML-%3E%3D6.0-blue?logo=yaml)](https://pypi.org/project/PyYAML/)
+  - [![orjson](https://img.shields.io/badge/orjson-%3E%3D3.10-blue)](https://pypi.org/project/orjson/)
+
+- **Poker / evaluation**
+  - [![pokerkit](https://img.shields.io/badge/pokerkit-%3E%3D0.5-purple)](https://pypi.org/project/pokerkit/)
+  - [![treys](https://img.shields.io/badge/treys-%3E%3D0.1.8-purple)](https://pypi.org/project/treys/)
+
+- **ML / GPU path**
+  - [![torch](https://img.shields.io/badge/torch-%3E%3D2.3-orange?logo=pytorch)](https://pypi.org/project/torch/)
+
+- **Data / experiments**
+  - [![pandas](https://img.shields.io/badge/pandas-%3E%3D2.2-blue?logo=pandas)](https://pypi.org/project/pandas/)
+  - [![matplotlib](https://img.shields.io/badge/matplotlib-%3E%3D3.8-blue)](https://pypi.org/project/matplotlib/)
+
+- **Testing / development**
+  - [![pytest](https://img.shields.io/badge/pytest-%3E%3D8.0-green?logo=pytest)](https://pypi.org/project/pytest/)
+  - [![pytest-benchmark](https://img.shields.io/badge/pytest--benchmark-%3E%3D4.0-green)](https://pypi.org/project/pytest-benchmark/)
+  - [![ruff](https://img.shields.io/badge/ruff-%3E%3D0.6-green?logo=ruff)](https://pypi.org/project/ruff/)
+  - [![mypy](https://img.shields.io/badge/mypy-%3E%3D1.10-green)](https://pypi.org/project/mypy/)
 
 ## What this repo is
 
