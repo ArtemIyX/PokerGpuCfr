@@ -46,6 +46,62 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:06 - Implemented NLHE action legality checks
+**Goal**
+- Finish action legality on top of the betting-rule helpers.
+
+**Work done**
+- Added `src/pokergpu/core/legality.py`.
+- Implemented legality helpers for `check`, `call`, `fold`, `bet`, and `raise`.
+- Implemented `is_legal_action(...)` against the current acting player.
+- Added tests in `tests/test_legality.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark action legality and rule edge-case tests done.
+
+**Result**
+- ✅ Success
+- Core NLHE betting model now has both sizing-rule helpers and action legality validation.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 23 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `28 passed in 0.04s`
+
+**Why it worked / failed**
+- Keeping legality separate from rule math made the implementation small and testable.
+
+**Follow-ups**
+- Start section 3 hand evaluation layer.
+- Decide whether to wrap `treys` first or use `pokerkit` only for reference tests.
+
+### 2026-06-09 11:03 - Implemented NLHE betting rule helpers
+**Goal**
+- Add typed action and raise-rule helpers for no-limit hold'em.
+
+**Work done**
+- Added `src/pokergpu/core/actions.py` with `ActionType` and `Action`.
+- Added `src/pokergpu/core/rules.py`.
+- Implemented helpers for player stack lookup, committed chips lookup, stack after call, max raise-to, min raise increment, min raise-to, and raise bounds.
+- Added tests in `tests/test_rules.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark NLHE betting rules done.
+
+**Result**
+- ✅ Success
+- Project now has the rule math needed for no-limit raise sizing and stack-capped all-in handling.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 21 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `25 passed in 0.04s`
+
+**Why it worked / failed**
+- Separating rule math from action legality gives us a clear base layer that later legality checks can reuse directly.
+
+**Follow-ups**
+- Implement action legality checks next.
+- Then broaden edge-case tests around folded and all-in players.
+
 ### 2026-06-09 11:00 - Implemented typed betting state models
 **Goal**
 - Add stack, pot, blind, and betting-round state types in `core`.

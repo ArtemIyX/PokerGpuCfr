@@ -30,9 +30,9 @@ How to use:
 - [x] Implement hand parsing and formatting
 - [x] Implement board representation
 - [x] Implement stack, pot, blind, and bet state types
-- [ ] Implement NLHE betting rules
-- [ ] Implement action legality checks
-- [ ] Add unit tests for rules and edge cases
+- [x] Implement NLHE betting rules
+- [x] Implement action legality checks
+- [x] Add unit tests for rules and edge cases
 
 ## 3. Hand evaluation layer
 

@@ -1,3 +1,4 @@
+from .actions import Action, ActionType
 from .betting import (
     BettingRoundState,
     BlindStructure,
@@ -19,8 +20,21 @@ from .cards import (
     make_deck,
     shuffled_deck,
 )
+from .legality import can_bet, can_call, can_check, can_fold, can_raise, is_legal_action
+from .rules import (
+    RaiseBounds,
+    max_raise_to,
+    min_raise_increment,
+    min_raise_to,
+    player_committed,
+    player_stack,
+    raise_bounds,
+    stack_after_call,
+)
 
 __all__ = [
+    "Action",
+    "ActionType",
     "Board",
     "BettingRoundState",
     "BlindStructure",
@@ -30,6 +44,7 @@ __all__ = [
     "PlayerIndex",
     "PlayerStack",
     "Pot",
+    "RaiseBounds",
     "Rank",
     "Street",
     "Suit",
@@ -37,7 +52,20 @@ __all__ = [
     "card_from_str",
     "chips",
     "cards_from_str",
+    "can_bet",
+    "can_call",
+    "can_check",
+    "can_fold",
+    "can_raise",
     "format_cards",
+    "is_legal_action",
+    "max_raise_to",
     "make_deck",
+    "min_raise_increment",
+    "min_raise_to",
+    "player_committed",
+    "player_stack",
+    "raise_bounds",
     "shuffled_deck",
+    "stack_after_call",
 ]
