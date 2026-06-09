@@ -1,8 +1,23 @@
 # GPU-CFR Poker Solver
 
+![Project Status](https://img.shields.io/badge/status-under%20development-orange)
+![Vibe Coding](https://img.shields.io/badge/vibe--coding-yes-purple)
+![AI Assisted](https://img.shields.io/badge/code%20primarily%20written%20by-AI-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![GPU](https://img.shields.io/badge/GPU-CUDA%20planned-green)
+![CFR](https://img.shields.io/badge/algorithm-CFR%2B%20%2F%20DCFR-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 A Python research project for building a GPU-accelerated Counterfactual Regret Minimization solver for poker, with a long-term focus on No-Limit Texas Hold'em.
 
 The project is not trying to exactly solve full 6-max no-limit Hold'em. That game is far too large to solve directly. Instead, this repository focuses on the practical approach used by real poker-solving systems: abstraction, flat data layouts, depth-limited solving, batched leaf evaluation, CFR variants, benchmarking, and eventually GPU-assisted re-solving.
+
+> [!WARNING]
+> This repository is under active development. APIs, package layout, solver quality, benchmarks, and GPU integration may change often. Do not treat the current code as production-ready or as a finished poker solver.
+
+> [!NOTE]
+> This is a vibe-coding / AI-assisted research project. The code is primarily written with AI help and should be reviewed carefully before serious use. Correctness, numerical stability, and performance claims must be validated with tests and reproducible benchmarks.
+
 
 ## What this repo is
 
@@ -216,4 +231,8 @@ The project is licensed under [MIT](LICENSE)
 
 ## Disclaimer
 
-This repository is for research and software engineering. Poker solvers are complex, approximate systems, and performance claims must be proven with reproducible benchmarks. GPU acceleration can provide large speedups only when the workload is batched, memory-friendly, and correctly validated.
+This repository is for research and software engineering. It is under active development and should not be treated as a production-ready poker solver.
+
+This is also a vibe-coding / AI-assisted project: code is primarily written with AI help, so every important implementation detail should be reviewed, tested, benchmarked, and validated by humans before serious use.
+
+Poker solvers are complex, approximate systems, and performance claims must be proven with reproducible benchmarks. GPU acceleration can provide large speedups only when the workload is batched, memory-friendly, and correctly validated.
