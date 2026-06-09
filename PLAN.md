@@ -63,9 +63,9 @@ How to use:
 
 ## 6. Action abstraction
 
-- [ ] Define abstraction interface
-- [ ] Implement baseline bet sizing set
-- [ ] Implement min-raise and stack-aware sizing filters
+- [x] Define abstraction interface
+- [x] Implement baseline bet sizing set
+- [x] Implement min-raise and stack-aware sizing filters
 - [ ] Implement street-specific action templates
 - [ ] Implement configurable abstraction profiles
 - [ ] Add tests for legal generated actions

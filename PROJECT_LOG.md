@@ -46,6 +46,37 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:47 - Added baseline action abstraction and first tree builder
+**Goal**
+- Start section 6 action abstraction.
+- Build a first public tree builder on top of the flat tree model.
+
+**Work done**
+- Added `src/pokergpu/abstraction/`.
+- Added `src/pokergpu/abstraction/actions.py` with `ActionAbstraction` and `BaselineActionAbstraction`.
+- Implemented baseline legal-action generation for check/call/fold plus basic bet and raise sizing.
+- Added `src/pokergpu/tree/builder.py`.
+- Implemented `build_shallow_public_tree(...)` for a one-ply public tree from the current `GameState`.
+- Added tests in `tests/test_action_abstraction.py` and `tests/test_tree_builder.py`.
+- Updated `PLAN.md` to mark the first section 6 items done.
+
+**Result**
+- ✅ Success
+- Project now has a baseline action abstraction and a first tree builder that expands root legal actions into a validated flat public tree.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 45 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `76 passed in 3.78s`
+
+**Why it worked / failed**
+- Starting with a shallow builder gives us a safe integration layer between action abstraction, transitions, and the flat tree container before recursive expansion.
+
+**Follow-ups**
+- Add street-specific action templates.
+- Add configurable abstraction profiles.
+- Extend the tree builder beyond one ply with depth/node limits.
+
 ### 2026-06-09 11:44 - Added flat-array public tree model
 **Goal**
 - Start section 5 with the core public tree representation.
