@@ -46,6 +46,34 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:27 - Scanned existing GPU CFR repositories
+**Goal**
+- Review reference repos for existing GPU CFR implementations.
+- Verify whether large GPU speedups over CPU are already demonstrated.
+
+**Work done**
+- Reviewed `DEEPFOLD-SOLVER`, `gpucfr`, and `cfrx` GitHub repositories.
+- Cross-checked repo claims against linked papers and recent CFR GPU literature.
+
+**Result**
+- ✅ Success
+- Confirmed GPU CFR already exists in multiple forms: production solver, CUDA research implementation, and JAX accelerator-oriented library.
+- Confirmed very large speedups are reported in literature, but they depend on benchmark and architecture. "100x" is real in some comparisons, not a universal constant.
+
+**Evidence**
+- `DEEPFOLD-SOLVER` README: GPU-accelerated DCFR with CUDA backend and CPU fallback.
+- `gpucfr` README: parallel CFR in C++/CUDA for NVIDIA GPUs.
+- `cfrx` README: JAX CFR library focused on GPUs/TPUs.
+- `GPU-Accelerated Counterfactual Regret Minimization` reports up to ~401x vs OpenSpiel Python and ~204x vs OpenSpiel C++.
+- `Real-Time Parallel Counterfactual Regret Minimization` reports ~3.3-3.4x end-to-end speedup on HUNL postflop with CPU+GPU pipeline.
+
+**Why it worked / failed**
+- Repos and papers align on the same pattern: dense arrays, batching, and regularized compute are what make GPU CFR fast.
+
+**Follow-ups**
+- Inspect code structure in the three repos for reusable design patterns.
+- Extract concrete implementation choices for our Python version: flat tree arrays, batching layer, and CPU/GPU split.
+
 ### 2026-06-09 10:00 - Repository initialized
 **Goal**
 - Create baseline repo structure for GPU-CFR NLHE project.
