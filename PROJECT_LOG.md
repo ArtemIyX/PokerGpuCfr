@@ -46,6 +46,38 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:37 - Added public-state signature and side-pot payouts
+**Goal**
+- Add a public-state signature for caching/tree work.
+- Finish payout computation with side-pot support.
+
+**Work done**
+- Added `src/pokergpu/core/signatures.py`.
+- Implemented `public_state_signature(...)` using only public information: board, phase, dealer, acting player, blinds, pot, stacks, committed chips, folded flags, and all-in flags.
+- Upgraded `src/pokergpu/core/payouts.py` to resolve side pots instead of rejecting them.
+- Added `tests/test_signatures.py`.
+- Extended `tests/test_payouts.py` to cover side-pot resolution.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark public-state signature and section 4 test coverage done.
+
+**Result**
+- ✅ Success
+- Section 4 is now fully complete.
+- Payouts now support uncontested pots, equal-commitment showdown, split pots, and side pots.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 37 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `68 passed in 3.31s`
+
+**Why it worked / failed**
+- Separating public-state identity from private cards gives us a reusable cache key for later tree and solve layers.
+- Side pots became manageable once payout resolution was expressed as pot layers over commitment levels.
+
+**Follow-ups**
+- Start section 5 public tree representation.
+- Define flat node arrays and node typing first.
+
 ### 2026-06-09 11:32 - Implemented payout computation
 **Goal**
 - Add payout computation for completed hands.

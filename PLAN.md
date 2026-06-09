@@ -49,8 +49,8 @@ How to use:
 - [x] Implement action apply/undo or state transition engine
 - [x] Implement terminal detection
 - [x] Implement payout computation
-- [ ] Implement public-state signature
-- [ ] Add tests for state transitions and payouts
+- [x] Implement public-state signature
+- [x] Add tests for state transitions and payouts
 
 ## 5. Public tree representation
 

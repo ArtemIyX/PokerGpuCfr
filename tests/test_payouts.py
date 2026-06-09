@@ -1,5 +1,3 @@
-import pytest
-
 from pokergpu.core.betting import (
     BettingRoundState,
     BlindStructure,
@@ -107,7 +105,7 @@ def test_compute_payouts_for_showdown_winner() -> None:
     assert payouts[1].amount == 0
 
 
-def test_compute_payouts_rejects_side_pots_for_now() -> None:
+def test_compute_payouts_handles_side_pots() -> None:
     state = GameState(
         board=Board.from_str("KhQhJh2c3d"),
         players=(
@@ -137,5 +135,7 @@ def test_compute_payouts_rejects_side_pots_for_now() -> None:
         dealer=PlayerIndex(0),
     )
 
-    with pytest.raises(NotImplementedError):
-        compute_payouts(state)
+    payouts = compute_payouts(state)
+
+    assert payouts[0].amount == 300
+    assert payouts[1].amount == 0

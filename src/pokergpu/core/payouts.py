@@ -52,12 +52,6 @@ def compute_payouts(
     if not contenders:
         raise ValueError("showdown requires at least one player with hole cards")
 
-    committed_levels = {
-        bet.committed for bet in state.betting_round.bets if not bet.folded
-    }
-    if len(committed_levels) > 1:
-        raise NotImplementedError("side-pot payout computation is not implemented yet")
-
     scores: dict[PlayerIndex, int] = {}
     for player in contenders:
         hole_cards = player.hole_cards
@@ -66,21 +60,54 @@ def compute_payouts(
         scores[player.player] = evaluator_instance.evaluate_seven_card_hand(
             hole_cards + state.board.cards
         ).score
-    best_score = min(scores.values())
-    winning_players = tuple(
-        player for player in contenders if scores[player.player] == best_score
-    )
 
-    split = Chips(pot // len(winning_players))
-    remainder = pot % len(winning_players)
-
-    for winning_player in winning_players:
-        bonus = 1 if remainder > 0 else 0
-        zero_payouts[winning_player.player] = Chips(split + bonus)
-        if remainder > 0:
-            remainder -= 1
+    _award_side_pots(state, scores, zero_payouts)
 
     return tuple(
         Payout(player=player.player, amount=zero_payouts[player.player])
         for player in state.players
     )
+
+
+def _award_side_pots(
+    state: GameState,
+    scores: dict[PlayerIndex, int],
+    payouts: dict[PlayerIndex, Chips],
+) -> None:
+    commitments = {
+        bet.player: bet.committed
+        for bet in state.betting_round.bets
+        if bet.committed > 0
+    }
+    levels = sorted(set(commitments.values()))
+    previous_level = 0
+    base_pot_awarded = False
+
+    for level in levels:
+        contributors = tuple(
+            player for player, committed in commitments.items() if committed >= level
+        )
+        eligible = tuple(
+            player
+            for player in contributors
+            if not state.player_state(player).folded and player in scores
+        )
+        pot_size = (level - previous_level) * len(contributors)
+        if not base_pot_awarded:
+            pot_size += state.betting_round.pot.amount
+            base_pot_awarded = True
+        previous_level = level
+
+        if pot_size <= 0 or not eligible:
+            continue
+
+        best_score = min(scores[player] for player in eligible)
+        winners = tuple(player for player in eligible if scores[player] == best_score)
+        split = pot_size // len(winners)
+        remainder = pot_size % len(winners)
+
+        for winner in winners:
+            bonus = 1 if remainder > 0 else 0
+            payouts[winner] = Chips(payouts[winner] + split + bonus)
+            if remainder > 0:
+                remainder -= 1
