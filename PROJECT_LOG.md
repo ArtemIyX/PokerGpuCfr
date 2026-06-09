@@ -46,6 +46,39 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 18:46 - Added deterministic reduction helpers for parallel traversal
+**Goal**
+- Finish the remaining structural section 10 item by making multi-worker merges explicit and deterministic.
+
+**Work done**
+- Updated `src/pokergpu/cfr/traversal.py`.
+- Added deterministic reducers for:
+  - child reach updates
+  - backward level results
+  - float32 array accumulation
+  - infoset vector map accumulation
+- Routed the parallel forward pass, backward pass, and parallel infoset-update path through the new reducers.
+- Exported `reduce_float32_arrays(...)` and `reduce_infoset_vector_maps(...)` from `src/pokergpu/cfr/__init__.py`.
+- Extended `tests/test_traversal.py` with a reduction-specific test.
+- Updated `PLAN.md` to mark deterministic reduction strategy done.
+
+**Result**
+- ✅ Success
+- The parallel traversal core now has explicit deterministic merge points instead of ad hoc accumulation logic spread across worker paths.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 62 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests\\test_traversal.py -q` -> `8 passed in 0.10s`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `134 passed, 4 skipped in 93.62s`
+
+**Why it worked / failed**
+- Centralizing reductions made the multi-worker logic easier to reason about and aligned the implementation with the planned "privatize + reduce" CPU design.
+
+**Follow-ups**
+- Benchmark single-thread vs multi-thread traversal behavior.
+- Then move into section 11 depth-limited solving using the new flat-array CPU core.
+
 ### 2026-06-09 18:42 - Added levelized parallel node traversal
 **Goal**
 - Continue section 10 by adding parallel node traversal where it fits the flat-array passes.

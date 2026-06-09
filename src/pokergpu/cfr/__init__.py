@@ -42,6 +42,8 @@ from .traversal import (
     compute_counterfactual_values_parallel,
     compute_reach_probabilities,
     compute_reach_probabilities_parallel,
+    reduce_float32_arrays,
+    reduce_infoset_vector_maps,
     update_regrets_from_traversal,
     update_regrets_from_traversal_parallel,
 )
@@ -92,6 +94,8 @@ __all__ = [
     "compute_counterfactual_values_parallel",
     "compute_reach_probabilities",
     "compute_reach_probabilities_parallel",
+    "reduce_float32_arrays",
+    "reduce_infoset_vector_maps",
     "update_regrets_from_traversal",
     "update_regrets_from_traversal_parallel",
 ]

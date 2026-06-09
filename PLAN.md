@@ -105,7 +105,7 @@ How to use:
 - [x] Separate forward pass, backward pass, and regret update
 - [x] Add parallel infoset updates
 - [x] Add parallel node traversal where useful
-- [ ] Add deterministic reduction strategy
+- [x] Add deterministic reduction strategy
 - [ ] Benchmark single-thread vs multi-thread
 
 ## 11. Depth-limited solving

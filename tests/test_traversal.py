@@ -10,6 +10,8 @@ from pokergpu.cfr import (
     compute_counterfactual_values_parallel,
     compute_reach_probabilities,
     compute_reach_probabilities_parallel,
+    reduce_float32_arrays,
+    reduce_infoset_vector_maps,
     update_regrets_from_traversal,
     update_regrets_from_traversal_parallel,
 )
@@ -248,3 +250,30 @@ def test_parallel_forward_and_backward_match_serial() -> None:
     assert set(serial_backward.infoset_action_values) == set(
         parallel_backward.infoset_action_values
     )
+
+
+def test_deterministic_reducers_merge_partial_results_stably() -> None:
+    reduced_array = reduce_float32_arrays(
+        (
+            np.array([1.0, 0.0, 2.0], dtype=np.float32),
+            np.array([0.5, 3.0, -1.0], dtype=np.float32),
+        ),
+        3,
+    )
+    reduced_map = reduce_infoset_vector_maps(
+        (
+            {
+                1: np.array([1.0, 2.0], dtype=np.float32),
+                0: np.array([3.0, 4.0], dtype=np.float32),
+            },
+            {
+                0: np.array([0.5, 1.5], dtype=np.float32),
+                1: np.array([2.0, -1.0], dtype=np.float32),
+            },
+        )
+    )
+
+    assert np.allclose(reduced_array, np.array([1.5, 3.0, 1.0], dtype=np.float32))
+    assert tuple(reduced_map) == (0, 1)
+    assert np.allclose(reduced_map[0], np.array([3.5, 5.5], dtype=np.float32))
+    assert np.allclose(reduced_map[1], np.array([3.0, 1.0], dtype=np.float32))

@@ -120,11 +120,14 @@ def compute_reach_probabilities_parallel(
                     level,
                 )
             )
-            for updates_p0, updates_p1 in results:
-                for child_index, reach_value in updates_p0:
-                    player0_reach[child_index] += reach_value
-                for child_index, reach_value in updates_p1:
-                    player1_reach[child_index] += reach_value
+            _reduce_child_reach_updates(
+                player0_reach,
+                tuple(result[0] for result in results),
+            )
+            _reduce_child_reach_updates(
+                player1_reach,
+                tuple(result[1] for result in results),
+            )
 
     return ForwardPassResult(
         player0_reach=player0_reach,
@@ -283,17 +286,12 @@ def compute_counterfactual_values_parallel(
                     level,
                 )
             )
-            for (
-                node_index,
-                value_p0,
-                value_p1,
-                infoset_index,
-                action_values,
-            ) in results:
-                node_values_player0[node_index] = value_p0
-                node_values_player1[node_index] = value_p1
-                if infoset_index is not None and action_values is not None:
-                    infoset_action_values[infoset_index] = action_values
+            _reduce_backward_level_results(
+                level_results=results,
+                node_values_player0=node_values_player0,
+                node_values_player1=node_values_player1,
+                infoset_action_values=infoset_action_values,
+            )
 
     return BackwardPassResult(
         node_values_player0=node_values_player0,
@@ -384,16 +382,29 @@ def update_regrets_from_traversal_parallel(
 
     infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
     updated_infosets: list[int] = []
-    for chunk_infoset_values, regret_updates, strategy_updates, chunk_infosets in (
-        chunk_results
-    ):
-        infoset_values += chunk_infoset_values
-        for infoset_index in chunk_infosets:
-            store.regrets_for_infoset(infoset_index)[:] += regret_updates[infoset_index]
-            store.strategy_sums_for_infoset(infoset_index)[:] += strategy_updates[
-                infoset_index
-            ]
-            updated_infosets.append(infoset_index)
+    infoset_values = reduce_float32_arrays(
+        tuple(chunk_infoset_values for chunk_infoset_values, _, _, _ in chunk_results),
+        store.layout.infoset_count,
+    )
+    merged_regret_updates = reduce_infoset_vector_maps(
+        tuple(regret_updates for _, regret_updates, _, _ in chunk_results)
+    )
+    merged_strategy_updates = reduce_infoset_vector_maps(
+        tuple(strategy_updates for _, _, strategy_updates, _ in chunk_results)
+    )
+    ordered_infosets = tuple(
+        infoset_index
+        for _, _, _, chunk_infosets in chunk_results
+        for infoset_index in chunk_infosets
+    )
+    for infoset_index in ordered_infosets:
+        store.regrets_for_infoset(infoset_index)[:] += merged_regret_updates[
+            infoset_index
+        ]
+        store.strategy_sums_for_infoset(infoset_index)[:] += merged_strategy_updates[
+            infoset_index
+        ]
+        updated_infosets.append(infoset_index)
 
     return RegretUpdateResult(
         infoset_values=infoset_values,
@@ -442,6 +453,71 @@ def _compute_chunk_updates(
         infoset_values[infoset_index] = infoset_value
 
     return infoset_values, regret_updates, strategy_updates, infoset_indices
+
+
+def _reduce_child_reach_updates(
+    target: NDArray[np.float32],
+    worker_updates: tuple[tuple[tuple[int, np.float32], ...], ...],
+) -> None:
+    for child_index, reach_value in _flatten_and_sort_updates(worker_updates):
+        target[child_index] += reach_value
+
+
+def _reduce_backward_level_results(
+    level_results: tuple[
+        tuple[int, np.float32, np.float32, int | None, NDArray[np.float32] | None],
+        ...,
+    ],
+    node_values_player0: NDArray[np.float32],
+    node_values_player1: NDArray[np.float32],
+    infoset_action_values: dict[int, NDArray[np.float32]],
+) -> None:
+    for node_index, value_p0, value_p1, infoset_index, action_values in sorted(
+        level_results,
+        key=lambda item: item[0],
+    ):
+        node_values_player0[node_index] = value_p0
+        node_values_player1[node_index] = value_p1
+        if infoset_index is not None and action_values is not None:
+            infoset_action_values[infoset_index] = action_values
+
+
+def reduce_float32_arrays(
+    arrays: tuple[NDArray[np.float32], ...],
+    size: int,
+) -> NDArray[np.float32]:
+    reduced = np.zeros(size, dtype=np.float32)
+    for array in arrays:
+        reduced += array
+    return reduced
+
+
+def reduce_infoset_vector_maps(
+    partial_maps: tuple[dict[int, NDArray[np.float32]], ...],
+) -> dict[int, NDArray[np.float32]]:
+    reduced: dict[int, NDArray[np.float32]] = {}
+    for partial_map in partial_maps:
+        for infoset_index in sorted(partial_map):
+            if infoset_index not in reduced:
+                reduced[infoset_index] = np.array(
+                    partial_map[infoset_index],
+                    dtype=np.float32,
+                    copy=True,
+                )
+            else:
+                reduced[infoset_index] += partial_map[infoset_index]
+    return reduced
+
+
+def _flatten_and_sort_updates(
+    worker_updates: tuple[tuple[tuple[int, np.float32], ...], ...],
+) -> tuple[tuple[int, np.float32], ...]:
+    return tuple(
+        sorted(
+            (update for updates in worker_updates for update in updates),
+            key=lambda item: item[0],
+        )
+    )
 
 
 def build_tree_levels(tree: PublicTree) -> TreeLevels:
