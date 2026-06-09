@@ -46,6 +46,36 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:30 - Added Kuhn Poker game implementation for CFR
+**Goal**
+- Add the first toy game in section 8.
+- Make Kuhn Poker usable for later CFR convergence tests, not just as a rules stub.
+
+**Work done**
+- Added `src/pokergpu/cfr/kuhn.py`.
+- Implemented `KuhnCard`, `KuhnAction`, `KuhnState`, and `KuhnInfoset`.
+- Implemented canonical Kuhn infoset enumeration and matching dense `InfosetLayout`.
+- Implemented `new_kuhn_infoset_store()` and `expected_action_utilities(...)`.
+- Exported Kuhn APIs from `src/pokergpu/cfr/__init__.py`.
+- Added `tests/test_kuhn.py`.
+- Updated `PLAN.md` to mark Kuhn Poker implementation done.
+
+**Result**
+- ✅ Success
+- The project now has a typed Kuhn Poker tree with payoff logic, infosets, and traversal helpers that produce per-infoset action utilities for CFR updates.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 56 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `108 passed, 4 skipped in 0.24s`
+
+**Why it worked / failed**
+- Kuhn is small enough to enumerate exactly, which makes it the right first integration point for checking the CFR storage and iteration machinery end to end.
+
+**Follow-ups**
+- Validate convergence on Kuhn Poker.
+- Add a simple sanity metric or exploitability-style check around the learned average strategy.
+
 ### 2026-06-09 17:27 - Added tiny CFR iteration loop
 **Goal**
 - Implement the first CFR iteration loop on top of the dense infoset store.
