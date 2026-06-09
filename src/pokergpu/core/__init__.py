@@ -21,6 +21,7 @@ from .cards import (
     shuffled_deck,
 )
 from .legality import can_bet, can_call, can_check, can_fold, can_raise, is_legal_action
+from .payouts import Payout, compute_payouts, total_pot
 from .rules import (
     RaiseBounds,
     max_raise_to,
@@ -57,6 +58,7 @@ __all__ = [
     "Chips",
     "GameState",
     "HandPhase",
+    "Payout",
     "PlayerBet",
     "PlayerIndex",
     "PlayerState",
@@ -69,6 +71,7 @@ __all__ = [
     "board_from_str",
     "card_from_str",
     "chips",
+    "compute_payouts",
     "cards_from_str",
     "apply_action",
     "apply_action_with_record",
@@ -93,5 +96,6 @@ __all__ = [
     "raise_bounds",
     "shuffled_deck",
     "stack_after_call",
+    "total_pot",
     "undo_transition",
 ]

@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:32 - Implemented payout computation
+**Goal**
+- Add payout computation for completed hands.
+
+**Work done**
+- Added `src/pokergpu/core/payouts.py`.
+- Implemented `Payout`, `total_pot`, and `compute_payouts`.
+- Covered uncontested terminal pots and showdown resolution using the typed `treys` evaluator wrapper.
+- Added tests in `tests/test_payouts.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark payout computation done.
+
+**Result**
+- ✅ Success
+- Project now computes payouts for uncontested pots and simple showdown cases.
+- Side pots are explicitly rejected with `NotImplementedError` for now.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 35 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `67 passed in 3.19s`
+
+**Why it worked / failed**
+- Starting with uncontested and equal-commitment showdown payouts gives us correct core behavior without pretending side-pot logic is done.
+
+**Follow-ups**
+- Implement public-state signature.
+- Then decide whether to add full side-pot resolution before solver work depends on it.
+
 ### 2026-06-09 11:27 - Implemented terminal detection helpers
 **Goal**
 - Add explicit terminal and showdown detection on top of the game state model.

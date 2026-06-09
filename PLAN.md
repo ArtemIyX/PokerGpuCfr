@@ -48,7 +48,7 @@ How to use:
 - [x] Implement immutable or controlled-mutation game state model
 - [x] Implement action apply/undo or state transition engine
 - [x] Implement terminal detection
-- [ ] Implement payout computation
+- [x] Implement payout computation
 - [ ] Implement public-state signature
 - [ ] Add tests for state transitions and payouts
 

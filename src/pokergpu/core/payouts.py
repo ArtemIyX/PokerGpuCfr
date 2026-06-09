@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from pokergpu.eval.treys_evaluator import TreysHandEvaluator
+
+from .betting import Chips, PlayerIndex
+from .state import GameState
+from .terminal import (
+    active_players,
+    is_hand_complete,
+    is_showdown_state,
+    is_terminal_state,
+)
+
+
+@dataclass(slots=True, frozen=True)
+class Payout:
+    player: PlayerIndex
+    amount: Chips
+
+
+def total_pot(state: GameState) -> Chips:
+    committed_total = sum(bet.committed for bet in state.betting_round.bets)
+    return Chips(state.betting_round.pot.amount + committed_total)
+
+
+def compute_payouts(
+    state: GameState,
+    *,
+    evaluator: TreysHandEvaluator | None = None,
+) -> tuple[Payout, ...]:
+    if not is_hand_complete(state):
+        raise ValueError("cannot compute payouts for incomplete hand")
+
+    pot = total_pot(state)
+    zero_payouts = {player.player: Chips(0) for player in state.players}
+
+    if is_terminal_state(state) and not is_showdown_state(state):
+        winners = active_players(state)
+        if len(winners) != 1:
+            raise ValueError("terminal non-showdown state must have exactly one winner")
+        winner_index = winners[0].player
+        zero_payouts[winner_index] = pot
+        return tuple(
+            Payout(player=player.player, amount=zero_payouts[player.player])
+            for player in state.players
+        )
+
+    evaluator_instance = evaluator or TreysHandEvaluator()
+    contenders = tuple(player for player in active_players(state) if player.hole_cards)
+    if not contenders:
+        raise ValueError("showdown requires at least one player with hole cards")
+
+    committed_levels = {
+        bet.committed for bet in state.betting_round.bets if not bet.folded
+    }
+    if len(committed_levels) > 1:
+        raise NotImplementedError("side-pot payout computation is not implemented yet")
+
+    scores: dict[PlayerIndex, int] = {}
+    for player in contenders:
+        hole_cards = player.hole_cards
+        if hole_cards is None:
+            raise ValueError("showdown contender must have hole cards")
+        scores[player.player] = evaluator_instance.evaluate_seven_card_hand(
+            hole_cards + state.board.cards
+        ).score
+    best_score = min(scores.values())
+    winning_players = tuple(
+        player for player in contenders if scores[player.player] == best_score
+    )
+
+    split = Chips(pot // len(winning_players))
+    remainder = pot % len(winning_players)
+
+    for winning_player in winning_players:
+        bonus = 1 if remainder > 0 else 0
+        zero_payouts[winning_player.player] = Chips(split + bonus)
+        if remainder > 0:
+            remainder -= 1
+
+    return tuple(
+        Payout(player=player.player, amount=zero_payouts[player.player])
+        for player in state.players
+    )
