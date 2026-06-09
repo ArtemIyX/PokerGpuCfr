@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 
 from pokergpu.cfr import (
     CFRVariant,
@@ -17,6 +18,7 @@ from pokergpu.cfr import (
 )
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_infoset_layout_has_expected_size() -> None:
     layout = kuhn_infoset_layout()
 
@@ -24,6 +26,7 @@ def test_kuhn_infoset_layout_has_expected_size() -> None:
     assert layout.total_actions == 24
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_root_state_has_check_and_bet() -> None:
     state = KuhnState(cards=(KuhnCard.JACK, KuhnCard.KING))
 
@@ -31,6 +34,7 @@ def test_kuhn_root_state_has_check_and_bet() -> None:
     assert state.player_to_act == 0
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_bet_fold_payoff() -> None:
     state = KuhnState(
         cards=(KuhnCard.JACK, KuhnCard.KING),
@@ -42,6 +46,7 @@ def test_kuhn_bet_fold_payoff() -> None:
     assert math.isclose(state.payoff(1), -1.0)
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_showdown_payoff_with_single_bet_round() -> None:
     state = KuhnState(
         cards=(KuhnCard.KING, KuhnCard.JACK),
@@ -53,6 +58,7 @@ def test_kuhn_showdown_payoff_with_single_bet_round() -> None:
     assert math.isclose(state.payoff(1), -1.0)
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_called_bet_has_two_chip_showdown_payoff() -> None:
     state = KuhnState(
         cards=(KuhnCard.JACK, KuhnCard.KING),
@@ -64,6 +70,7 @@ def test_kuhn_called_bet_has_two_chip_showdown_payoff() -> None:
     assert math.isclose(state.payoff(1), 2.0)
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_expected_action_utilities_match_layout() -> None:
     store = new_kuhn_infoset_store()
 
@@ -73,6 +80,7 @@ def test_kuhn_expected_action_utilities_match_layout() -> None:
     assert all(values.shape == (2,) for values in utilities)
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_expected_action_utilities_are_non_zero_for_root_infosets() -> None:
     store = new_kuhn_infoset_store()
 
@@ -91,6 +99,7 @@ def test_kuhn_expected_action_utilities_are_non_zero_for_root_infosets() -> None
     )
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_cfr_average_strategy_value_approaches_known_game_value() -> None:
     store = train_kuhn_cfr(2000)
 
@@ -99,6 +108,7 @@ def test_kuhn_cfr_average_strategy_value_approaches_known_game_value() -> None:
     assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_cfr_root_betting_profile_matches_sanity_pattern() -> None:
     store = train_kuhn_cfr(2000)
 
@@ -109,6 +119,7 @@ def test_kuhn_cfr_root_betting_profile_matches_sanity_pattern() -> None:
     assert 0.0 <= queen_bet < jack_bet < king_bet <= 1.0
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_cfr_plus_average_strategy_value_approaches_known_game_value() -> None:
     store = train_kuhn_cfr(2000, variant=CFRVariant.CFR_PLUS)
 
@@ -117,6 +128,7 @@ def test_kuhn_cfr_plus_average_strategy_value_approaches_known_game_value() -> N
     assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
 
 
+@pytest.mark.benchmark_suite
 def test_kuhn_dcfr_average_strategy_value_approaches_known_game_value() -> None:
     store = train_kuhn_cfr(2000, variant=CFRVariant.DCFR)
 

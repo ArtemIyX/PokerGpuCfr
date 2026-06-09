@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from pokergpu.cfr import (
     LeducAction,
     LeducCard,
@@ -15,6 +17,7 @@ from pokergpu.cfr import (
 )
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_infoset_layout_is_non_empty() -> None:
     layout = leduc_infoset_layout()
 
@@ -22,6 +25,7 @@ def test_leduc_infoset_layout_is_non_empty() -> None:
     assert layout.total_actions == layout.infoset_count * 2
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_root_state_has_check_and_bet() -> None:
     state = LeducState(
         cards=(
@@ -34,6 +38,7 @@ def test_leduc_root_state_has_check_and_bet() -> None:
     assert state.player_to_act == 0
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_preflop_check_check_reveals_public_card() -> None:
     state = LeducState(
         cards=(
@@ -48,6 +53,7 @@ def test_leduc_preflop_check_check_reveals_public_card() -> None:
     assert state.needs_public_chance
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_showdown_pair_beats_high_card() -> None:
     state = LeducState(
         cards=(
@@ -65,6 +71,7 @@ def test_leduc_showdown_pair_beats_high_card() -> None:
     assert math.isclose(state.payoff(1), -1.0)
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_expected_action_utilities_match_layout() -> None:
     store = new_leduc_infoset_store()
 
@@ -74,6 +81,7 @@ def test_leduc_expected_action_utilities_match_layout() -> None:
     assert all(values.shape == (2,) for values in utilities)
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_root_infosets_exist() -> None:
     root_infosets = [
         infoset
@@ -84,6 +92,7 @@ def test_leduc_root_infosets_exist() -> None:
     assert len(root_infosets) == 3
 
 
+@pytest.mark.benchmark_suite
 def test_leduc_cfr_average_strategy_value_stabilizes() -> None:
     smaller = train_leduc_cfr(200)
     larger = train_leduc_cfr(800)
@@ -95,7 +104,7 @@ def test_leduc_cfr_average_strategy_value_stabilizes() -> None:
     assert math.isfinite(value_large)
     assert abs(value_large - value_small) < 0.5
 
-
+@pytest.mark.benchmark_suite
 def test_leduc_cfr_root_betting_sanity_orders_ranks() -> None:
     store = train_leduc_cfr(800)
 
