@@ -46,6 +46,39 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:17 - Added evaluator performance benchmarks
+**Goal**
+- Add benchmark coverage for evaluator single-hand and batch-hand performance.
+
+**Work done**
+- Added `tests/test_treys_evaluator_benchmark.py`.
+- Benchmarked single 5-card evaluation.
+- Benchmarked single 7-card evaluation.
+- Benchmarked batch 5-card evaluation.
+- Benchmarked batch 7-card evaluation.
+- Updated `PLAN.md` to mark evaluator benchmarking done.
+
+**Result**
+- ✅ Success
+- Evaluator layer now has baseline throughput measurements for future optimization comparisons.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 27 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `50 passed in 3.15s`
+- Benchmark means from `tests/test_treys_evaluator_benchmark.py`:
+  - single 5-card: ~`3.58 us`
+  - single 7-card: ~`9.36 us`
+  - batch 5-card (`1000` hands): ~`3278.90 us`
+  - batch 7-card (`1000` hands): ~`9427.94 us`
+
+**Why it worked / failed**
+- `pytest-benchmark` gave a low-friction way to capture repeatable baseline numbers inside the existing test workflow.
+
+**Follow-ups**
+- Start section 4 game state and transitions.
+- Define a typed game state model around board, betting state, and player statuses.
+
 ### 2026-06-09 11:15 - Added evaluator correctness regression tests
 **Goal**
 - Add broader correctness tests against known hand rankings and class names.
