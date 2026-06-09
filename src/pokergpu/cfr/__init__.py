@@ -5,10 +5,16 @@ from .kuhn import (
     KuhnCard,
     KuhnInfoset,
     KuhnState,
+    average_strategy_profile,
+    average_strategy_root_bet_probability,
     expected_action_utilities,
+    expected_game_value,
+    expected_game_value_for_average_strategy,
+    kuhn_infoset_indices_for_player,
     kuhn_infoset_layout,
     kuhn_infosets,
     new_kuhn_infoset_store,
+    train_kuhn_cfr,
 )
 
 __all__ = [
@@ -19,10 +25,16 @@ __all__ = [
     "KuhnCard",
     "KuhnInfoset",
     "KuhnState",
+    "average_strategy_profile",
+    "average_strategy_root_bet_probability",
     "expected_action_utilities",
+    "expected_game_value",
+    "expected_game_value_for_average_strategy",
+    "kuhn_infoset_indices_for_player",
     "kuhn_infoset_layout",
     "kuhn_infosets",
     "new_kuhn_infoset_store",
     "regret_matching",
     "run_cfr_iteration",
+    "train_kuhn_cfr",
 ]

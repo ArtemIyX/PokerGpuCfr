@@ -85,9 +85,9 @@ How to use:
 - [x] Implement regret matching
 - [x] Implement CFR iteration loop
 - [x] Implement average strategy accumulation
-- [ ] Implement exploitability or sanity metrics for toy games
+- [x] Implement exploitability or sanity metrics for toy games
 - [x] Add Kuhn Poker implementation
-- [ ] Validate convergence on Kuhn Poker
+- [x] Validate convergence on Kuhn Poker
 - [ ] Add Leduc Poker implementation
 - [ ] Validate convergence on Leduc
 

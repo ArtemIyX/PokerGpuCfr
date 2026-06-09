@@ -19,17 +19,26 @@ def run_cfr_iteration(
     store: InfosetStore,
     action_utilities: Sequence[NDArray[np.float32] | Sequence[float]],
     strategy_weight: float = 1.0,
+    active_infosets: Sequence[int] | None = None,
 ) -> CFRIterationResult:
     if len(action_utilities) != store.layout.infoset_count:
         raise ValueError("action utilities must match infoset count")
     if strategy_weight < 0.0:
         raise ValueError("strategy weight must be non-negative")
+    infoset_indices = (
+        tuple(range(store.layout.infoset_count))
+        if active_infosets is None
+        else tuple(active_infosets)
+    )
 
     strategies: list[NDArray[np.float32]] = []
     infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
     strategy_scale = np.float32(strategy_weight)
 
-    for infoset_index, utility_values_like in enumerate(action_utilities):
+    for infoset_index in infoset_indices:
+        if infoset_index < 0 or infoset_index >= store.layout.infoset_count:
+            raise IndexError(f"infoset index out of range: {infoset_index}")
+        utility_values_like = action_utilities[infoset_index]
         utility_values = np.asarray(utility_values_like, dtype=np.float32)
         if utility_values.ndim != 1:
             raise ValueError("action utility arrays must be one-dimensional")

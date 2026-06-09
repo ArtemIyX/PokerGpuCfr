@@ -73,3 +73,20 @@ def test_cfr_iteration_rejects_wrong_action_count() -> None:
 
     with pytest.raises(ValueError):
         run_cfr_iteration(store, [np.array([1.0], dtype=np.float32)])
+
+
+def test_cfr_iteration_can_limit_updates_to_active_infosets() -> None:
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([2, 2]))
+
+    run_cfr_iteration(
+        store,
+        [
+            np.array([1.0, -1.0], dtype=np.float32),
+            np.array([4.0, -4.0], dtype=np.float32),
+        ],
+        active_infosets=[1],
+    )
+
+    assert np.allclose(store.regrets[:2], np.zeros(2, dtype=np.float32))
+    assert np.allclose(store.strategy_sums[:2], np.zeros(2, dtype=np.float32))
+    assert np.allclose(store.regrets[2:], np.array([4.0, -4.0], dtype=np.float32))

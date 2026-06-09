@@ -6,10 +6,13 @@ from pokergpu.cfr import (
     KuhnAction,
     KuhnCard,
     KuhnState,
+    average_strategy_root_bet_probability,
     expected_action_utilities,
+    expected_game_value_for_average_strategy,
     kuhn_infoset_layout,
     kuhn_infosets,
     new_kuhn_infoset_store,
+    train_kuhn_cfr,
 )
 
 
@@ -85,3 +88,21 @@ def test_kuhn_expected_action_utilities_are_non_zero_for_root_infosets() -> None
         not np.allclose(utilities[index], np.zeros(2, dtype=np.float32))
         for index in root_indices
     )
+
+
+def test_kuhn_cfr_average_strategy_value_approaches_known_game_value() -> None:
+    store = train_kuhn_cfr(2000)
+
+    value = expected_game_value_for_average_strategy(store)
+
+    assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
+
+
+def test_kuhn_cfr_root_betting_profile_matches_sanity_pattern() -> None:
+    store = train_kuhn_cfr(2000)
+
+    jack_bet = average_strategy_root_bet_probability(store, KuhnCard.JACK)
+    queen_bet = average_strategy_root_bet_probability(store, KuhnCard.QUEEN)
+    king_bet = average_strategy_root_bet_probability(store, KuhnCard.KING)
+
+    assert 0.0 <= queen_bet < jack_bet < king_bet <= 1.0

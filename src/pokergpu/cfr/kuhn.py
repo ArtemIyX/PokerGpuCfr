@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .infosets import InfosetLayout, InfosetStore
+from .iteration import run_cfr_iteration
 
 
 class KuhnCard(IntEnum):
@@ -121,6 +122,14 @@ def kuhn_infosets() -> tuple[KuhnInfoset, ...]:
     return _INFOSETS
 
 
+def kuhn_infoset_indices_for_player(player: int) -> tuple[int, ...]:
+    if player not in {0, 1}:
+        raise ValueError("player must be 0 or 1")
+    return tuple(
+        index for index, infoset in enumerate(_INFOSETS) if infoset.player == player
+    )
+
+
 def kuhn_infoset_layout() -> InfosetLayout:
     return InfosetLayout.from_action_counts([2] * len(_INFOSETS))
 
@@ -154,6 +163,62 @@ def expected_action_utilities(
         )
 
     return tuple(utilities)
+
+
+def train_kuhn_cfr(iterations: int) -> InfosetStore:
+    if iterations < 0:
+        raise ValueError("iterations must be non-negative")
+
+    store = new_kuhn_infoset_store()
+    for _ in range(iterations):
+        for player in (0, 1):
+            run_cfr_iteration(
+                store=store,
+                action_utilities=expected_action_utilities(store, player),
+                active_infosets=kuhn_infoset_indices_for_player(player),
+            )
+    return store
+
+
+def average_strategy_profile(
+    store: InfosetStore,
+) -> dict[KuhnInfoset, NDArray[np.float32]]:
+    if store.layout != kuhn_infoset_layout():
+        raise ValueError("store layout must match Kuhn infoset layout")
+    return {
+        infoset: store.average_strategy(index)
+        for index, infoset in enumerate(_INFOSETS)
+    }
+
+
+def expected_game_value_for_average_strategy(store: InfosetStore) -> float:
+    return expected_game_value(average_strategy_profile(store), player=0)
+
+
+def average_strategy_root_bet_probability(
+    store: InfosetStore,
+    card: KuhnCard,
+) -> float:
+    infoset = KuhnInfoset(player=0, card=card, history=())
+    return float(average_strategy_profile(store)[infoset][1])
+
+
+def expected_game_value(
+    strategy_profile: dict[KuhnInfoset, NDArray[np.float32]],
+    player: int,
+) -> float:
+    if player not in {0, 1}:
+        raise ValueError("player must be 0 or 1")
+
+    total_value = 0.0
+    chance_weight = 1.0 / len(_DEALS)
+    for cards in _DEALS:
+        total_value += chance_weight * _walk_average_strategy_tree(
+            strategy_profile=strategy_profile,
+            state=KuhnState(cards=cards),
+            player=player,
+        )
+    return total_value
 
 
 def _walk_tree(
@@ -205,3 +270,27 @@ def _walk_tree(
         utilities[infoset_index] += action_values * np.float32(reach_opponent)
 
     return node_value
+
+
+def _walk_average_strategy_tree(
+    strategy_profile: dict[KuhnInfoset, NDArray[np.float32]],
+    state: KuhnState,
+    player: int,
+) -> float:
+    if state.is_terminal:
+        return state.payoff(player)
+
+    infoset = KuhnInfoset(
+        player=state.player_to_act,
+        card=state.cards[state.player_to_act],
+        history=state.history,
+    )
+    strategy = strategy_profile[infoset]
+    value = 0.0
+    for action_index, action in enumerate(state.legal_actions()):
+        value += float(strategy[action_index]) * _walk_average_strategy_tree(
+            strategy_profile=strategy_profile,
+            state=state.apply_action(action),
+            player=player,
+        )
+    return value

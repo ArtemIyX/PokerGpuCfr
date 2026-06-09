@@ -46,6 +46,44 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:34 - Validated Kuhn CFR convergence and added sanity metrics
+**Goal**
+- Validate that the new Kuhn CFR path actually converges.
+- Add a small sanity metric around the learned average strategy.
+
+**Work done**
+- Extended `src/pokergpu/cfr/iteration.py` to support selective infoset updates via `active_infosets`.
+- Extended `src/pokergpu/cfr/kuhn.py` with:
+  - `kuhn_infoset_indices_for_player(...)`
+  - `train_kuhn_cfr(...)`
+  - `average_strategy_profile(...)`
+  - `expected_game_value(...)`
+  - `expected_game_value_for_average_strategy(...)`
+  - `average_strategy_root_bet_probability(...)`
+- Exported the new helpers from `src/pokergpu/cfr/__init__.py`.
+- Added active-infoset coverage to `tests/test_cfr_iteration.py`.
+- Extended `tests/test_kuhn.py` with:
+  - average-strategy self-play value check against the known Kuhn game value
+  - root betting monotonicity sanity check `Q < J < K`
+- Updated `PLAN.md` to mark Kuhn validation and toy-game sanity metrics done.
+
+**Result**
+- ✅ Success
+- Kuhn CFR now trains end to end and the learned average strategy reaches the expected game value neighborhood.
+- The project has a lightweight sanity metric for average strategy shape in addition to the value-based convergence check.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 56 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `111 passed, 4 skipped in 2.61s`
+
+**Why it worked / failed**
+- Alternating-player CFR needs selective infoset updates; once that was added, the Kuhn traversal, regret updates, and average-strategy evaluation lined up cleanly.
+
+**Follow-ups**
+- Add Leduc Poker implementation.
+- Reuse the same dense infoset and convergence-check pattern for Leduc before moving to CFR variants.
+
 ### 2026-06-09 17:30 - Added Kuhn Poker game implementation for CFR
 **Goal**
 - Add the first toy game in section 8.
