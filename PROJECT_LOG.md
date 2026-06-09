@@ -46,6 +46,33 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:42 - Added linting and strict typing setup
+**Goal**
+- Finish the tooling part of section 1.
+- Set up strong Python typing and quality checks before solver code grows.
+
+**Work done**
+- Extended `pyproject.toml` with Ruff and mypy configuration.
+- Enabled strict mypy checking for `src` and `tests`.
+- Fixed import ordering and test typing issues so tooling passes cleanly.
+- Updated `PLAN.md` to mark formatting, lint, and type-check tooling done.
+
+**Result**
+- ✅ Success
+- Project now has strict static checks similar to a typed-language workflow.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 9 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `2 passed in 0.01s`
+
+**Why it worked / failed**
+- Doing this early keeps domain and solver APIs precise before more modules appear.
+
+**Follow-ups**
+- Add benchmark harness scaffold.
+- Then start section 2 core poker model.
+
 ### 2026-06-09 10:39 - Scaffolded Python project foundation
 **Goal**
 - Start section 1 of `PLAN.md`.

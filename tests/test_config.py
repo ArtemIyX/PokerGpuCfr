@@ -1,9 +1,10 @@
 from pathlib import Path
+from typing import Any
 
 from pokergpu.config import load_settings
 
 
-def test_load_settings_uses_env(monkeypatch) -> None:
+def test_load_settings_uses_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("POKERGPU_PROJECT_ROOT", str(Path("C:/tmp/pokergpu-root")))
     monkeypatch.setenv("POKERGPU_DATA_DIR", str(Path("C:/tmp/pokergpu-data")))
     monkeypatch.setenv("POKERGPU_ARTIFACT_DIR", str(Path("C:/tmp/pokergpu-artifacts")))

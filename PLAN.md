@@ -20,7 +20,7 @@ How to use:
 - [x] Add config system for paths, device, and solver settings
 - [x] Add logging setup
 - [x] Add test setup
-- [ ] Add formatting, lint, and type-check tooling
+- [x] Add formatting, lint, and type-check tooling
 - [ ] Add benchmark harness scaffold
 
 ## 2. Core game model
