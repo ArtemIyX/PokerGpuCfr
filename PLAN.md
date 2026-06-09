@@ -75,8 +75,8 @@ How to use:
 - [x] Define private-hand indexing scheme
 - [x] Implement range representation API
 - [x] Implement range normalization and masking
-- [ ] Implement postflop bucket interface
-- [ ] Start with simple bucket baseline
+- [x] Implement postflop bucket interface
+- [x] Start with simple bucket baseline
 - [x] Add tests for range math and masking
 
 ## 8. Tiny CFR baseline

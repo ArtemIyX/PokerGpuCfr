@@ -6,6 +6,7 @@ from .actions import (
     make_compact_profile,
     make_default_profile,
 )
+from .buckets import BucketId, PostflopBucketer, StrengthTierBucketer
 from .hands import (
     PrivateHand,
     PrivateHandIndex,
@@ -21,9 +22,12 @@ __all__ = [
     "AbstractionProfile",
     "ActionAbstraction",
     "BaselineActionAbstraction",
+    "BucketId",
+    "PostflopBucketer",
     "PrivateHand",
     "PrivateHandIndex",
     "RangeVector",
+    "StrengthTierBucketer",
     "StreetActionTemplate",
     "all_private_hands",
     "make_compact_profile",

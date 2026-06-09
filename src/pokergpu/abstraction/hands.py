@@ -33,6 +33,9 @@ class PrivateHand:
     def contains(self, card: Card) -> bool:
         return self.first == card or self.second == card
 
+    def contains_any(self, cards: tuple[Card, ...] | list[Card]) -> bool:
+        return any(self.contains(card) for card in cards)
+
 
 _DECK: tuple[Card, ...] = make_deck()
 _CARD_TO_INDEX: dict[Card, int] = {card: index for index, card in enumerate(_DECK)}

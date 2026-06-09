@@ -46,6 +46,37 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:21 - Added postflop bucket interface and baseline strength tiers
+**Goal**
+- Finish the remaining section 7 bucket work on top of the new range vectors.
+- Add a simple deterministic postflop bucketer that is usable in later CFR code.
+
+**Work done**
+- Added `src/pokergpu/abstraction/buckets.py`.
+- Implemented `BucketId`, `PostflopBucketer`, and `StrengthTierBucketer`.
+- Added board-aware postflop bucket assignment using the existing `treys` evaluator rank classes.
+- Added bucket-mask and bucketed-range aggregation helpers.
+- Exported the new APIs from `src/pokergpu/abstraction/__init__.py`.
+- Added tests in `tests/test_buckets.py`.
+- Updated `PLAN.md` to mark the remaining section 7 items done.
+
+**Result**
+- ✅ Success
+- Section 7 is now complete.
+- The project has a first postflop bucket interface and a simple evaluator-strength baseline for mapping private hands into coarse buckets.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 49 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `89 passed, 4 skipped in 0.24s`
+
+**Why it worked / failed**
+- Reusing evaluator rank classes gives a cheap, deterministic baseline abstraction without introducing more solver-specific heuristics yet.
+
+**Follow-ups**
+- Start section 8 tiny CFR baseline.
+- Define dense-array infoset storage to match the existing flat tree and range layout.
+
 ### 2026-06-09 17:18 - Added private-hand indexing and dense range vectors
 **Goal**
 - Start section 7 card abstraction and ranges.
