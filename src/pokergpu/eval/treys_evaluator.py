@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
@@ -53,6 +54,18 @@ class TreysHandEvaluator:
             class_name=self._evaluator.class_to_string(rank_class),
         )
 
+    def evaluate_five_card_hands(
+        self,
+        hands: Iterable[tuple[Card, ...]],
+    ) -> tuple[EvaluatedHand, ...]:
+        return tuple(self.evaluate_five_card_hand(hand) for hand in hands)
+
+    def evaluate_seven_card_hands(
+        self,
+        hands: Iterable[tuple[Card, ...]],
+    ) -> tuple[EvaluatedHand, ...]:
+        return tuple(self.evaluate_seven_card_hand(hand) for hand in hands)
+
 
 def evaluate_five_card_hand(cards: tuple[Card, ...]) -> EvaluatedHand:
     return TreysHandEvaluator().evaluate_five_card_hand(cards)
@@ -60,3 +73,15 @@ def evaluate_five_card_hand(cards: tuple[Card, ...]) -> EvaluatedHand:
 
 def evaluate_seven_card_hand(cards: tuple[Card, ...]) -> EvaluatedHand:
     return TreysHandEvaluator().evaluate_seven_card_hand(cards)
+
+
+def evaluate_five_card_hands(
+    hands: Iterable[tuple[Card, ...]],
+) -> tuple[EvaluatedHand, ...]:
+    return TreysHandEvaluator().evaluate_five_card_hands(hands)
+
+
+def evaluate_seven_card_hands(
+    hands: Iterable[tuple[Card, ...]],
+) -> tuple[EvaluatedHand, ...]:
+    return TreysHandEvaluator().evaluate_seven_card_hands(hands)

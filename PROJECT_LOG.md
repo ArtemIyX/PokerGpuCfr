@@ -46,6 +46,33 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:13 - Added batch hand evaluation API
+**Goal**
+- Add batch 5-card and 7-card evaluation APIs on top of the typed `treys` wrapper.
+
+**Work done**
+- Extended `src/pokergpu/eval/treys_evaluator.py` with batch evaluator methods.
+- Added top-level helper functions for batch 5-card and 7-card evaluation.
+- Updated `src/pokergpu/eval/__init__.py` exports.
+- Added batch tests in `tests/test_treys_evaluator.py`.
+- Updated `PLAN.md` to mark batch evaluation API done.
+
+**Result**
+- ✅ Success
+- Evaluation layer now supports both single-hand and batch-hand typed APIs.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 26 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `34 passed in 0.05s`
+
+**Why it worked / failed**
+- A simple iterable-in, tuple-out API is enough for early solver work and easy to optimize later.
+
+**Follow-ups**
+- Add broader correctness tests against known hand rankings.
+- Add evaluator benchmarks.
+
 ### 2026-06-09 11:10 - Added typed treys evaluator wrapper
 **Goal**
 - Start section 3 hand evaluation layer.
