@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 11:10 - Added typed treys evaluator wrapper
+**Goal**
+- Start section 3 hand evaluation layer.
+- Wrap `treys` behind typed 5-card and 7-card evaluator APIs.
+
+**Work done**
+- Added `src/pokergpu/eval/`.
+- Added `src/pokergpu/eval/treys_evaluator.py` with `TreysHandEvaluator` and `EvaluatedHand`.
+- Added top-level helper functions for 5-card and 7-card evaluation.
+- Added tests in `tests/test_treys_evaluator.py`.
+- Added a mypy override for `treys` in `pyproject.toml`.
+- Updated `PLAN.md` to mark evaluator choice, 5-card evaluation, and 7-card evaluation done.
+
+**Result**
+- ✅ Success
+- Project now has a typed evaluation layer without leaking `treys` into the rest of the codebase.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 26 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `32 passed in 0.05s`
+
+**Why it worked / failed**
+- A thin wrapper gives us stable internal APIs now and leaves room to swap evaluator backends later.
+
+**Follow-ups**
+- Add batch evaluation API.
+- Add broader correctness tests against known hand classes and ordering cases.
+
 ### 2026-06-09 11:06 - Implemented NLHE action legality checks
 **Goal**
 - Finish action legality on top of the betting-rule helpers.

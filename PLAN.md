@@ -36,9 +36,9 @@ How to use:
 
 ## 3. Hand evaluation layer
 
-- [ ] Choose evaluator approach for Python project
-- [ ] Implement 5-card hand evaluation
-- [ ] Implement 7-card hand evaluation
+- [x] Choose evaluator approach for Python project
+- [x] Implement 5-card hand evaluation
+- [x] Implement 7-card hand evaluation
 - [ ] Add batch evaluation API
 - [ ] Add correctness tests against known hand rankings
 - [ ] Add performance benchmark for evaluator
