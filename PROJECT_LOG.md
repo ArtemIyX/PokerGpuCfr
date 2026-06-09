@@ -46,6 +46,33 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:53 - Moved card model into core package
+**Goal**
+- Start using the new subfolder structure for poker-domain code.
+
+**Work done**
+- Added `src/pokergpu/core/`.
+- Moved the card-domain implementation to `src/pokergpu/core/cards.py`.
+- Added `src/pokergpu/core/__init__.py`.
+- Kept `src/pokergpu/cards.py` as a re-export shim for compatibility.
+- Updated tests to import from `pokergpu.core.cards`.
+
+**Result**
+- ✅ Success
+- Future poker-domain modules now have a clear home under `src/pokergpu/core/`.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 15 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `9 passed in 0.02s`
+
+**Why it worked / failed**
+- Moving domain code early avoids a larger refactor once more poker state modules are added.
+
+**Follow-ups**
+- Put board representation in `src/pokergpu/core/board.py`.
+- Put betting state and actions in `src/pokergpu/core/`.
+
 ### 2026-06-09 10:50 - Updated SKILL.md for repo structure and typed Python workflow
 **Goal**
 - Align `SKILL.md` with the real project conventions.

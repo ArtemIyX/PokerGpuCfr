@@ -2,7 +2,7 @@ from random import Random
 
 import pytest
 
-from pokergpu.cards import (
+from pokergpu.core.cards import (
     Card,
     Rank,
     Suit,
