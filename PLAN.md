@@ -28,7 +28,7 @@ How to use:
 - [x] Implement core poker types: cards, suits, ranks
 - [x] Implement deck generation and shuffle utilities
 - [x] Implement hand parsing and formatting
-- [ ] Implement board representation
+- [x] Implement board representation
 - [ ] Implement stack, pot, blind, and bet state types
 - [ ] Implement NLHE betting rules
 - [ ] Implement action legality checks

@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 10:56 - Implemented board representation
+**Goal**
+- Add typed board representation in the new `core` package.
+
+**Work done**
+- Added `src/pokergpu/core/board.py`.
+- Implemented `Street` and immutable `Board`.
+- Added parsing, string formatting, street detection, and validation for legal NLHE board sizes.
+- Added duplicate-card protection.
+- Added tests in `tests/test_board.py`.
+- Updated `src/pokergpu/core/__init__.py` exports.
+- Updated `PLAN.md` to mark board representation done.
+
+**Result**
+- ✅ Success
+- Project now has a strict board model for preflop, flop, turn, and river states.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 16 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `15 passed in 0.02s`
+
+**Why it worked / failed**
+- Keeping board validation at the model boundary prevents illegal states from leaking into later betting and traversal logic.
+
+**Follow-ups**
+- Implement stack, pot, blind, and bet state types.
+- Then add NLHE betting rules and action legality checks.
+
 ### 2026-06-09 10:53 - Moved card model into core package
 **Goal**
 - Start using the new subfolder structure for poker-domain code.
