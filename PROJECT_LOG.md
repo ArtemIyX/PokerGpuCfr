@@ -46,6 +46,35 @@ Rule: Every task ends with a new entry. Keep it short, factual, and actionable.
 
 ## Entries
 
+### 2026-06-09 17:41 - Added `python -m pokergpu kuhn` CLI command
+**Goal**
+- Make the Kuhn CFR output easy to inspect manually without writing one-off Python commands.
+
+**Work done**
+- Updated `src/pokergpu/cli.py`.
+- Added `kuhn` CLI subcommand with optional iteration count argument.
+- Printed:
+  - iteration count
+  - average self-play value for player 0
+  - root betting frequencies for `J`, `Q`, and `K`
+- Added `tests/test_cli.py` to validate the new output shape.
+
+**Result**
+- ✅ Success
+- You can now run `python -m pokergpu kuhn` directly from the repo and inspect convergence values.
+
+**Evidence**
+- `.\\.venv\\Scripts\\python.exe -m ruff check .` -> `All checks passed!`
+- `.\\.venv\\Scripts\\python.exe -m mypy` -> `Success: no issues found in 57 source files`
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` -> `112 passed, 4 skipped in 2.61s`
+
+**Why it worked / failed**
+- The Kuhn training path was already stable, so exposing the key summary values through the existing CLI only needed a thin wrapper.
+
+**Follow-ups**
+- Add Leduc Poker implementation.
+- Optionally add a richer CLI later for printing the full average strategy profile.
+
 ### 2026-06-09 17:34 - Validated Kuhn CFR convergence and added sanity metrics
 **Goal**
 - Validate that the new Kuhn CFR path actually converges.
