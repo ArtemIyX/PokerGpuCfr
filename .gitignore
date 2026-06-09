@@ -1,0 +1,146 @@
+# =========================
+# Python / Bytecode / Cache
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+.cache/
+
+# =========================
+# Virtual Environments
+# =========================
+.venv/
+venv/
+env/
+ENV/
+.conda/
+conda-env/
+pip-wheel-metadata/
+
+# =========================
+# Packaging / Build Artifacts
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-build/
+MANIFEST
+
+# =========================
+# Jupyter / Notebooks
+# =========================
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# =========================
+# Logs / Runtime Artifacts
+# =========================
+*.log
+*.tmp
+*.temp
+*.pid
+*.pid.lock
+*.out
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# Coverage / Reports
+# =========================
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+report.xml
+*.lcov
+
+# =========================
+# Type Checking
+# =========================
+dmypy.json
+pyrightconfig.json
+
+# =========================
+# Local Config / Secrets
+# =========================
+.env
+.env.*
+*.key
+*.pem
+secrets/
+credentials/
+*.sqlite
+*.db
+
+# =========================
+# Data / Outputs / Models
+# (adjust if you want some of these tracked)
+# =========================
+data/
+datasets/
+outputs/
+runs/
+checkpoints/
+models/
+artifacts/
+results/
+wandb/
+mlruns/
+
+# TensorBoard
+tb_logs/
+tfevents.*
+events.out.tfevents.*
+
+# =========================
+# CUDA / Compiled Extensions
+# =========================
+*.so
+*.pyd
+*.dll
+*.dylib
+*.o
+*.a
+*.lib
+*.obj
+*.cuo
+*.ptx
+*.cubin
+*.fatbin
+
+# PyTorch / CUDA build caches
+torch_extensions/
+.cuda_cache/
+nvcc_tmp/
+**/.nv/
+**/.ninja_log
+**/.ninja_deps
+
+# =========================
+# Docs build
+# =========================
+docs/_build/
+
+# =========================
+# Local scratch
+# =========================
+scratch/
+tmp/
+local/
