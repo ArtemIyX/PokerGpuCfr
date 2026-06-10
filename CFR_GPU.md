@@ -67,7 +67,6 @@ The expensive part: repeated tree evaluation + regret updates at huge scale.
 CFR variants by use case:
 - **CFR+ / DCFR**: offline blueprint training, faster practical convergence
 - **MCCFR (outcome / external sampling)**: offline when full traversal is too expensive
-- **DREAM (Deep Regret-based Abstraction and Minimization)**: GPU-native; better than MCCFR for learned-value pipelines; generates training data for the value network simultaneously
 
 ---
 
@@ -104,6 +103,8 @@ True 6-max equilibrium is not computable. Practical approaches:
 - Use **coalition approximation**: treat remaining players as a single agent with aggregated range
 - Solve heads-up subgames exactly; approximate multiway nodes with heuristics or learned values
 - Pluribus used this: blueprint for all streets, real-time re-solving only in critical spots (often 2–3-way)
+
+
 
 ---
 
@@ -169,7 +170,6 @@ Produce a strategy table over the full abstract game. Used directly in low-varia
 |---|---|
 | Fits in VRAM (< 12GB) | Matrix-op CFR+ on GPU (Strategy B below) |
 | Larger, sampling required | MCCFR (external sampling) + GPU batch eval |
-| Learned value function available | DREAM — GPU-native, generates value training data |
 
 ### 5.3 Strategy A — MCCFR + GPU Batch Evaluation
 
@@ -213,18 +213,8 @@ for infoset in all_infosets:  # parallelized
 - Reach/value arrays: `num_nodes * num_buckets * 4 bytes`
 - If this exceeds VRAM, fall back to MCCFR + GPU eval (Strategy A)
 
-### 5.5 DREAM for Offline Training
 
-DREAM (Deep Regret-based Abstraction and Minimization) is GPU-native and preferred when you also want to train a value network:
-
-- Maintains a **reservoir buffer** of (state, regret) samples
-- Trains a neural net to predict regrets from game state features
-- CFR traversal is driven by the learned regret model, not explicit tables
-- Generates value network training data as a byproduct of training
-
-Advantage over MCCFR: no explicit regret table needed (neural approximation); scales better to large state spaces; GPU utilization is higher (training dominates compute).
-
-### 5.6 Offline Training Pipeline
+### 5.5 Offline Training Pipeline
 
 ```
 1. Build abstract game (action + card abstraction)
@@ -240,7 +230,7 @@ Advantage over MCCFR: no explicit regret table needed (neural approximation); sc
 6. Optional: distill blueprint into neural policy (behavior cloning + fine-tuning)
 ```
 
-### 5.7 Parallelism Across CPU and GPU (Offline)
+### 5.6 Parallelism Across CPU and GPU (Offline)
 
 - Use CUDA streams: stream 0 runs current batch, stream 1 prepares next
 - CPU threads handle: sampling new trajectories, pruning, range normalization, scheduling
@@ -361,11 +351,7 @@ Option A (solver rollouts):
 - Record (state, both ranges) → (EV per player) pairs
 - ~10M–100M samples needed for good coverage
 
-Option B (self-play + DREAM):
-- DREAM generates (state, regret) samples during training
-- Simultaneously train a value head on these samples
-
-Option C (bootstrap from blueprint):
+Option B (bootstrap from blueprint):
 - Use blueprint strategy to simulate rollouts forward
 - Cheap but biased toward blueprint quality
 
@@ -414,43 +400,182 @@ Option C (bootstrap from blueprint):
 
 ---
 
-## 10. Implementation Checklist (Pragmatic Progression)
+# 10. Multiway Solving (3+ Active Players)
 
-**Phase 1 — Foundation**
-- [ ] Implement CFR+ on Kuhn poker with dense flat arrays (CPU)
-- [ ] Add RM+ and verify convergence to Nash
-- [ ] Extend to Leduc Hold'em
-- [ ] Measure exploitability per iteration
+True multiway equilibrium (3+ players) is not computationally feasible for 6-max NLHE. The following section describes the practical approximations used in production systems, ordered from simplest to most sophisticated.
 
-**Phase 2 — GPU Integration**
-- [ ] Port regret update pass to GPU (CUDA/JAX/PyTorch)
-- [ ] Add a stub value network (random, for pipeline validation)
-- [ ] Implement CUDA stream overlap
-- [ ] Benchmark: CPU baseline vs GPU version
+---
 
-**Phase 3 — Card Abstraction**
-- [ ] Implement equity histogram computation (Monte Carlo or enumeration)
-- [ ] K-means clustering with EMD distance for postflop buckets
-- [ ] Validate bucket quality (equity preservation check)
-- [ ] Add potential-aware abstraction for draw-heavy boards
+### 10.1 Why Multiway Is Hard
 
-**Phase 4 — HUNL Postflop Solver**
-- [ ] Build depth-limited public tree generator
-- [ ] Implement real-time pipeline (sections 6.4–6.6)
-- [ ] Train first value network on solver rollout data
-- [ ] Benchmark convergence quality vs time budget
+*   **Non-uniqueness:** Nash equilibrium is not unique in 3+ player games. CFR convergence does not guarantee a single useful strategy.
+*   **Joint action space:** Counterfactual values must be computed over the joint distribution of all opponents' actions. The action space grows as O(|A|^n) where n is the number of active players.
+*   **Range interdependence:** Each player's strategy affects all others simultaneously. Ranges cannot be decomposed into independent 2-player matchups.
+*   **Coalition effects:** Multiple opponents can implicitly coordinate (e.g., two players applying pressure to force a fold) even without explicit collusion.
 
-**Phase 5 — Blueprint Generation**
-- [ ] Implement full DCFR or MCCFR offline loop
-- [ ] Add blueprint table serialization / compression
-- [ ] Implement warm-start initialization in runtime solver
-- [ ] Validate: re-solving with warm-start vs cold-start convergence speed
+---
 
-**Phase 6 — 6-max Multiway**
-- [ ] Implement coalition approximation for 4–6 players
-- [ ] Add multiway range propagation
-- [ ] Train value network on multiway states
-- [ ] Benchmark multiway re-solving quality
+### 10.2 Approximation Hierarchy
+
+| Method | Description | Complexity | Use Case |
+|--------|-------------|------------|----------|
+| **A. Sequential 2-Player Subgames** | Pick a focal player; treat all others as a single aggregated opponent. Solve 2-player game; rotate focal player. | Low | Baseline, early implementation |
+| **B. Coalition Approximation** | Group all opponents into a single "team" with combined range and shared objective. Solve hero vs. coalition. | Medium | Production runtime (Pluribus-style) |
+| **C. Full Multiway CFR** | Run CFR on the full multiway tree with joint action regret updates. | Very High | Small abstractions only, research |
+| **D. Learned Multiway Value Function** | Neural network predicts EV for each player given all ranges. Implicitly learns multiway interaction. | High (training) | Modern approach, scales to any player count |
+
+---
+
+### 10.3 Method A: Sequential 2-Player Subgames
+
+**Algorithm:**
+1. At a multiway node with N active players, select a focal player i.
+2. Aggregate all other players' ranges into a single opponent range: R_opponent = normalize(sum_{j != i} R_j).
+3. Solve the 2-player subgame: focal player i vs. R_opponent.
+4. Record the resulting strategy for player i.
+5. Rotate focal player and repeat until all players have a strategy.
+
+**Pros:**
+*   Reuses existing 2-player solver without modification.
+*   Simple to implement and debug.
+
+**Cons:**
+*   Ignores coordination between opponents.
+*   Can produce incoherent strategies (e.g., two players both overfolding because each assumes the other will apply pressure).
+*   No equilibrium properties; strategies may be mutually inconsistent.
+
+**When to use:**
+*   Prototype phase.
+*   Nodes with 4+ players where any approximation is acceptable.
+
+---
+
+### 10.4 Method B: Coalition Approximation (Recommended for Runtime)
+
+**Algorithm:**
+1. Group all opponents into a single coalition agent.
+2. The coalition's range is the union (or weighted sum) of individual opponent ranges.
+3. The coalition's objective is to maximize the total EV of its members, or equivalently, minimize the hero's EV.
+4. Solve the 2-player game: hero vs. coalition.
+5. Map the coalition's strategy back to individual players proportionally to their range weights.
+
+**Implementation details:**
+*   **Range aggregation:** R_coalition[b] = sum_{j != hero} R_j[b] for each bucket b. Normalize so that sum(R_coalition) = 1.
+*   **Action mapping:** If the coalition strategy specifies action a with probability p, each opponent j plays action a with probability p * (R_j[b] / R_coalition[b]) at bucket b.
+*   **Payoff:** Hero's EV is computed against the coalition's joint strategy. Coalition EV is the sum of individual EVs.
+
+**Pros:**
+*   Better than sequential subgames; captures some multiway pressure.
+*   Compatible with blueprint warm-start (coalition strategy initialized from blueprint aggregate).
+*   Fast enough for real-time re-solving.
+
+**Cons:**
+*   Coalition can over-represent threat (e.g., 3 opponents each with 30% equity do not combine to 90% threat).
+*   Individual opponent strategies may not be best responses to each other.
+*   Not a true equilibrium; exploitable in theory.
+
+**When to use:**
+*   Default for 3-way and 4-way nodes in runtime re-solving.
+*   When combined with a learned value function for leaf evaluation.
+
+---
+
+### 10.5 Method C: Full Multiway CFR
+
+**Algorithm:**
+1. Build the full public tree for all active players.
+2. At each player node, compute counterfactual values over the joint distribution of all opponents' strategies.
+3. Update regrets using the joint counterfactual values.
+4. Apply regret matching to derive new strategies.
+
+**Regret update formula (3-player example):**
+*   For player 1 at infoset I with actions a:
+    *   v_1(I, a) = sum_{a2, a3} [ sigma_2(I2, a2) * sigma_3(I3, a3) * u_1(z) * pi_{-1}(h) ]
+    *   where pi_{-1}(h) is the product of all opponents' reach probabilities to reach terminal node z.
+*   Instant regret: r_1(I, a) = v_1(I, a) - sum_b [ sigma_1(I, b) * v_1(I, b) ]
+
+**Pros:**
+*   Theoretically sound approximation of Nash equilibrium.
+*   Strategies are mutually consistent.
+
+**Cons:**
+*   Joint action space is intractable for 6-max NLHE (even with abstraction).
+*   Convergence is orders of magnitude slower than 2-player CFR.
+*   Memory requirements scale with the product of opponent infosets.
+
+**When to use:**
+*   Research on toy games (Kuhn poker 3-player, small Leduc).
+*   Not recommended for 6-max NLHE production.
+
+---
+
+### 10.6 Method D: Learned Multiway Value Function (Modern)
+
+**Architecture:**
+*   **Input:** Public state (board, pot, stacks, street, action history) + range vectors for all N active players.
+*   **Output:** EV for each active player, or advantage A[player, bucket].
+*   **Network:** MLP with 4-8 layers, residual connections, LayerNorm. Input dimension scales linearly with player count.
+
+**Training data generation:**
+*   **Option 1 (Solver rollouts):** Run multiway CFR (Method C) on small abstractions to convergence. Record (state, all ranges) -> (EV per player) pairs. Expensive but accurate.
+*   **Option 2 (Self-play + DREAM):** DREAM generates (state, regret) samples during training. Train a value head simultaneously on multiway states.
+*   **Option 3 (Bootstrap from coalition):** Use coalition approximation (Method B) to generate rollouts. Cheap but biased toward coalition quality.
+
+**Pros:**
+*   Scales to any number of players (2-6) with the same network.
+*   Fast at runtime: single forward pass per leaf node.
+*   Implicitly learns complex multiway interactions (squeeze play, implied odds from multiple callers, etc.).
+
+**Cons:**
+*   Requires massive training data (10M-100M+ multiway states).
+*   Must generalize across player counts, stack depths, and board textures.
+*   Quality depends on data distribution; rare multiway spots may be poorly estimated.
+
+**When to use:**
+*   Primary method for leaf evaluation in runtime re-solving.
+*   Combined with coalition approximation (Method B) for the CFR layer.
+
+---
+
+### 10.7 Runtime Decision Logic
+
+```
+game state arrives with N active players
+    |
+    v
+if N == 2:
+    |   exact 2-player re-solve (standard CFR/CFR+/DCFR/MCFR)
+    v
+elif N == 3:
+    |   coalition approximation (Method B)
+    |   value network evaluates leaves (Method D)
+    v
+elif N >= 4:
+    |   heuristic pre-filter (fold if range is weak, call if strong)
+    |   coalition approximation for remaining players
+    |   value network evaluates leaves
+    v
+return action distribution at root infoset
+```
+
+---
+
+### 10.8 Validation Checks
+
+Any multiway approximation must be checked for pathologies:
+
+*   **Range coherence:** After solving, verify that no two players both hold the same strong hand with high probability. Sum of bucket probabilities across players should not exceed 1 for any single hand.
+*   **Monotonicity:** Adding an opponent should never increase hero's EV. If EV increases, the approximation is inconsistent.
+*   **Exploitability sampling:** Play the strategy against a best-response opponent. If exploitability exceeds 0.5 * pot size, the approximation has failed.
+*   **Strategy consistency:** In coalition approximation, verify that mapped individual strategies are not dominated (e.g., folding a hand that is clearly the nuts).
+
+---
+
+
+### 10.10 Key Insight
+
+Pluribus and other winning 6-max agents do not solve true multiway equilibrium. They solve 2-player and 3-player subgames with approximations, and rely on a strong value network to paper over the gaps. The goal is not optimality; it is to be unexploitable enough that opponents cannot systematically deviate for profit. Coalition approximation + learned value function achieves this at production scale.
+
 
 ---
 
