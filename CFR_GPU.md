@@ -594,7 +594,128 @@ Keep total under 14GB to leave headroom for driver/kernel overhead. If reach/val
 
 ---
 
-## 12. Full Pseudocode
+## 12. Preflop Solvability: HU, 3-Way, 6-Max
+
+This section describes the computational boundaries of solving preflop scenarios in No-Limit Hold'em, ordered by player count. No method described here relies on learned regret models or neural regret approximation.
+
+---
+
+### 12.1 Heads-Up Preflop (2 Players)
+
+**Status:** Solvable with standard abstraction.
+
+**Hand space:** 1,326 distinct starting hands. Reduced to 169 canonical hands via suit isomorphism (e.g., all AKs combinations are equivalent preflop; suits only matter for flush/blocker potential, which is symmetric preflop).
+
+**Tree size:** Approximately 10^6 to 10^7 information sets with the abstraction above. Fits comfortably in GPU memory (under 4GB for regret tables).
+
+**Method:** CFR+ or DCFR on the abstracted tree. Converges in hours on a modern GPU (RTX 4080/5080 class).
+
+**Output:** Near-Nash equilibrium strategy for the abstracted game. Exploitability typically under 0.5% of the pot against a best response in the same abstraction.
+
+**Commercial availability:** Yes. PioSOLVER, GTO+, and similar tools solve HU preflop exactly within their abstractions.
+
+---
+
+### 12.2 Three-Way Preflop (3 Players)
+
+**Status:** Marginally solvable with heavy abstraction.
+
+**Hand space:** 1,326 hands per player. Joint hand combinations: 1,326^3 ≈ 2.3 × 10^9. Even with 169 canonical buckets per player, joint bucket combinations are 169^3 ≈ 4.8 × 10^6.
+
+**Action space problem:** Each player acts in sequence with full knowledge of previous actions. A single orbit with 5 actions each creates 5^3 = 125 branches. Multiple orbits (limp, raise, call, 3-bet, call, 4-bet) multiply this further.
+
+**Tree size:** 10^9 to 10^10 information sets with moderate abstraction. Exceeds single-GPU memory. Requires aggressive abstraction to fit.
+
+**Required abstractions:**
+*   **Card:** 169 canonical hands, possibly further reduced to 50-100 buckets by grouping similar hands (e.g., all broadways, all suited connectors).
+*   **Action:** Severely restricted set. Example: {fold, call, raise 3bb, all-in}. No intermediate sizing.
+
+**Method:** MCCFR with external sampling. CPU traverses sampled paths; GPU evaluates leaf nodes in batches. Alternatively, explicit CFR+ on a heavily pruned tree.
+
+**Convergence:** Days to weeks on high-end hardware. Exploitability is higher than HU (2-5% of pot) due to abstraction coarseness.
+
+**Commercial availability:** Limited. Some research solvers exist; no mainstream consumer tool solves 3-way preflop to high precision.
+
+---
+
+### 12.3 Six-Max Preflop (6 Players)
+
+**Status:** Not solvable without abstraction. Full game is intractable.
+
+**Hand space:** 1,326 hands per player × 6 players. Joint hand combinations: 1,326^6 ≈ 5.2 × 10^18. Even with 169 canonical buckets: 169^6 ≈ 2.4 × 10^13 joint bucket states.
+
+**Action space problem:** 6 players act in sequence. Early position faces 5 unknown opponents. Each orbit multiplies branches by 5^6 = 15,625 for a single action per player. Multiple betting rounds (limp, raise, 3-bet, 4-bet, 5-bet, all-in) compound this.
+
+**Information set count:** Estimated 10^15 to 10^18 for the full game. Even with aggressive abstraction, 10^12 to 10^14.
+
+**Memory requirement for explicit regret tables:**
+*   10^12 infosets × 5 actions × 4 bytes = 20 TB.
+*   Far beyond any existing GPU or CPU memory system.
+
+**What is actually done:**
+*   **Blueprint construction:** Solve an abstracted game offline using MCCFR or DCFR. The abstraction includes:
+    *   169 canonical preflop hands (no further reduction, but suit isomorphism applied).
+    *   Severe action abstraction: {fold, call, raise 3bb, all-in} or similar.
+    *   Early position solved with reduced opponent models (e.g., assume late position plays a fixed strategy).
+*   **Nested subgame solving:** At runtime, when the hand reaches a specific state (e.g., UTG raises, MP calls, hero in BB), build a smaller subgame with only the active players and solve it in real-time.
+*   **Heuristic preflop charts:** Many systems use pre-computed charts (e.g., GTO charts for open-raising, 3-betting, calling) derived from smaller solved games, not from a full 6-max solve.
+
+**Pluribus approach:**
+*   Blueprint trained with MCCFR on an abstracted 6-max game.
+*   Action abstraction: small discrete set per node.
+*   Card abstraction: 169 canonical hands preflop; no postflop bucketing in the blueprint (postflop handled by real-time solving).
+*   The blueprint is not a full equilibrium. It is a coarse approximation used to warm-start real-time solving.
+
+**Commercial availability:** No consumer tool claims to solve full 6-max preflop. All "GTO" 6-max charts are abstractions, approximations, or interpolations from smaller solved games.
+
+---
+
+### 12.4 Summary Table
+
+| Scenario | Players | Joint Hand Combos | Solvable? | Method | Time | Exploitability |
+|----------|---------|-------------------|-----------|--------|------|----------------|
+| HU preflop | 2 | 1.7 × 10^6 | Yes | CFR+ / DCFR | Hours | < 0.5% pot |
+| 3-way preflop | 3 | 2.3 × 10^9 | Barely | MCCFR + heavy abstraction | Days-weeks | 2-5% pot |
+| 6-max preflop | 6 | 5.2 × 10^18 | Possible | Blueprint + nested subgames | N/A (offline weeks) | Unknown, high |
+
+
+We don't solve 6max preflop. We approximate it.
+6-max preflop has no exact solution. The blueprint is a coarse, sampled approximation. It is good enough to avoid major leaks and warm-start postflop play, but it is not Nash equilibrium.
+
+**Build a blueprint offline:**
+- 169 canonical hands per player (suit isomorphism).
+- Severe action abstraction: {fold, call, raise 3bb, all-in}.
+- MCCFR with external sampling. Traverse a tiny fraction of the tree, accumulate regrets.
+- Accept that 99.9% of nodes are never visited.
+
+**Store only what fits:**
+- Regret table: compress, quantize, prune low-reach nodes.
+- Blueprint is ~1-10GB, not 20TB. It covers common spots; rare spots use fallback heuristics.
+
+**Use it at runtime:**
+- Load blueprint for the current preflop spot (position, action history).
+- If the spot is in the blueprint, play the stored strategy.
+- If not, fall back to real-time coalition approximation or heuristic charts.
+
+**Real-time re-solving is not used preflop**
+- Too many nodes, ranges too wide.
+- Re-solving is for postflop subgames where the tree is smaller.
+
+---
+
+### 12.5 Key Insight
+
+The jump from 2 to 3 players is manageable with abstraction. The jump from 3 to 6 players is a wall. No existing system solves 6-max preflop exactly. All production systems use:
+
+1.  A coarse offline blueprint (abstracted game, approximate equilibrium).
+2.  Real-time subgame re-solving at decision points (smaller, tractable games).
+3.  Heuristic charts for common spots (derived from smaller solves or expert tuning).
+
+The blueprint does not need to be perfect. It needs to be good enough to warm-start real-time solving and avoid catastrophic errors.
+
+---
+
+## 13. Full Pseudocode
 
 ### Offline (Matrix-Op CFR+)
 
@@ -664,7 +785,7 @@ def resolve(game_state, blueprint, vnet, time_budget):
 
 ---
 
-## 13. Key Papers to Read
+## 14. Key Papers to Read
 
 - **Libratus** (Brown & Sandholm 2017): blueprint + real-time re-solving architecture for heads-up
 - **Pluribus** (Brown & Sandholm 2019): multiway 6-max; nested subgame solving; blueprint via MCCFR
