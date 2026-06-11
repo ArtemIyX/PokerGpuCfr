@@ -111,11 +111,11 @@ How to use:
 
 ## 11. Depth-limited solving
 
-- [ ] Define depth limit policy
-- [ ] Mark frontier nodes for leaf evaluation
-- [ ] Add configurable node-count cap
-- [ ] Add configurable reach-probability pruning
-- [ ] Add tests for frontier correctness
+- [x] Define depth limit policy
+- [x] Mark frontier nodes for leaf evaluation
+- [x] Add configurable node-count cap
+- [x] Add configurable reach-probability pruning
+- [x] Add tests for frontier correctness
 
 ## 12. Leaf evaluation interface
 

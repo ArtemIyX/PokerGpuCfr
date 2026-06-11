@@ -11,6 +11,7 @@ def test_public_tree_exposes_child_ranges() -> None:
             NodeType.TERMINAL,
             NodeType.LEAF,
         ),
+        is_frontier=(False, True, False),
         first_child=(0, 2, 2),
         child_count=(2, 0, 0),
         children=(
@@ -32,6 +33,7 @@ def test_public_tree_validates_chance_probabilities() -> None:
     with pytest.raises(ValueError):
         PublicTree(
             node_types=(NodeType.CHANCE, NodeType.TERMINAL, NodeType.TERMINAL),
+            is_frontier=(False, True, True),
             first_child=(0, 2, 2),
             child_count=(2, 0, 0),
             children=(
@@ -47,6 +49,7 @@ def test_public_tree_rejects_missing_infoset_on_player_node() -> None:
     with pytest.raises(ValueError):
         PublicTree(
             node_types=(NodeType.PLAYER0,),
+            is_frontier=(False,),
             first_child=(0,),
             child_count=(0,),
             children=(),
@@ -59,6 +62,7 @@ def test_public_tree_rejects_payoff_on_non_terminal_node() -> None:
     with pytest.raises(ValueError):
         PublicTree(
             node_types=(NodeType.LEAF,),
+            is_frontier=(True,),
             first_child=(0,),
             child_count=(0,),
             children=(),

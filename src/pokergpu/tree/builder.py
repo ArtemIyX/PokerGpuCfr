@@ -23,6 +23,7 @@ class BuiltPublicTree:
 class TreeBuildConfig:
     max_depth: int = 1
     max_nodes: int = 256
+    min_reach_prob: float = 0.0
 
 
 def build_shallow_public_tree(
@@ -49,6 +50,9 @@ def build_public_tree(
     node_types: list[NodeType] = [
         _node_type_for_state(state, depth=0, max_depth=build_config.max_depth)
     ]
+    is_frontier: list[bool] = [
+        _is_frontier_node(state, depth=0, max_depth=build_config.max_depth)
+    ]
     first_child: list[int] = [0]
     child_count: list[int] = [0]
     infoset_ids: list[InfosetId | None] = [
@@ -67,6 +71,8 @@ def build_public_tree(
         node_type = node_types[node_index]
 
         if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+            continue
+        if is_frontier[node_index]:
             continue
 
         legal_actions = abstraction_impl.legal_actions(node_state)
@@ -89,8 +95,14 @@ def build_public_tree(
                 depth=next_depth,
                 max_depth=build_config.max_depth,
             )
+            child_is_frontier = _is_frontier_node(
+                child_state,
+                depth=next_depth,
+                max_depth=build_config.max_depth,
+            )
             added_children += 1
             node_types.append(child_type)
+            is_frontier.append(child_is_frontier)
             first_child.append(0)
             child_count.append(0)
             infoset_ids.append(
@@ -98,13 +110,15 @@ def build_public_tree(
             )
             terminal_payoffs.append(_terminal_payoff_for_state(child_state))
 
-            if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
+            if (child_type not in {NodeType.LEAF, NodeType.TERMINAL}
+                and not child_is_frontier):
                 queue.append((child_node_index, next_depth))
 
         child_count[node_index] = added_children
 
     tree = PublicTree(
         node_types=tuple(node_types),
+        is_frontier=tuple(is_frontier),
         first_child=tuple(first_child),
         child_count=tuple(child_count),
         children=tuple(children),
@@ -124,6 +138,14 @@ def _node_type_for_state(state: GameState, *, depth: int, max_depth: int) -> Nod
     if depth >= max_depth or state.phase is HandPhase.SHOWDOWN:
         return NodeType.LEAF
     return NodeType.PLAYER0 if state.betting_round.to_act == 0 else NodeType.PLAYER1
+
+
+def _is_frontier_node(state: GameState, *, depth: int, max_depth: int) -> bool:
+    return (
+        state.phase is HandPhase.TERMINAL
+        or depth >= max_depth
+        or state.phase is HandPhase.SHOWDOWN
+    )
 
 
 def _infoset_id_for_state(

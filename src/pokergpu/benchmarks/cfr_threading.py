@@ -1,27 +1,21 @@
-"""Parallel CFR benchmark utilities for testing single vs multi-thread performance."""
+
 
 from __future__ import annotations
-
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor
-from time import perf_counter
-
-import numpy as np
-from numpy.typing import NDArray
 
 from pokergpu.cfr.infosets import InfosetStore
 from pokergpu.cfr.iteration import CFRVariant, DCFRConfig, run_cfr_iteration
 from pokergpu.cfr.kuhn import (
     expected_action_utilities as kuhn_expected_action_utilities,
-    kuhn_infoset_indices_for_player,
+)
+from pokergpu.cfr.kuhn import (
     new_kuhn_infoset_store,
 )
 from pokergpu.cfr.leduc import (
     expected_action_utilities_leduc,
-    leduc_infoset_indices_for_player,
     new_leduc_infoset_store,
 )
 
+"""Parallel CFR benchmark utilities for testing single vs multi-thread performance."""
 
 def _train_kuhn_parallel(
     iter_range: tuple[int, int],

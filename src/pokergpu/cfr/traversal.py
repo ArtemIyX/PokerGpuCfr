@@ -42,6 +42,7 @@ def compute_reach_probabilities(
     *,
     root_player0_reach: float = 1.0,
     root_player1_reach: float = 1.0,
+    min_reach_prob: float = 0.0,
 ) -> ForwardPassResult:
     player0_reach = np.zeros(tree.node_count, dtype=np.float32)
     player1_reach = np.zeros(tree.node_count, dtype=np.float32)
@@ -50,8 +51,13 @@ def compute_reach_probabilities(
 
     for node_index in range(tree.node_count):
         node_type = tree.node_types[node_index]
-        if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+        if (node_type in {NodeType.LEAF, NodeType.TERMINAL} 
+            or tree.is_frontier[node_index]):
             continue
+        if min_reach_prob > 0.0:
+            reach_sum = float(player0_reach[node_index] + player1_reach[node_index])
+            if reach_sum < min_reach_prob:
+                continue
 
         links = tree.child_links(NodeId(node_index))
         if node_type is NodeType.CHANCE:
@@ -88,6 +94,7 @@ def compute_reach_probabilities_parallel(
     *,
     root_player0_reach: float = 1.0,
     root_player1_reach: float = 1.0,
+    min_reach_prob: float = 0.0,
     max_workers: int = 1,
 ) -> ForwardPassResult:
     if max_workers <= 0:
@@ -98,6 +105,7 @@ def compute_reach_probabilities_parallel(
             store,
             root_player0_reach=root_player0_reach,
             root_player1_reach=root_player1_reach,
+            min_reach_prob=min_reach_prob,
         )
 
     levels = build_tree_levels(tree)
@@ -169,7 +177,7 @@ def compute_counterfactual_values(
             node_values_player0[node_index] = terminal_p0[node_index]
             node_values_player1[node_index] = -terminal_p0[node_index]
             continue
-        if node_type is NodeType.LEAF:
+        if node_type is NodeType.LEAF or tree.is_frontier[node_index]:
             node_values_player0[node_index] = leaf_p0[node_index]
             node_values_player1[node_index] = leaf_p1[node_index]
             continue
@@ -601,7 +609,7 @@ def _backward_node_update(
     if node_type is NodeType.TERMINAL:
         value_p0 = terminal_p0[node_index]
         return node_index, value_p0, np.float32(-value_p0), None, None
-    if node_type is NodeType.LEAF:
+    if node_type is NodeType.LEAF or tree.is_frontier[node_index]:
         return node_index, leaf_p0[node_index], leaf_p1[node_index], None, None
 
     links = tree.child_links(NodeId(node_index))

@@ -22,6 +22,7 @@ from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 def test_forward_pass_propagates_player_strategy_reach() -> None:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
         first_child=(0, 2, 2),
         child_count=(2, 0, 0),
         children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
@@ -42,6 +43,7 @@ def test_forward_pass_propagates_player_strategy_reach() -> None:
 def test_backward_pass_computes_expected_node_values() -> None:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
         first_child=(0, 2, 2),
         child_count=(2, 0, 0),
         children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
@@ -69,6 +71,7 @@ def test_backward_pass_computes_expected_node_values() -> None:
 def test_regret_update_is_separated_from_backward_pass() -> None:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
         first_child=(0, 2, 2),
         child_count=(2, 0, 0),
         children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
@@ -97,6 +100,7 @@ def test_regret_update_is_separated_from_backward_pass() -> None:
 def test_chance_nodes_are_handled_in_forward_and_backward_passes() -> None:
     tree = PublicTree(
         node_types=(NodeType.CHANCE, NodeType.TERMINAL, NodeType.TERMINAL),
+        is_frontier=(False, True, True),
         first_child=(0, 2, 2),
         child_count=(2, 0, 0),
         children=(
@@ -119,6 +123,26 @@ def test_chance_nodes_are_handled_in_forward_and_backward_passes() -> None:
     assert math.isclose(float(backward.node_values_player0[0]), -1.0, abs_tol=1e-6)
 
 
+def test_frontier_nodes_use_leaf_values_in_backward_pass() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER1, NodeType.LEAF),
+        is_frontier=(False, True, True),
+        first_child=(0, 1, 2),
+        child_count=(1, 1, 0),
+        children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
+        infoset_ids=(InfosetId(0), InfosetId(1), None),
+        terminal_payoffs=(None, None, None),
+    )
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([1, 1]))
+    backward = compute_counterfactual_values(
+        tree,
+        store,
+        leaf_values_player0=np.array([0.0, 5.0, 7.0], dtype=np.float32),
+    )
+
+    assert math.isclose(float(backward.node_values_player0[1]), 5.0, abs_tol=1e-6)
+
+
 def test_parallel_infoset_updates_match_serial_updates() -> None:
     tree = PublicTree(
         node_types=(
@@ -128,6 +152,7 @@ def test_parallel_infoset_updates_match_serial_updates() -> None:
             NodeType.LEAF,
             NodeType.LEAF,
         ),
+        is_frontier=(False, True, False, True, True),
         first_child=(0, 4, 2, 4, 4),
         child_count=(2, 0, 2, 0, 0),
         children=(
@@ -177,6 +202,7 @@ def test_tree_levels_group_nodes_by_depth() -> None:
             NodeType.LEAF,
             NodeType.LEAF,
         ),
+        is_frontier=(False, True, False, True, True),
         first_child=(0, 4, 2, 4, 4),
         child_count=(2, 0, 2, 0, 0),
         children=(
@@ -204,6 +230,7 @@ def test_parallel_forward_and_backward_match_serial() -> None:
             NodeType.LEAF,
             NodeType.LEAF,
         ),
+        is_frontier=(False, True, False, True, True),
         first_child=(0, 4, 2, 4, 4),
         child_count=(2, 0, 2, 0, 0),
         children=(

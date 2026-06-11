@@ -27,6 +27,7 @@ class ChildLink:
 @dataclass(slots=True, frozen=True)
 class PublicTree:
     node_types: tuple[NodeType, ...]
+    is_frontier: tuple[bool, ...]
     first_child: tuple[int, ...]
     child_count: tuple[int, ...]
     children: tuple[ChildLink, ...]
@@ -36,6 +37,7 @@ class PublicTree:
     def __post_init__(self) -> None:
         node_count = len(self.node_types)
         aligned_lengths = (
+            len(self.is_frontier),
             len(self.first_child),
             len(self.child_count),
             len(self.infoset_ids),
@@ -49,6 +51,7 @@ class PublicTree:
             start = self.first_child[node_index]
             count = self.child_count[node_index]
             end = start + count
+            frontier = self.is_frontier[node_index]
 
             if start < 0 or count < 0 or end > len(self.children):
                 raise ValueError("child ranges must stay within children array bounds")
@@ -74,6 +77,8 @@ class PublicTree:
 
             if node_type in {NodeType.LEAF, NodeType.TERMINAL} and count != 0:
                 raise ValueError("leaf and terminal nodes cannot have children")
+            if frontier and node_type is NodeType.TERMINAL and count != 0:
+                raise ValueError("frontier terminal nodes cannot have children")
 
             child_slice = self.children[start:end]
             if node_type is NodeType.CHANCE:

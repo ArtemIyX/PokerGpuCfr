@@ -30,7 +30,10 @@ from pokergpu.cfr.leduc import (
 # Helpers for multiprocessing - returns InfosetStore-compatible objects
 # =============================================================================
 
-def _run_kuhn_chunk(args: tuple[int, int, CFRVariant, DCFRConfig | None]) -> InfosetStore:  # noqa: F811
+def _run_kuhn_chunk(
+    args: tuple[int, int, CFRVariant, DCFRConfig | None],
+) -> InfosetStore:
+    # noqa: F811
     """Run Kuhn CFR iterations in worker process."""
     iter_start, iter_end, _, dcfr_config = args
     store = new_kuhn_infoset_store()
@@ -58,7 +61,8 @@ def _run_kuhn_chunk(args: tuple[int, int, CFRVariant, DCFRConfig | None]) -> Inf
     return store
 
 
-def _run_leduc_chunk(args: tuple[int, int, CFRVariant, DCFRConfig | None]) -> InfosetStore:  # noqa: F811
+def _run_leduc_chunk(args: 
+    tuple[int, int, CFRVariant, DCFRConfig | None]) -> InfosetStore:  # noqa: F811
     """Run Leduc CFR iterations in worker process."""
     iter_start, iter_end, _, dcfr_config = args
     store = new_leduc_infoset_store()
@@ -90,7 +94,8 @@ def _run_leduc_chunk(args: tuple[int, int, CFRVariant, DCFRConfig | None]) -> In
 # Helper functions for single-thread baseline training
 # =============================================================================
 
-def train_kuhn_cfr(iterations: int, variant: CFRVariant = CFRVariant.CFR_PLUS) -> InfosetStore:  # noqa: F811
+def train_kuhn_cfr(iterations: int, 
+                   variant: CFRVariant = CFRVariant.CFR_PLUS) -> InfosetStore:  # noqa: F811
     """Run Kuhn CFR training."""
     store = new_kuhn_infoset_store()
 
@@ -117,7 +122,8 @@ def train_kuhn_cfr(iterations: int, variant: CFRVariant = CFRVariant.CFR_PLUS) -
     return store
 
 
-def train_leduc_cfr(iterations: int, variant: CFRVariant = CFRVariant.CFR_PLUS) -> InfosetStore:  # noqa: F811
+def train_leduc_cfr(iterations: int, 
+                    variant: CFRVariant = CFRVariant.CFR_PLUS) -> InfosetStore:  # noqa: F811
     """Run Leduc CFR training."""
     store = new_leduc_infoset_store()
 
@@ -245,7 +251,8 @@ def test_leduc_single_vs_multi_thread() -> None:
     _ = train_leduc_cfr(iterations=iterations, variant=CFRVariant.CFR_PLUS)
     elapsed_st: float = perf_counter() - start
 
-    # Multi-thread using ProcessPoolExecutor - need full tuple including CFRVariant.DCFRConfig
+    # Multi-thread using ProcessPoolExecutor - 
+    # need full tuple including CFRVariant.DCFRConfig
     chunks: list[tuple[int, int, CFRVariant, DCFRConfig | None]] = [
         (i * 5, i * 5 + 5, CFRVariant.CFR_PLUS, None)
         for i in range(iterations // 5)
@@ -274,7 +281,8 @@ def test_leduc_dcfr_single_vs_multi_thread() -> None:
     _ = train_leduc_cfr(iterations=iterations, variant=CFRVariant.CFR_PLUS)
     elapsed_st: float = perf_counter() - start
 
-    # Multi-thread using ProcessPoolExecutor - need full tuple including CFRVariant.DCFRConfig
+    # Multi-thread using ProcessPoolExecutor -
+    # need full tuple including CFRVariant.DCFRConfig
     chunks: list[tuple[int, int, CFRVariant, DCFRConfig | None]] = [
         (i * 7, i * 7 + 7, CFRVariant.CFR_PLUS, None)
         for i in range(iterations // 7)
