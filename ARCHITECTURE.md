@@ -47,6 +47,16 @@ Handles batched leaf-value evaluation for frontier nodes.
 *   **`async_exec.py`**: Async-ready wrapper for overlapped batch execution.
 *   **`benchmark.py`**: Measures leaf batch throughput.
 
+### `src/pokergpu/runtime/` (Runtime Reuse and Warm Start)
+Provides reusable runtime solve state for repeated spots.
+*   **`cache.py`**: Stable public-state keys, LRU cache containers, cached tree/leaf/warm-start data, and benchmark result structs.
+*   **`caching.py`**: Higher-level cache helpers, regret blending, benchmark builder, and leaf key helpers.
+*   **`postflop.py`**: Runtime postflop re-solving entry point.
+
+### `src/pokergpu/benchmarks/` (Performance Checks)
+Contains standalone benchmark entrypoints.
+*   **`caching_warm_start.py`**: Deterministic cache and warm-start benchmark with printed output.
+
 ## 🔄 Data Flow: Solver Lifecycle
 The typical solve process follows this flow:
 
@@ -57,7 +67,12 @@ The typical solve process follows this flow:
     *   `tree/builder.py` frontier flags to mark nodes that need evaluation.
     *   `eval/` batch builders and evaluator backends.
     *   CPU or CUDA execution depending on device selection.
-5.  **Backpropagation & Update:** The calculated values are back-propagated up the tree to update regrets and average strategies, following standard CFR algorithms implemented in `cli.py` (via functions like `train_kuhn_cfr`).
+5.  **Cache Lookup and Warm Start:** Before building or solving, the runtime checks `runtime/cache.py` and `runtime/caching.py` for:
+    *   public-state key hits
+    *   subtree structure reuse
+    *   reusable leaf results
+    *   regret warm-start state
+6.  **Backpropagation & Update:** The calculated values are back-propagated up the tree to update regrets and average strategies, following standard CFR algorithms implemented in `cli.py` and runtime re-solving code.
 
 ## ✨ Novice Getting Started Guide
 
@@ -87,6 +102,12 @@ To run a basic performance benchmark of the current solver iteration:
 python src/pokergpu/cli.py benchmark
 # Output format example: benchmark=noop iterations=1000 seconds=X.XXXXXX per_iter=Y.YYYYYY
 ```
+
+For caching and warm-start reuse:
+```bash
+python -m pokergpu.benchmark_caching
+```
+This prints cache hit/miss counts, cold vs warm timing, and a benchmark summary row.
 
 For leaf-evaluation comparisons:
 ```bash
