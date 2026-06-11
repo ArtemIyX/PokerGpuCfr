@@ -64,17 +64,17 @@ How to use:
 
 ## 7. Implement full CFR traversal
 
-- [ ] Traverse the public tree forward and backward
-- [ ] Compute counterfactual values for each infoset
-- [ ] Update regrets and average strategy
-- [ ] Add CFR+ and DCFR support
+- [x] Traverse the public tree forward and backward
+- [x] Compute counterfactual values for each infoset
+- [x] Update regrets and average strategy
+- [x] Add CFR+ and DCFR support
 
 ## 8. Validate on toy games
 
-- [ ] Run Kuhn end to end
-- [ ] Run Leduc end to end
-- [ ] Compare strategies and values against expected baselines
-- [ ] Fix convergence and stability issues
+- [x] Run Kuhn end to end
+- [x] Run Leduc end to end
+- [x] Compare strategies and values against expected baselines
+- [x] Fix convergence and stability issues
 
 ## 9. Add heads-up postflop re-solving
 
