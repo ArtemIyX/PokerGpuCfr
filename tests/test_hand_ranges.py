@@ -3,14 +3,19 @@ import math
 import pytest
 
 from pokergpu.abstraction import (
+    PlayerRangeVectors,
     PrivateHand,
     RangeVector,
     all_private_hands,
+    apply_dead_cards,
+    masked_range_vector,
+    normalize_range_vector,
     private_hand_count,
     private_hand_from_index,
     private_hand_index,
     private_hand_mask,
 )
+from pokergpu.core.board import Board
 from pokergpu.core.cards import card_from_str
 
 
@@ -93,6 +98,101 @@ def test_masked_range_zeros_blocked_combos() -> None:
 
     assert math.isclose(float(masked.values[blocked_index]), 0.0)
     assert math.isclose(float(masked.values[live_index]), 5.0)
+
+
+def test_masked_range_normalizes_after_board_cards() -> None:
+    values = [0.0] * private_hand_count()
+    live_index = int(private_hand_index(card_from_str("Qc"), card_from_str("Js")))
+    values[live_index] = 7.0
+
+    masked = RangeVector.from_values(values).normalized_masked([card_from_str("Ah")])
+
+    assert math.isclose(masked.total_weight(), 1.0, abs_tol=1e-6)
+    assert math.isclose(float(masked.values[live_index]), 1.0, abs_tol=1e-6)
+
+
+def test_player_range_vectors_apply_dead_cards_to_each_player() -> None:
+    values0 = [0.0] * private_hand_count()
+    values1 = [0.0] * private_hand_count()
+    index0 = int(private_hand_index(card_from_str("Ah"), card_from_str("Kd")))
+    index1 = int(private_hand_index(card_from_str("Qc"), card_from_str("Js")))
+    values0[index0] = 2.0
+    values1[index1] = 3.0
+    player_ranges = PlayerRangeVectors.from_values(
+        (
+            RangeVector.from_values(values0),
+            RangeVector.from_values(values1),
+        )
+    )
+
+    masked = player_ranges.masked([card_from_str("Ah")])
+
+    assert math.isclose(float(masked.values[0].values[index0]), 0.0)
+    assert math.isclose(float(masked.values[1].values[index1]), 3.0)
+
+
+def test_player_range_vectors_normalize_after_masking() -> None:
+    values = [0.0] * private_hand_count()
+    live_index = int(private_hand_index(card_from_str("Qc"), card_from_str("Js")))
+    values[live_index] = 5.0
+    player_ranges = PlayerRangeVectors.from_values(
+        (RangeVector.from_values(values), RangeVector.from_values(values))
+    )
+
+    normalized = player_ranges.normalized_masked([card_from_str("Ah")])
+
+    assert all(
+        math.isclose(weight, 1.0, abs_tol=1e-6)
+        for weight in normalized.total_weights()
+    )
+
+
+def test_normalize_range_vector_helper_matches_method() -> None:
+    values = [0.0] * private_hand_count()
+    values[0] = 4.0
+    helper = normalize_range_vector(RangeVector.from_values(values))
+
+    assert math.isclose(helper.total_weight(), 1.0, abs_tol=1e-6)
+
+
+def test_masked_range_vector_helper_matches_method() -> None:
+    values = [0.0] * private_hand_count()
+    index = int(private_hand_index(card_from_str("Qc"), card_from_str("Js")))
+    values[index] = 1.0
+    helper = masked_range_vector(
+        RangeVector.from_values(values),
+        [card_from_str("Ah")],
+    )
+
+    assert math.isclose(float(helper.values[index]), 1.0, abs_tol=1e-6)
+
+
+def test_apply_dead_cards_masks_all_ranges() -> None:
+    values = [0.0] * private_hand_count()
+    index = int(private_hand_index(card_from_str("Ah"), card_from_str("Kd")))
+    values[index] = 1.0
+    masked = apply_dead_cards(
+        (RangeVector.from_values(values), RangeVector.from_values(values)),
+        [card_from_str("Ah")],
+    )
+
+    assert math.isclose(float(masked[0].values[index]), 0.0, abs_tol=1e-6)
+    assert math.isclose(float(masked[1].values[index]), 0.0, abs_tol=1e-6)
+
+
+def test_board_masking_keeps_total_mass_valid_after_renormalization() -> None:
+    board = Board.from_str("AhKdQc")
+    values = [0.0] * private_hand_count()
+    live_index = int(private_hand_index(card_from_str("Js"), card_from_str("Ts")))
+    blocked_index = int(private_hand_index(card_from_str("Ah"), card_from_str("Qs")))
+    values[live_index] = 9.0
+    values[blocked_index] = 4.0
+
+    normalized = RangeVector.from_values(values).normalized_masked(board.cards)
+
+    assert math.isclose(normalized.total_weight(), 1.0, abs_tol=1e-6)
+    assert math.isclose(float(normalized.values[blocked_index]), 0.0, abs_tol=1e-6)
+    assert math.isclose(float(normalized.values[live_index]), 1.0, abs_tol=1e-6)
 
 
 def test_all_private_hands_are_unique() -> None:

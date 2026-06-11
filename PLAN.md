@@ -43,10 +43,10 @@ How to use:
 
 ## 4. Add private-hand indexing and range vectors
 
-- [ ] Build canonical private-hand IDs
-- [ ] Add range vector storage per player
-- [ ] Add dead-card masking and normalization
-- [ ] Verify range sums stay valid after board cards
+- [x] Build canonical private-hand IDs
+- [x] Add range vector storage per player
+- [x] Add dead-card masking and normalization
+- [x] Verify range sums stay valid after board cards
 
 ## 5. Add postflop bucketing and suit-isomorphic canonicalization
 

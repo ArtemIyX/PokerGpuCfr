@@ -130,3 +130,63 @@ class RangeVector:
 
     def weight(self, first: Card, second: Card) -> float:
         return float(self.values[int(private_hand_index(first, second))])
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerRangeVectors:
+    values: tuple[RangeVector, ...]
+
+    def __post_init__(self) -> None:
+        if not self.values:
+            raise ValueError("player range vectors must not be empty")
+
+    @classmethod
+    def from_values(
+        cls,
+        values: tuple[RangeVector, ...] | list[RangeVector],
+    ) -> PlayerRangeVectors:
+        return cls(tuple(values))
+
+    @classmethod
+    def uniform_for_players(cls, player_count: int) -> PlayerRangeVectors:
+        if player_count <= 0:
+            raise ValueError("player count must be positive")
+        return cls(tuple(RangeVector.uniform() for _ in range(player_count)))
+
+    def masked(
+        self,
+        dead_cards: tuple[Card, ...] | list[Card],
+    ) -> PlayerRangeVectors:
+        return PlayerRangeVectors(tuple(range_vector.masked(dead_cards)
+                                        for range_vector in self.values))
+
+    def normalized(self) -> PlayerRangeVectors:
+        return PlayerRangeVectors(tuple(range_vector.normalized() 
+                                        for range_vector in self.values))
+
+    def normalized_masked(
+        self,
+        dead_cards: tuple[Card, ...] | list[Card],
+    ) -> PlayerRangeVectors:
+        return self.masked(dead_cards).normalized()
+
+    def total_weights(self) -> tuple[float, ...]:
+        return tuple(range_vector.total_weight() for range_vector in self.values)
+
+
+def apply_dead_cards(
+    range_vectors: tuple[RangeVector, ...] | list[RangeVector],
+    dead_cards: tuple[Card, ...] | list[Card],
+) -> tuple[RangeVector, ...]:
+    return tuple(range_vector.masked(dead_cards) for range_vector in range_vectors)
+
+
+def normalize_range_vector(range_vector: RangeVector) -> RangeVector:
+    return range_vector.normalized()
+
+
+def masked_range_vector(
+    range_vector: RangeVector,
+    dead_cards: tuple[Card, ...] | list[Card],
+) -> RangeVector:
+    return range_vector.masked(dead_cards)
