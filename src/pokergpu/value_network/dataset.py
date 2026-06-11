@@ -10,7 +10,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pokergpu.abstraction.hands import PlayerRangeVectors
-from pokergpu.core.state import GameState
+from pokergpu.core.betting import BettingRoundState, BlindStructure, PlayerBet, PlayerIndex, PlayerStack, Pot, chips
+from pokergpu.core.board import Board
+from pokergpu.core.state import GameState, PlayerState
 
 from .target import (
     PokerValueLabel,
@@ -26,8 +28,12 @@ __all__ = [
     "DatasetSplitRule",
     "FeatureNormalizer",
     "FeatureNormalizerPayload",
+    "LabelNormalizer",
+    "LabelNormalizerPayload",
     "ValueDatasetSample",
     "ValueFeatureBatch",
+    "curated_solver_spots",
+    "CuratedSpot",
     "build_dataset_manifest_entry",
     "export_dataset_sample",
     "export_value_sample",
@@ -50,12 +56,27 @@ class FeatureNormalizerPayload(TypedDict):
     std: list[float]
 
 
+class LabelNormalizerPayload(TypedDict):
+    version: int
+    mean: list[float]
+    std: list[float]
+
+
 class DatasetManifestEntryPayload(TypedDict):
     sample_id: str
     split: str
     path: str
     feature_count: int
     label_shape: list[int]
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedSpot:
+    state: GameState
+    board_texture: str
+    pot_bucket: str
+    stack_bucket: str
+    action_line: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +168,55 @@ class FeatureNormalizer:
 
 
 @dataclass(frozen=True, slots=True)
+class LabelNormalizer:
+    mean: NDArray[np.float32]
+    std: NDArray[np.float32]
+
+    def __post_init__(self) -> None:
+        if self.mean.ndim != 1 or self.std.ndim != 1:
+            raise ValueError("label normalizer vectors must be one-dimensional")
+        if self.mean.shape != self.std.shape:
+            raise ValueError("label normalizer mean and std must match")
+        if np.any(self.std <= 0):
+            raise ValueError("label normalizer std must be positive")
+        if self.mean.dtype != np.float32 or self.std.dtype != np.float32:
+            raise ValueError("label normalizer arrays must use float32")
+
+    @property
+    def label_count(self) -> int:
+        return int(self.mean.shape[0])
+
+    def normalize(self, labels: NDArray[np.float32]) -> NDArray[np.float32]:
+        if labels.ndim != 2:
+            raise ValueError("labels must be two-dimensional")
+        if labels.shape[1] != self.label_count:
+            raise ValueError("label length mismatch")
+        return (labels - self.mean) / self.std
+
+    def denormalize(self, labels: NDArray[np.float32]) -> NDArray[np.float32]:
+        if labels.ndim != 2:
+            raise ValueError("labels must be two-dimensional")
+        if labels.shape[1] != self.label_count:
+            raise ValueError("label length mismatch")
+        return labels * self.std + self.mean
+
+    def to_json(self) -> LabelNormalizerPayload:
+        return {
+            "version": DATASET_VERSION,
+            "mean": [float(value) for value in self.mean.tolist()],
+            "std": [float(value) for value in self.std.tolist()],
+        }
+
+    @classmethod
+    def from_json(cls, payload: LabelNormalizerPayload) -> LabelNormalizer:
+        if payload["version"] != DATASET_VERSION:
+            raise ValueError("unsupported normalizer version")
+        mean = np.asarray(payload["mean"], dtype=np.float32)
+        std = np.asarray(payload["std"], dtype=np.float32)
+        return cls(mean=mean, std=std)
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetManifestEntry:
     sample_id: str
     split: str
@@ -201,6 +271,18 @@ def fit_feature_normalizer(samples: list[ValueDatasetSample]) -> FeatureNormaliz
     variance = matrix.var(axis=0, dtype=np.float64).astype(np.float32)
     std = np.sqrt(np.maximum(variance, np.float32(1e-8))).astype(np.float32)
     return FeatureNormalizer(mean=mean, std=std)
+
+
+def fit_label_normalizer(samples: list[ValueDatasetSample]) -> LabelNormalizer:
+    if not samples:
+        raise ValueError("samples must not be empty")
+    matrix = np.concatenate([sample.label for sample in samples], axis=0).astype(
+        np.float32
+    )
+    mean = matrix.mean(axis=0, dtype=np.float64).astype(np.float32)
+    variance = matrix.var(axis=0, dtype=np.float64).astype(np.float32)
+    std = np.sqrt(np.maximum(variance, np.float32(1e-8))).astype(np.float32)
+    return LabelNormalizer(mean=mean, std=std)
 
 
 def export_value_sample(
@@ -268,6 +350,16 @@ def load_feature_normalizer(path: Path) -> FeatureNormalizer:
     return FeatureNormalizer.from_json(payload)
 
 
+def save_label_normalizer(normalizer: LabelNormalizer, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(normalizer.to_json(), indent=2, sort_keys=True), encoding="utf-8")
+
+
+def load_label_normalizer(path: Path) -> LabelNormalizer:
+    payload = cast(LabelNormalizerPayload, json.loads(path.read_text(encoding="utf-8")))
+    return LabelNormalizer.from_json(payload)
+
+
 def build_dataset_manifest_entry(
     sample: ValueDatasetSample,
     split_rule: DatasetSplitRule,
@@ -303,3 +395,79 @@ def export_dataset_sample(
     relative_path = f"{split}/{file_name}"
     save_value_sample(sample, output_dir / relative_path)
     return build_dataset_manifest_entry(sample, split_rule, relative_path)
+
+
+def curated_solver_spots() -> tuple[CuratedSpot, ...]:
+    return (
+        _make_spot("AhKdQc", "flop", "small", "shallow", "check"),
+        _make_spot("9hThJh", "flop", "medium", "deep", "c-bet"),
+        _make_spot("8s8d8h", "flop", "large", "deep", "check"),
+        _make_spot("AhKdQcJd", "turn", "small", "shallow", "c-bet"),
+        _make_spot("9hThJh2c", "turn", "medium", "deep", "check"),
+        _make_spot("8s8d8h2d", "turn", "large", "deep", "c-bet"),
+        _make_spot("AhKdQcJd9s", "river", "small", "shallow", "check"),
+        _make_spot("9hThJh2c3d", "river", "medium", "deep", "c-bet"),
+        _make_spot("8s8d8h2d3c", "river", "large", "deep", "check"),
+    )
+
+
+def _make_spot(
+    board_text: str,
+    street: str,
+    pot_bucket: str,
+    stack_bucket: str,
+    action_line: str,
+) -> CuratedSpot:
+    board = Board.from_str(board_text)
+    if board.street.value != street:
+        raise ValueError("board street mismatch")
+    pot_amount = {
+        "small": chips(100),
+        "medium": chips(300),
+        "large": chips(800),
+    }[pot_bucket]
+    stack_amount = {
+        "shallow": chips(600),
+        "deep": chips(2000),
+    }[stack_bucket]
+    state = GameState(
+        board=board,
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=pot_amount),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=stack_amount),
+                PlayerStack(player=PlayerIndex(1), stack=stack_amount),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    return CuratedSpot(
+        state=state,
+        board_texture="paired" if _is_paired(board) else _board_texture(board),
+        pot_bucket=pot_bucket,
+        stack_bucket=stack_bucket,
+        action_line=action_line,
+    )
+
+
+def _board_texture(board: Board) -> str:
+    ranks = [card.rank for card in board.cards]
+    unique = len(set(ranks))
+    if unique == len(ranks):
+        return "dry"
+    return "wet"
+
+
+def _is_paired(board: Board) -> bool:
+    ranks = [card.rank for card in board.cards]
+    return len(set(ranks)) < len(ranks)

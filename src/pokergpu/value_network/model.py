@@ -23,6 +23,12 @@ else:
 from .target import ValueFeatureSpec, ValueTargetKind
 
 
+def default_value_device() -> str:
+    if torch is not None and torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
 @dataclass(frozen=True, slots=True)
 class ValueNetworkConfig:
     input_dim: int
@@ -92,6 +98,10 @@ def build_value_model(config: ValueNetworkConfig,
     return model
 
 
+def model_device(model: ValueMLP) -> "torch.device":
+    return next(model.parameters()).device
+
+
 def infer_value(
     model: ValueMLP,
     features: NDArray[np.float32],
@@ -100,10 +110,11 @@ def infer_value(
         raise RuntimeError("torch is required for inference")
     model.eval()
     with torch.no_grad():
-        first_layer = cast(Any, model.network[0])
-        tensor = torch.as_tensor(features, 
-                                 dtype=torch.float32, 
-                                 device=first_layer.weight.device)
+        tensor = torch.as_tensor(
+            features,
+            dtype=torch.float32,
+            device=model_device(model),
+        )
         output = model(tensor)
         return np.asarray(
             output.detach().to("cpu", dtype=torch.float32).numpy(),
@@ -122,19 +133,22 @@ def train_value_step(
         raise RuntimeError("torch is required for training")
     model.train()
     optimizer.zero_grad(set_to_none=True)
-    first_layer = cast(Any, model.network[0])
-    feature_tensor = torch.as_tensor(features, 
-                                     dtype=torch.float32, 
-                                     device=first_layer.weight.device)
-    target_tensor = torch.as_tensor(targets, 
-                                    dtype=torch.float32, 
-                                    device=feature_tensor.device)
+    feature_tensor = torch.as_tensor(
+        features,
+        dtype=torch.float32,
+        device=model_device(model),
+    )
+    target_tensor = torch.as_tensor(
+        targets,
+        dtype=torch.float32,
+        device=feature_tensor.device,
+    )
     if amp and feature_tensor.device.type == "cuda":
         scaler = torch.cuda.amp.GradScaler()
         with torch.cuda.amp.autocast():
             prediction = model(feature_tensor)
             loss: Tensor = torch.nn.functional.mse_loss(prediction, target_tensor)
-        cast(Any, scaler.scale(loss)).backward()
+        scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
     else:

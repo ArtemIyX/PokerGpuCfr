@@ -49,6 +49,8 @@ class PostflopResolveResult:
     root_infoset_id: int
     root_actions: tuple[str, ...]
     root_strategy: NDArray[np.float32]
+    root_ev_player0: float
+    root_ev_player1: float
     iterations: int
     elapsed_seconds: float
     node_count: int
@@ -91,7 +93,7 @@ def resolve_postflop_hu(
         if warm_start is not None:
             _apply_warm_start(store, warm_start)
 
-    _, _, root_reach_p0, root_reach_p1 = _apply_root_ranges(
+    root_range_p0, root_range_p1, _, _ = _apply_root_ranges(
         spec.state,
         spec.range_p0,
         spec.range_p1,
@@ -111,8 +113,8 @@ def resolve_postflop_hu(
         forward = compute_reach_probabilities(
             tree.tree,
             store,
-            root_player0_reach=root_reach_p0,
-            root_player1_reach=root_reach_p1,
+            root_player0_reach=root_range_p0.total_weight(),
+            root_player1_reach=root_range_p1.total_weight(),
             min_reach_prob=spec.min_reach_prob,
         )
         backward = compute_counterfactual_values(
@@ -129,18 +131,28 @@ def resolve_postflop_hu(
             store,
             backward,
             active_player=0,
-            strategy_weight=root_reach_p0,
+            strategy_weight=root_range_p0.total_weight(),
         )
         update_regrets_from_traversal(
             tree.tree,
             store,
             backward,
             active_player=1,
-            strategy_weight=root_reach_p1,
+            strategy_weight=root_range_p1.total_weight(),
         )
         iterations += 1
         if spec.time_budget_sec <= 0.0:
             break
+
+    final_backward = compute_counterfactual_values(
+        tree.tree,
+        store,
+        node_states=tree.node_states,
+        reach_p0=forward.player0_reach,
+        reach_p1=forward.player1_reach,
+        terminal_values_player0=terminal_values_player0,
+        evaluator=evaluator_impl,
+    )
 
     if spec.cache_state is not None:
         spec.cache_state.store_warm_start(
@@ -158,6 +170,8 @@ def resolve_postflop_hu(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
         root_strategy=root_strategy,
+        root_ev_player0=float(final_backward.node_values_player0[0]),
+        root_ev_player1=float(final_backward.node_values_player1[0]),
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         node_count=tree.tree.node_count,

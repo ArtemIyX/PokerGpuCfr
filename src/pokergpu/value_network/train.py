@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,9 +12,11 @@ from .dataset import (
     DatasetManifestEntry,
     DatasetSplitRule,
     FeatureNormalizer,
+    LabelNormalizer,
     ValueDatasetSample,
     ValueFeatureBatch,
     fit_feature_normalizer,
+    fit_label_normalizer,
     load_dataset_manifest,
     load_value_sample,
     normalize_feature_batch,
@@ -23,6 +25,7 @@ from .model import (
     ValueMLP,
     build_value_model,
     build_value_network_config,
+    default_value_device,
     infer_value,
     train_value_step,
 )
@@ -96,6 +99,7 @@ def _evaluate_loss(
     model: ValueMLP,
     samples: list[ValueDatasetSample],
     normalizer: FeatureNormalizer,
+    label_normalizer: LabelNormalizer,
     batch_size: int,
 ) -> float:
     if not samples:
@@ -108,6 +112,7 @@ def _evaluate_loss(
             ValueFeatureBatch(features),
             normalizer,
         ).values
+        targets = label_normalizer.normalize(targets)
         prediction = infer_value(model, normalized)
         losses.append(float(np.mean((prediction - targets) ** 2)))
     return float(np.mean(losses, dtype=np.float64))
@@ -121,6 +126,7 @@ def train_baseline(
     target_kind: ValueTargetKind,
     config: TrainingConfig | None = None,
     normalizer: FeatureNormalizer | None = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> TrainingResult:
     if config is None:
         config = TrainingConfig()
@@ -138,9 +144,11 @@ def train_baseline(
 
     if normalizer is None:
         normalizer = fit_feature_normalizer(train_samples)
+    label_normalizer = fit_label_normalizer(train_samples)
 
     model_config = build_value_network_config(feature_spec, target_kind)
-    model = build_value_model(model_config, device="cpu")
+    device = default_value_device()
+    model = build_value_model(model_config, device=device)
     import torch
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
@@ -151,6 +159,8 @@ def train_baseline(
 
     for epoch in range(config.epochs):
         epoch_losses: list[float] = []
+        batch_total = (len(train_samples) + config.batch_size - 1) // config.batch_size
+        batch_index = 0
         for start in range(0, len(train_samples), config.batch_size):
             stop = min(start + config.batch_size, len(train_samples))
             features, targets = _batch_slice(train_samples, start, stop)
@@ -158,6 +168,7 @@ def train_baseline(
                 ValueFeatureBatch(features),
                 normalizer,
             ).values
+            targets = label_normalizer.normalize(targets)
             epoch_losses.append(
                 train_value_step(
                     model,
@@ -167,8 +178,17 @@ def train_baseline(
                     amp=config.amp,
                 )
             )
+            batch_index += 1
+            if progress_callback is not None:
+                progress_callback(batch_index, batch_total, f"train epoch {epoch + 1}")
         train_loss = float(np.mean(epoch_losses, dtype=np.float64))
-        val_loss = _evaluate_loss(model, val_samples, normalizer, config.batch_size)
+        val_loss = _evaluate_loss(
+            model,
+            val_samples,
+            normalizer,
+            label_normalizer,
+            config.batch_size,
+        )
         if val_loss <= best_val:
             best_val = val_loss
             best_checkpoint = ValueCheckpoint(
@@ -207,7 +227,9 @@ def train_baseline(
             ValueFeatureBatch(features),
             normalizer,
         ).values
-        preview_predictions = infer_value(model, normalized)
+        preview_predictions = label_normalizer.denormalize(
+            infer_value(model, normalized)
+        )
         preview_labels = targets
 
     return TrainingResult(
