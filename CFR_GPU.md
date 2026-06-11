@@ -87,6 +87,13 @@ Action count directly controls solver cost: fewer actions = faster convergence. 
 
 **Preflop**: 169 canonical hands (suit isomorphism). No bucketing needed at this scale.
 
+**Postflop suit isomorphism**: Suit isomorphism extends beyond preflop but is significantly more complex. On the flop, two boards are isomorphic only if there exists a suit permutation mapping one to the other that preserves all players' hole card suits simultaneously. For example, A♠K♠Q♥ and A♥K♥Q♠ are isomorphic (swap spades/hearts); A♠K♠Q♠ (monotone) is a distinct canonical class. Correct postflop isomorphism reduces the number of distinct flop textures from 22,100 to ~1,755 canonical boards. Implementing this requires:
+- Canonical board normalization: sort suits by frequency, then by rank, assign canonical suit labels.
+- Per-infoset isomorphism check at flop/turn/river construction time.
+- Shared regret tables for isomorphic board classes.
+
+This is non-trivial to implement correctly but cuts postflop infoset count by 10–12× on average. Most production solvers implement this; skipping it is a significant memory waste. The canonical normalization must be applied consistently across blueprint generation, value network training data, and runtime re-solving — any mismatch causes lookup errors.
+
 **Postflop bucketing** (critical for GPU feasibility):
 - Target: 500–5000 buckets per street
 - Cluster hands by: equity vs. random range, equity vs. opponent range, draw potential, blocker value
@@ -104,7 +111,23 @@ True 6-max equilibrium is not computable. Practical approaches:
 - Solve heads-up subgames exactly; approximate multiway nodes with heuristics or learned values
 - Pluribus used this: blueprint for all streets, real-time re-solving only in critical spots (often 2–3-way)
 
+**Why:**
 
+- Multiway Nash equilibrium doesn't decompose cleanly like heads-up
+- Each player's strategy depends on the joint strategy of all others simultaneously
+- Tree size explodes exponentially with players
+
+**What solvers actually do:**
+
+- Treat multiway as iterated 2-player subgames (wrong but tractable)
+- Use aggressive abstraction (card buckets, limited bet sizes)
+- Run CFR until "convergence" but the solution isn't a true Nash equilibrium
+
+**In practice:**
+
+- GTO Wizard, Solver+ etc. just run CFR on the abstracted tree and call it solved
+- The result is "good enough" vs humans because humans are even further from optimal
+- Multiway spots are just less exploited by bots, more human edge exists there
 
 ---
 
@@ -196,16 +219,17 @@ Rewrite CFR iteration as bulk-synchronous linear algebra:
 5. Average strategy accumulation
 
 ```python
-# Pseudocode (JAX/PyTorch style)
+# Python + CUDA (PyTorch/CuPy style)
 for level in levels_bottom_up:
     nodes = level_nodes[level]
     # backward: cfv[parent] += sigma[I,a] * cfv[child] * reach_opponent
-    cfv = sparse_backward(adjacency[level], cfv_children, sigma, reach)
+    # adjacency[level] is a CSR matrix on GPU (torch.sparse_csr_tensor)
+    cfv = sparse_backward_cuda(adjacency[level], cfv_children, sigma, reach)
 
-for infoset in all_infosets:  # parallelized
-    r = instant_regret(infoset, cfv, reach)
-    R[infoset] = jnp.maximum(R[infoset] + r, 0)  # CFR+
-    S[infoset] += t_weight * sigma_from_regret(R[infoset])
+# parallelized over all infosets via GPU kernel
+instant_r = compute_instant_regret_cuda(cfv, reach, sigma, infoset_offsets)
+R = torch.clamp(R + instant_r, min=0.0)   # CFR+ floor
+S += t_weight * regret_matching_cuda(R, infoset_offsets)
 ```
 
 **Memory constraints**: on 16GB VRAM (RTX 5080), this limits abstract game size. Budget:
@@ -214,7 +238,29 @@ for infoset in all_infosets:  # parallelized
 - If this exceeds VRAM, fall back to MCCFR + GPU eval (Strategy A)
 
 
-### 5.5 Offline Training Pipeline
+### 5.6 Exploitability Estimation via Sampled Best Response
+
+Exploitability = how much a best-response opponent can gain per game against your strategy. True exploitability requires computing an exact best response over the full tree, which is intractable for large abstractions. Use sampled BR instead.
+
+**Algorithm (sampled BR):**
+1. Fix your current average strategy `sigma`.
+2. For each player `i`, compute an approximate best response `BR_i` by traversing the tree and greedily selecting the action with the highest counterfactual value at each infoset, using MCCFR sampling to cover a fraction of the tree.
+3. Estimate exploitability as: `eps = sum_i [ EV(BR_i, sigma_{-i}) - EV(sigma_i, sigma_{-i}) ] / 2`
+4. Normalize by pot size for interpretability (mbb/hand or % of pot).
+
+**Implementation notes:**
+- Run sampled BR every K iterations (e.g., every 10,000 CFR iterations during offline training).
+- Use a separate MCCFR traversal in best-response mode: at the BR player's nodes, take argmax instead of regret-matching; at opponent nodes, sample from current sigma.
+- Sample ~1M–10M terminal nodes per estimate. More samples = lower variance estimate.
+- Log convergence: exploitability should decrease monotonically with iterations under CFR+/DCFR. If it plateaus or increases, check for bugs in regret update or strategy accumulation.
+- Exploitability in the abstracted game does not equal exploitability in the full game. A strategy with 0.1% pot exploitability in the abstraction can be significantly more exploitable outside it (abstraction bleeding). Track both if possible.
+
+**Runtime check (simplified):**
+- At runtime, after re-solving, run 100–500 sampled BR trajectories against the returned strategy.
+- If estimated exploitability exceeds a threshold (e.g., 5% pot), fall back to blueprint strategy for that spot.
+- This adds <50ms latency if BR sampling is vectorized.
+
+### 5.7 Offline Training Pipeline
 
 ```
 1. Build abstract game (action + card abstraction)
@@ -230,7 +276,7 @@ for infoset in all_infosets:  # parallelized
 6. Optional: distill blueprint into neural policy (behavior cloning + fine-tuning)
 ```
 
-### 5.6 Parallelism Across CPU and GPU (Offline)
+### 5.8 Parallelism Across CPU and GPU (Offline)
 
 - Use CUDA streams: stream 0 runs current batch, stream 1 prepares next
 - CPU threads handle: sampling new trajectories, pruning, range normalization, scheduling
@@ -346,14 +392,30 @@ Architecture: MLP with 4–8 layers, residual connections, LayerNorm. Wider is b
 
 ### 7.3 Training Data Generation
 
-Option A (solver rollouts):
+**Option A (Solver rollouts) — recommended:**
 - Run offline CFR to convergence on many board/range samples
 - Record (state, both ranges) → (EV per player) pairs
 - ~10M–100M samples needed for good coverage
+- Ground truth quality; the only reliable approach
 
-Option B (bootstrap from blueprint):
+**Option B (Bootstrap from blueprint) — acceptable as warm-start only:**
 - Use blueprint strategy to simulate rollouts forward
 - Cheap but biased toward blueprint quality
+- Do not use as sole training signal; bias compounds and the value network learns to approximate a weak baseline, not true EV
+
+**Option C (Self-play / DREAM-style) — not recommended for this architecture:**
+- DREAM generates (state, regret) samples during training and trains a regret network simultaneously
+- Works in theory but requires careful implementation: if the regret network is wrong, CFR updates are wrong, which corrupts future training data
+- In practice, self-play bootstrapping in poker tends to collapse to exploitable strategies or plateau far from Nash without solver-generated ground truth as a corrective signal
+- Avoid for production; use solver rollouts (Option A) as the primary signal
+
+**A note on value networks as leaf evaluators:**
+A value network at the depth limit is a practical necessity for real-time re-solving, but it is not the best possible approach — it is the tractable one. The VNet approximates the EV of continuing play under the blueprint strategy, which means errors in the blueprint propagate into the value estimate. Alternatives:
+- **Longer depth limit with no VNet**: more accurate but runtime explodes
+- **Nested subgame solving at leaves**: correct but recursively expensive
+- **Monte Carlo rollouts from leaves**: unbiased but high variance; not real-time compatible
+
+For 2–8 second decision budgets, a TensorRT-compiled MLP value network is the only practical option on current hardware. Accept the approximation error; minimize it by training on high-quality solver data.
 
 ### 7.4 Deployment
 
@@ -394,7 +456,7 @@ Option B (bootstrap from blueprint):
 - Minimal branch divergence in GPU kernels
 - No global atomics on shared regret tables in inner loops (use per-block accumulators + reduction)
 - Overlap CPU prep with GPU execution via CUDA streams
-- Float32 for regrets; float16/bfloat16 for reach/value where numerically stable
+- Float32 for regrets and strategy sums; bfloat16 for reach/value arrays; fp16 for VNet inference (see §11.1)
 - Keep action count small (5–9 per node); action abstraction quality over quantity
 - Blueprint warm-start in runtime mode (non-negotiable for convergence speed)
 
@@ -592,6 +654,39 @@ Pluribus and other winning 6-max agents do not solve true multiway equilibrium. 
 
 Keep total under 14GB to leave headroom for driver/kernel overhead. If reach/value arrays don't fit, tile by subtree or switch to MCCFR.
 
+### 11.1 Regret Table Compression: fp16 vs fp32
+
+**The problem:** regret tables are the largest persistent structure in VRAM during training. At scale (10M+ infosets × 7 actions), fp32 costs 280MB+. Doubling action abstraction doubles this linearly.
+
+**fp16 during training — use with caution:**
+- fp16 has ~3 decimal digits of precision and clips at ±65504.
+- Regrets accumulate over millions of iterations. Large positive regrets (common for dominant actions) will overflow fp16 near iteration 100k–1M depending on normalization.
+- Small regrets (rare actions) underflow to zero, which permanently zeros their strategy weight. This causes strategy collapse for low-frequency actions.
+- **Conclusion:** do not store raw cumulative regrets in fp16.
+
+**Safe fp16 usage:**
+- Reach vectors (`pi`): safe to use fp16 or bfloat16. Values stay in [0, 1]; precision loss has minimal CFR impact.
+- Counterfactual values (`cfv`): safe to use bfloat16 (wider exponent range than fp16). Verify no overflow on your specific game scale.
+- VNet inference: always fp16 or bfloat16. TensorRT fp16 is standard; no precision issue for a forward pass.
+- Strategy sums (`S`): borderline. Use fp32 unless VRAM is critically constrained; the average strategy is your final output and precision matters.
+
+**Recommended hybrid:**
+```python
+R = torch.zeros(total_actions, dtype=torch.float32, device='cuda')  # regrets: fp32
+S = torch.zeros(total_actions, dtype=torch.float32, device='cuda')  # strategy sum: fp32
+pi  = torch.ones(num_nodes * num_buckets, dtype=torch.bfloat16, device='cuda')
+cfv = torch.zeros(num_nodes * num_buckets, dtype=torch.bfloat16, device='cuda')
+# VNet input/output: fp16 (TensorRT handles internally)
+```
+
+**Blueprint export (post-training):**
+- Quantize average strategy to uint16 per action (normalized per infoset, sum = 65535).
+- Optionally quantize to uint8 for aggressive compression (coarser strategy, acceptable for low-reach infosets).
+- Regrets for warm-starting: export as fp16 after clipping to [-1000, 1000] (values outside this range have negligible RM+ impact after normalization).
+- Expected blueprint size: 1M infosets × 7 actions × uint16 ≈ 14MB. 10M infosets ≈ 140MB. Fits in VRAM easily for warm-starting.
+
+**Convergence check:** if switching from fp32 to bf16 for reach/cfv, run a calibration: compare exploitability at iteration 100k with full fp32 vs hybrid. Difference should be < 0.05% pot. If larger, your game scale has precision sensitivity and you should keep cfv in fp32.
+
 ---
 
 ## 12. Preflop Solvability: HU, 3-Way, 6-Max
@@ -720,67 +815,83 @@ The blueprint does not need to be perfect. It needs to be good enough to warm-st
 ### Offline (Matrix-Op CFR+)
 
 ```python
-# Preprocessing
+# Python + CUDA (PyTorch). All tensors on GPU unless noted.
+# Preprocessing (CPU → GPU once)
 levels = topological_levels(tree)
-adjacency = build_csr(tree)
-infoset_offsets = precompute_offsets(infosets)
+adjacency = build_csr_cuda(tree)          # torch.sparse_csr_tensor per level
+infoset_offsets = precompute_offsets(infosets).cuda()
 
-R = zeros(total_actions)       # regrets
-S = zeros(total_actions)       # strategy sums
-sigma = uniform(total_actions)
+R = torch.zeros(total_actions, device='cuda')   # regrets
+S = torch.zeros(total_actions, device='cuda')   # strategy sums
+sigma = uniform_strategy_cuda(infoset_offsets)
 
-for t in 1..num_iterations:
-    weight = compute_dcfr_weight(t)
+stream_fwd  = torch.cuda.Stream()
+stream_bwd  = torch.cuda.Stream()
 
-    # Forward: reach probabilities
-    pi = ones(num_nodes * num_buckets)
-    for level in levels_top_down:
-        pi = forward_pass(adjacency[level], pi, sigma)
+for t in range(1, num_iterations + 1):
+    weight = dcfr_weight(t)
 
-    # Leaf evaluation (GPU)
-    leaf_features = build_leaf_features(leaves, pi)
-    leaf_ev = GPU_vnet_infer(leaf_features)  # batched, fp16
+    # Forward: reach probabilities (GPU, level by level)
+    pi = torch.ones(num_nodes * num_buckets, device='cuda')
+    with torch.cuda.stream(stream_fwd):
+        for level in levels_top_down:
+            pi = sparse_forward_cuda(adjacency[level], pi, sigma)
 
-    # Backward: counterfactual values
-    cfv = zeros(num_nodes * num_buckets)
-    cfv[leaves] = leaf_ev
+    # Leaf evaluation (GPU, fp16, overlap with next forward setup)
+    leaf_features = build_leaf_features_cuda(leaves, pi)
+    with torch.cuda.stream(stream_bwd):
+        leaf_ev = vnet_infer_fp16(leaf_features)   # TensorRT or torch.compile
+
+    torch.cuda.synchronize()
+
+    # Backward: counterfactual values (GPU)
+    cfv = torch.zeros(num_nodes * num_buckets, device='cuda')
+    cfv[leaves] = leaf_ev.float()
     for level in levels_bottom_up:
-        cfv = backward_pass(adjacency[level], cfv, sigma, pi)
+        cfv = sparse_backward_cuda(adjacency[level], cfv, sigma, pi)
 
-    # Regret update (GPU, parallelized over infosets)
-    instant_r = compute_instant_regret(cfv, sigma, pi, infoset_offsets)
-    R = maximum(R + instant_r, 0)          # CFR+ floor
-    sigma = regret_matching(R, infoset_offsets)
-    S += weight * sigma                     # DCFR weighted average
+    # Regret update (GPU kernel, parallelized over infosets)
+    instant_r = compute_instant_regret_cuda(cfv, sigma, pi, infoset_offsets)
+    R = torch.clamp(R + instant_r, min=0.0)        # CFR+ floor
+    sigma = regret_matching_cuda(R, infoset_offsets)
+    S.add_(weight * sigma)                          # DCFR weighted average
 
-blueprint = normalize_strategy(S, infoset_offsets)
+blueprint = normalize_strategy_cuda(S, infoset_offsets)
 ```
 
 ### Runtime (Depth-Limited Re-Solving)
 
 ```python
-def resolve(game_state, blueprint, vnet, time_budget):
-    tree = build_public_tree(game_state, depth_limit=STREET_END)
-    R, S, sigma = warm_start_from_blueprint(tree, blueprint)
+# Python + CUDA. CPU orchestrates; GPU handles VNet and large regret updates.
+def resolve(game_state, blueprint, vnet, time_budget_sec):
+    tree = build_public_tree(game_state, depth_limit=STREET_END)   # CPU
+    R, S, sigma = warm_start_from_blueprint(tree, blueprint)        # CPU → GPU
 
-    deadline = now() + time_budget
-    while now() < deadline:
-        pi = forward_reach(tree, sigma)
+    R = R.cuda(); S = S.cuda(); sigma = sigma.cuda()
+    infer_stream = torch.cuda.Stream()
+    deadline = time.monotonic() + time_budget_sec
 
-        # GPU leaf eval (overlapped with CPU prep for next iter)
+    while time.monotonic() < deadline:
+        # Forward reach (GPU)
+        pi = forward_reach_cuda(tree, sigma)
+
+        # Async GPU leaf eval (overlap with CPU regret update from prev iter)
         leaves = get_leaves(tree)
-        batch = build_features(leaves, pi, game_state)
-        with cuda_stream(0):
-            leaf_ev = vnet.infer(batch)
+        batch = build_features_cuda(leaves, pi, game_state)
+        with torch.cuda.stream(infer_stream):
+            leaf_ev = vnet.infer_fp16(batch)
 
-        cfv = backward_cfv(tree, leaf_ev, sigma, pi)
-        R = maximum(R + instant_regret(cfv, sigma, pi), 0)
-        sigma = regret_matching(R)
-        S += sigma
+        # Backward CFV (GPU, waits for leaf_ev)
+        infer_stream.synchronize()
+        cfv = backward_cfv_cuda(tree, leaf_ev.float(), sigma, pi)
 
-        prune_low_reach(tree, pi, threshold=1e-5)
+        # Regret update + prune (GPU)
+        R = torch.clamp(R + instant_regret_cuda(cfv, sigma, pi), min=0.0)
+        sigma = regret_matching_cuda(R)
+        S.add_(sigma)
+        prune_low_reach_cuda(tree, pi, threshold=1e-5)
 
-    return normalize(S[root_infoset])
+    return normalize_cuda(S[root_infoset])
 ```
 
 ---
