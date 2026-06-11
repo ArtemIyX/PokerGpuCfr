@@ -136,6 +136,27 @@ def test_fit_feature_normalizer_produces_positive_std() -> None:
     assert float(normalizer.std[0]) > 0.0
 
 
+def test_fit_label_normalizer_clamps_scale() -> None:
+    from pokergpu.value_network.dataset import fit_label_normalizer
+
+    sample_a = ValueDatasetSample(
+        sample_id="a",
+        features=np.asarray([1.0, 3.0], dtype=np.float32),
+        label=np.asarray([[100.0, -100.0]], dtype=np.float32),
+        metadata={},
+    )
+    sample_b = ValueDatasetSample(
+        sample_id="b",
+        features=np.asarray([3.0, 7.0], dtype=np.float32),
+        label=np.asarray([[200.0, -200.0]], dtype=np.float32),
+        metadata={},
+    )
+
+    normalizer = fit_label_normalizer([sample_a, sample_b])
+
+    assert float(normalizer.std[0]) >= 1000.0
+
+
 def test_normalize_feature_batch_round_trips_shape() -> None:
     sample = ValueDatasetSample(
         sample_id="a",

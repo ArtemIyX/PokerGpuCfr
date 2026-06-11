@@ -175,6 +175,8 @@ def compute_reach_probabilities(
         infoset_id = tree.infoset_ids[node_index]
         assert infoset_id is not None
         strategy = store.current_strategy(int(infoset_id))
+        if strategy.shape[0] != len(links):
+            strategy = strategy[: len(links)]
         for action_index, link in enumerate(links):
             child_index = int(link.child)
             action_prob = strategy[action_index]
@@ -334,21 +336,23 @@ def compute_counterfactual_values(
         infoset_id = tree.infoset_ids[node_index]
         assert infoset_id is not None
         strategy = store.current_strategy(int(infoset_id))
+        if strategy.shape[0] != len(links):
+            strategy = strategy[: len(links)]
         if node_type is NodeType.PLAYER0:
-            infoset_action_values[int(infoset_id)] = child_values_p0
+            infoset_action_values[int(infoset_id)] = child_values_p0[: strategy.shape[0]]
             node_values_player0[node_index] = np.float32(
-                np.sum(strategy * child_values_p0, dtype=np.float64)
+                np.sum(strategy * child_values_p0[: strategy.shape[0]], dtype=np.float64)
             )
             node_values_player1[node_index] = np.float32(
-                np.sum(strategy * child_values_p1, dtype=np.float64)
+                np.sum(strategy * child_values_p1[: strategy.shape[0]], dtype=np.float64)
             )
         else:
-            infoset_action_values[int(infoset_id)] = child_values_p1
+            infoset_action_values[int(infoset_id)] = child_values_p1[: strategy.shape[0]]
             node_values_player0[node_index] = np.float32(
-                np.sum(strategy * child_values_p0, dtype=np.float64)
+                np.sum(strategy * child_values_p0[: strategy.shape[0]], dtype=np.float64)
             )
             node_values_player1[node_index] = np.float32(
-                np.sum(strategy * child_values_p1, dtype=np.float64)
+                np.sum(strategy * child_values_p1[: strategy.shape[0]], dtype=np.float64)
             )
 
     return BackwardPassResult(
@@ -476,7 +480,11 @@ def update_regrets_from_traversal(
             continue
 
         action_values = backward_pass.infoset_action_values[infoset_index]
+        if action_values.size == 0:
+            continue
         strategy = store.current_strategy(infoset_index)
+        if strategy.shape[0] != action_values.shape[0]:
+            action_values = action_values[: strategy.shape[0]]
         infoset_value = np.float32(np.sum(strategy * action_values, dtype=np.float64))
         store.regrets_for_infoset(infoset_index)[:] += action_values - infoset_value
         store.strategy_sums_for_infoset(infoset_index)[:] += strategy * np.float32(

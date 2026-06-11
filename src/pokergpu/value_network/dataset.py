@@ -68,6 +68,7 @@ class DatasetManifestEntryPayload(TypedDict):
     path: str
     feature_count: int
     label_shape: list[int]
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +78,7 @@ class CuratedSpot:
     pot_bucket: str
     stack_bucket: str
     action_line: str
+    family: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +202,14 @@ class LabelNormalizer:
             raise ValueError("label length mismatch")
         return labels * self.std + self.mean
 
+    def normalize_signed(self, labels: NDArray[np.float32]) -> NDArray[np.float32]:
+        normalized = self.normalize(labels)
+        scale = np.maximum(np.abs(normalized), np.float32(1.0)).astype(np.float32)
+        return (normalized / scale).astype(np.float32)
+
+    def denormalize_signed(self, labels: NDArray[np.float32]) -> NDArray[np.float32]:
+        return self.denormalize(labels)
+
     def to_json(self) -> LabelNormalizerPayload:
         return {
             "version": DATASET_VERSION,
@@ -223,6 +233,7 @@ class DatasetManifestEntry:
     path: str
     feature_count: int
     label_shape: tuple[int, int]
+    metadata: dict[str, object] | None = None
 
     def to_dict(self) -> DatasetManifestEntryPayload:
         return {
@@ -231,6 +242,7 @@ class DatasetManifestEntry:
             "path": self.path,
             "feature_count": self.feature_count,
             "label_shape": list(self.label_shape),
+            "metadata": dict(self.metadata or {}),
         }
 
     @classmethod
@@ -244,6 +256,7 @@ class DatasetManifestEntry:
             path=payload["path"],
             feature_count=payload["feature_count"],
             label_shape=(shape[0], shape[1]),
+            metadata=dict(payload.get("metadata", {})),
         )
 
 
@@ -282,6 +295,7 @@ def fit_label_normalizer(samples: list[ValueDatasetSample]) -> LabelNormalizer:
     mean = matrix.mean(axis=0, dtype=np.float64).astype(np.float32)
     variance = matrix.var(axis=0, dtype=np.float64).astype(np.float32)
     std = np.sqrt(np.maximum(variance, np.float32(1e-8))).astype(np.float32)
+    std = np.maximum(std, np.float32(1000.0))
     return LabelNormalizer(mean=mean, std=std)
 
 
@@ -371,6 +385,7 @@ def build_dataset_manifest_entry(
         path=relative_path,
         feature_count=int(sample.features.shape[0]),
         label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
+        metadata=dict(sample.metadata),
     )
 
 
@@ -467,6 +482,7 @@ def _make_spot(
         pot_bucket=pot_bucket,
         stack_bucket=stack_bucket,
         action_line=action_line,
+        family=f"{street}:{pot_bucket}:{stack_bucket}:{action_line}:{board_text}",
     )
 
 

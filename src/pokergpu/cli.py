@@ -756,6 +756,7 @@ def _export_solver_labels(
     args.output_dir.mkdir(parents=True, exist_ok=True)
     entries: list[DatasetManifestEntry] = []
     samples: list[ValueDatasetSample] = []
+    seen_signatures: set[tuple[float, ...]] = set()
     split_rule = DatasetSplitRule(
         validation_modulo=args.validation_modulo,
         validation_remainder=args.validation_remainder,
@@ -796,6 +797,10 @@ def _export_solver_labels(
                 )
             for job in done:
                 entry, sample = job.result()
+                signature = tuple(np.round(sample.features[:32], 3).tolist())
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
                 entries.append(entry)
                 samples.append(sample)
                 completed += 1
@@ -824,6 +829,7 @@ def _export_curated_solver_labels(
     spots = curated_solver_spots()[: args.limit]
     entries: list[DatasetManifestEntry] = []
     samples: list[ValueDatasetSample] = []
+    seen_signatures: set[tuple[float, ...]] = set()
     split_rule = DatasetSplitRule()
     feature_spec = ValueFeatureSpec(player_count=2, max_history_length=8)
     if progress_callback is not None:
@@ -862,6 +868,10 @@ def _export_curated_solver_labels(
                 )
             for job in done:
                 entry, sample = job.result()
+                signature = tuple(np.round(sample.features[:32], 3).tolist())
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
                 entries.append(entry)
                 samples.append(sample)
                 completed += 1
@@ -887,18 +897,28 @@ def _solve_and_export_label(
 ) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
     from .runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
 
-    spec = _real_postflop_spec(Random(9000 + index))
-    resolve_spec = PostflopResolveSpec(
-        state=spec.state,
-        range_p0=spec.range_p0,
-        range_p1=spec.range_p1,
-        time_budget_sec=args.solve_time_sec,
-        max_depth=args.max_depth,
-        max_nodes=args.max_nodes,
-        min_reach_prob=spec.min_reach_prob,
-        cache_state=spec.cache_state,
-    )
-    result = resolve_postflop_hu(resolve_spec)
+    result = None
+    resolve_spec = None
+    for attempt in range(16):
+        spec = _real_postflop_spec(Random(9000 + index * 97 + attempt))
+        candidate = PostflopResolveSpec(
+            state=spec.state,
+            range_p0=spec.range_p0,
+            range_p1=spec.range_p1,
+            time_budget_sec=args.solve_time_sec,
+            max_depth=args.max_depth,
+            max_nodes=args.max_nodes,
+            min_reach_prob=spec.min_reach_prob,
+            cache_state=spec.cache_state,
+        )
+        try:
+            result = resolve_postflop_hu(candidate)
+            resolve_spec = candidate
+            break
+        except ValueError:
+            continue
+    if result is None or resolve_spec is None:
+        raise ValueError("unable to generate a valid solver label")
     sample = export_dataset_sample(
         sample_id=f"solver-{index:05d}",
         state=resolve_spec.state,
@@ -942,7 +962,7 @@ def _solve_curated_spot(
     )
     result = resolve_postflop_hu(spec)
     entry = export_dataset_sample(
-        sample_id=f"curated-{index:05d}",
+        sample_id=f"curated-{spot_t.family}-{index:05d}",
         state=spot_t.state,
         ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
         label=build_value_label(
@@ -958,6 +978,7 @@ def _solve_curated_spot(
             "pot_bucket": spot_t.pot_bucket,
             "stack_bucket": spot_t.stack_bucket,
             "action_line": spot_t.action_line,
+            "template_family": spot_t.family,
         },
     )
     loaded = load_value_sample(output_dir / entry.path)
@@ -982,12 +1003,8 @@ def _real_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
         max_depth = 4
     board = Board(cards=board_cards)
     pot = chips(100 + 100 * rng.randrange(1, 9))
-    stack_p0 = chips(5000 + 500 * rng.randrange(0, 16))
-    stack_p1 = chips(5000 + 500 * rng.randrange(0, 16))
-    bets = (
-        PlayerBet(player=PlayerIndex(0), committed=chips(50 * rng.randrange(0, 5))),
-        PlayerBet(player=PlayerIndex(1), committed=chips(50 * rng.randrange(0, 5))),
-    )
+    stack_p0 = chips(20000 + 1000 * rng.randrange(0, 8))
+    stack_p1 = chips(20000 + 1000 * rng.randrange(0, 8))
     state = GameState(
         board=board,
         players=(
@@ -1000,7 +1017,10 @@ def _real_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
                 PlayerStack(player=PlayerIndex(0), stack=stack_p0),
                 PlayerStack(player=PlayerIndex(1), stack=stack_p1),
             ),
-            bets=bets,
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
             blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
             to_act=PlayerIndex(rng.randrange(2)),
         ),
