@@ -399,15 +399,24 @@ def export_dataset_sample(
 
 def curated_solver_spots() -> tuple[CuratedSpot, ...]:
     return (
-        _make_spot("AhKdQc", "flop", "small", "shallow", "check"),
+        _make_spot("AhKdQc", "flop", "small", "shallow", "check-check"),
         _make_spot("9hThJh", "flop", "medium", "deep", "c-bet"),
-        _make_spot("8s8d8h", "flop", "large", "deep", "check"),
+        _make_spot("8s8d8h", "flop", "large", "deep", "check-raise"),
+        _make_spot("2c7d9s", "flop", "small", "medium", "bet-call"),
+        _make_spot("AhQh2h", "flop", "medium", "deep", "bet-fold"),
+        _make_spot("KcKd2s", "flop", "large", "shallow", "check-bet"),
         _make_spot("AhKdQcJd", "turn", "small", "shallow", "c-bet"),
         _make_spot("9hThJh2c", "turn", "medium", "deep", "check"),
         _make_spot("8s8d8h2d", "turn", "large", "deep", "c-bet"),
+        _make_spot("2c7d9sTd", "turn", "small", "medium", "check-raise"),
+        _make_spot("AhQh2hJs", "turn", "medium", "shallow", "bet-call"),
+        _make_spot("KcKd2s7h", "turn", "large", "deep", "bet-fold"),
         _make_spot("AhKdQcJd9s", "river", "small", "shallow", "check"),
         _make_spot("9hThJh2c3d", "river", "medium", "deep", "c-bet"),
         _make_spot("8s8d8h2d3c", "river", "large", "deep", "check"),
+        _make_spot("2c7d9sTdKh", "river", "small", "medium", "bet-call"),
+        _make_spot("AhQh2hJs9d", "river", "medium", "shallow", "check-raise"),
+        _make_spot("KcKd2s7h4c", "river", "large", "deep", "bet-fold"),
     )
 
 
@@ -428,6 +437,7 @@ def _make_spot(
     }[pot_bucket]
     stack_amount = {
         "shallow": chips(3000),
+        "medium": chips(6000),
         "deep": chips(10000),
     }[stack_bucket]
     state = GameState(
@@ -463,6 +473,13 @@ def _make_spot(
 def _board_texture(board: Board) -> str:
     ranks = [card.rank for card in board.cards]
     unique = len(set(ranks))
+    suits = [card.suit for card in board.cards]
+    if len(set(suits)) == 1:
+        return "monotone"
+    if max((ranks.count(rank) for rank in set(ranks)), default=0) >= 2:
+        return "paired"
+    if any(abs(a.order_value - b.order_value) <= 2 for a in ranks for b in ranks if a != b):
+        return "connected"
     if unique == len(ranks):
         return "dry"
     return "wet"

@@ -235,3 +235,17 @@ def test_build_dataset_manifest_entry_uses_sample_shapes() -> None:
 
     assert entry.feature_count == 2
     assert entry.label_shape == (1, 2)
+
+
+def test_curated_solver_spots_cover_multiple_textures() -> None:
+    from pokergpu.value_network.dataset import curated_solver_spots
+
+    spots = curated_solver_spots()
+    textures = {spot.board_texture for spot in spots}
+    streets = {spot.state.current_street.value for spot in spots}
+    actions = {spot.action_line for spot in spots}
+
+    assert len(spots) >= 12
+    assert {"dry", "wet", "paired"}.issubset(textures)
+    assert {"flop", "turn", "river"}.issubset(streets)
+    assert {"check-check", "c-bet", "bet-call", "bet-fold"}.issubset(actions)
