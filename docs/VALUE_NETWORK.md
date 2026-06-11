@@ -161,16 +161,16 @@ These help track:
 
 ### Goal 1: Define the target
 
-- choose scalar EV or bucketed value output
-- define the exact input features
-- define label format from solver data
+- [x] choose scalar EV or bucketed value output
+- [x] define the exact input features
+- [x] define label format from solver data
 
 ### Goal 2: Build the dataset pipeline
 
-- export training states from solver runs
-- normalize features
-- write train/validation split rules
-- store samples on disk in a simple format
+- [x] export training states from solver runs
+- [x] normalize features
+- [x] write train/validation split rules
+- [x] store samples on disk in a simple format
 
 ### Goal 3: Build the first network
 
