@@ -79,6 +79,7 @@ Full 6-max NLHE is unsolvable without abstraction. You need both card and action
 Discretize betting into a small fixed set per node:
 - Example: `{fold, check/call, bet 33%, bet 75%, bet 150%, all-in}`
 - Vary by street (preflop tighter, postflop richer)
+- **Vary by position**: a 3x open from UTG and a 3x open from BTN are strategically different — the range compositions differ, the multiway pot probability differs, and the postflop position is different. Using the same abstract action tree for all positions is a meaningful abstraction quality loss, especially preflop where positional ranges diverge significantly. Recommended minimum: separate preflop trees for early position (UTG/UTG+1), middle position (MP/HJ), late position (CO/BTN), and blinds (SB/BB). Postflop: at minimum separate IP (in-position) and OOP (out-of-position) bet sizing sets.
 - Constraint by SPR, pot size, min-raise rules
 
 Action count directly controls solver cost: fewer actions = faster convergence. Quality matters more than quantity.
@@ -180,6 +181,31 @@ Per (node, player): `float32[NumBuckets]`
 
 Normalize after chance events. For multiway: one range vector per active player.
 
+**Card removal (blocker filtering) — required at every chance node:**
+
+When a community card is dealt, you must zero out any bucket whose hole cards conflict with the new board card before normalizing. Failing to do this causes ranges to contain impossible holdings, which makes range sums exceed 1 and produces incorrect EVs throughout the tree.
+
+```python
+def apply_card_removal(range_vec, bucket_holdings, new_board_cards):
+    """
+    range_vec: float32[NumBuckets]
+    bucket_holdings: list of (card1, card2) representative hands per bucket
+    new_board_cards: list of cards just dealt
+    """
+    board_set = set(new_board_cards)
+    for b, (c1, c2) in enumerate(bucket_holdings):
+        if c1 in board_set or c2 in board_set:
+            range_vec[b] = 0.0
+    total = range_vec.sum()
+    if total > 1e-9:
+        range_vec /= total
+    # else: impossible state — all holdings blocked. Flag as error.
+```
+
+Apply this at flop deal, turn deal, and river deal for all active players' ranges. Also apply it to your own range when computing self-reach probabilities. For bucketed hands (multiple hole card combinations map to one bucket), zero the bucket only if ALL representative hands in that bucket conflict with the board — or more precisely, weight the bucket by the fraction of combinations that survive removal.
+
+For postflop suit-isomorphic boards (§3.2), card removal must operate on the canonical hand representation, not the raw dealt cards.
+
 ### 4.4 Blueprint Tables
 
 After offline training, export:
@@ -226,9 +252,12 @@ Recheck this estimate after any change to action abstraction or bucket count —
 
 CPU orchestrates tree traversal (sampling). GPU accelerates:
 - Leaf node evaluation (neural value net, large batches)
-- Batch regret accumulation after sampling episodes
 
-Parallelism: run many independent MCCFR trajectories in parallel CPU threads. Collect leaf eval requests, dispatch to GPU in batches of 4096+.
+**Regret accumulation stays on CPU.** MCCFR regret updates are per-trajectory: each trajectory updates a specific set of infosets with values that depend on the exact sampled path. You cannot batch regret updates across trajectories the way you batch leaf evals — each trajectory touches different infosets with different values, so there is no regular structure to parallelize. Attempting to move regret accumulation to GPU gives no speedup and adds PCIe transfer overhead.
+
+GPU work in MCCFR is strictly: leaf node EV inference via VNet, batched across many trajectories. Nothing else in the MCCFR inner loop belongs on the GPU.
+
+Parallelism: run many independent MCCFR trajectories in parallel CPU threads. Collect leaf eval requests, dispatch to GPU in batches of 4096+. See §5.8 for thread safety on shared regret tables.
 
 ### 5.4 Strategy B — Matrix-Op CFR (Maximum GPU Throughput)
 
@@ -304,12 +333,36 @@ Exploitability = how much a best-response opponent can gain per game against you
    a. GPU: batch leaf eval / matrix passes
    b. CPU: sampling, scheduling, pruning (for MCCFR)
 4. Every K iterations:
-   a. Checkpoint average strategy
+   a. Checkpoint (see below)
    b. Compute exploitability estimate (sampled)
    c. Log convergence
 5. Export blueprint tables
 6. Optional: distill blueprint into neural policy (behavior cloning + fine-tuning)
 ```
+
+**Checkpointing and resume:**
+
+Blueprint training runs for days or weeks. Without checkpointing, any interruption restarts from scratch. What to save and why:
+
+```python
+checkpoint = {
+    'iteration': t,                  # REQUIRED: DCFR weights depend on t; wrong t = wrong weights
+    'R': R.cpu(),                    # regret table (fp32)
+    'S': S.cpu(),                    # strategy sum table (fp32)
+    'sigma': sigma.cpu(),            # current strategy (can be recomputed from R, but save for speed)
+    'rng_state': torch.get_rng_state(),          # CPU RNG
+    'cuda_rng_state': torch.cuda.get_rng_state(), # GPU RNG (for MCCFR sampling reproducibility)
+    'prune_mask': prune_mask.cpu(),  # if using regret-based pruning (§5.9)
+}
+torch.save(checkpoint, f'checkpoint_iter_{t}.pt')
+```
+
+**Why each field matters:**
+- `iteration`: DCFR weight `w(t) = t^alpha / (t^alpha + 1)` depends on the true iteration count. Resuming at wrong `t` corrupts all future weighted averages in `S`. This is the most common resume bug.
+- `rng_state` + `cuda_rng_state`: without these, MCCFR sampling is not reproducible after resume. Not critical for correctness (MCCFR converges regardless), but useful for debugging divergence.
+- `prune_mask`: without this, pruned infosets get re-explored unnecessarily for the first few iterations after resume.
+
+**Checkpoint frequency:** every 5,000–10,000 iterations for long runs. Keep the last 3 checkpoints (rolling window) to protect against corrupted saves. Checkpoint files for 10M infosets are ~80–280MB depending on dtype; disk space is not a concern.
 
 ### 5.8 Parallelism Across CPU and GPU (Offline)
 
@@ -387,6 +440,12 @@ At each decision point in a live game, solve the current subgame to near-Nash wi
 - **Range propagation**: forward/backward passes if tree is large enough to justify transfer overhead
 
 ### 6.4 Warm-Starting from Blueprint
+
+**Range initialization overview:** opponent range handling has two distinct steps that must happen in order:
+1. **§6.4 (this section):** one-time initialization at the start of each re-solve — load blueprint regrets/strategy and set the opponent's current range based on all actions observed so far in the hand.
+2. **§6.9:** ongoing per-action update throughout the hand — after each observed action, apply a Bayesian update to the range before the next re-solve.
+
+These are not interchangeable. §6.4 sets the starting range for a given re-solve. §6.9 keeps that range current between re-solves.
 
 Before beginning re-solving:
 1. Load blueprint regrets/strategy for all infosets in the current subtree into CPU memory (or VRAM if budget allows)
@@ -551,14 +610,25 @@ Input features per leaf node:
 - Board cards (one-hot or suit-normalized encoding, using canonical suit normalization from §3.2)
 - Pot size, stack sizes (normalized)
 - Street
+- **Position:** encode each active player's position relative to the dealer button (e.g., one-hot over {BTN, SB, BB, UTG, MP, CO} or ordinal 0–5). Position is critical for EV — the same board/stack/pot situation has a different EV profile depending on who acts first postflop. Omitting position causes systematic errors in out-of-position vs. in-position spots, which are among the most common and strategically significant situations in 6-max.
 - **Action history encoding (fixed-width sequence, player-tagged):** encode each action as a tuple `(player_seat, action_type, bet_size_normalized)`. Player seat must be included — a 3-way pot where UTG bets and BTN calls has a different EV profile than BTN bets and UTG calls, but an encoding without player identity cannot distinguish them. Use a fixed-length sequence padded to max history length (e.g., 20 actions). Represent each action as a small embedding or one-hot over `(seat, action_type, size_bucket)`.
 - Player 0 range: `float32[NumBuckets]`
 - Player 1 range: `float32[NumBuckets]`
 - (Multiway: one range per player, pad to max_players with zeros for folded seats; include a `active_players` bitmask)
 
 Output:
-- `EV[player]` for each active player (sum to pot, verify)
+- `EV[player]` for each active player. **Constraint: `sum(EV[player]) == current_pot` at the depth-limited leaf node, not pot at game end.** The pot at a depth-limited leaf has not been distributed yet; EVs represent each player's expected share of the chips currently in the middle plus their remaining stack contributions. This is distinct from terminal-node EV which sums to the total starting stacks.
 - Or: advantage value `A[player, bucket]` (richer, more expensive)
+
+**Enforcing the sum constraint during training:**
+```python
+# After VNet forward pass, project outputs onto the constraint hyperplane:
+ev_raw = vnet(features)                        # shape: [batch, num_players]
+ev_sum = ev_raw.sum(dim=1, keepdim=True)
+ev_corrected = ev_raw - (ev_sum - current_pot.unsqueeze(1)) / num_players
+# ev_corrected.sum(dim=1) == current_pot for all samples
+```
+Add this projection as a post-processing step at both training time (apply before computing loss) and inference time. Also add a sanity assert during training: if `abs(ev_raw.sum(dim=1) - current_pot).max() > 0.1 * pot`, log a warning — large violations indicate a feature engineering bug (wrong pot normalization or missing stack inputs).
 
 Architecture: MLP with 4–8 layers, residual connections, LayerNorm. Wider is better given GPU budget.
 
@@ -632,7 +702,7 @@ For 2–8 second decision budgets, a TensorRT-compiled MLP value network is the 
 - Minimal branch divergence in GPU kernels
 - No global atomics on shared regret tables in inner loops (use per-block accumulators + reduction)
 - Overlap CPU prep with GPU execution via CUDA streams
-- Float32 for regrets and strategy sums; bfloat16 for reach/value arrays; fp16 for VNet inference (see §11.1)
+- Float32 for regrets and strategy sums; bfloat16 for reach/value arrays; fp16 for VNet inference (see §11.1 for full precision tradeoff analysis). Note: reach vectors (`pi`) are safe in either fp16 or bfloat16 since values stay in [0,1]; prefer bfloat16 for cfv due to its wider exponent range. Do not use fp16 for raw cumulative regrets.
 - Keep action count small (5–9 per node); action abstraction quality over quantity
 - Blueprint warm-start in runtime mode (non-negotiable for convergence speed)
 
@@ -698,8 +768,11 @@ True multiway equilibrium (3+ players) is not computationally feasible for 6-max
 5. Map the coalition's strategy back to individual players proportionally to their range weights.
 
 **Implementation details:**
-*   **Range aggregation:** R_coalition[b] = sum_{j != hero} R_j[b] for each bucket b. Normalize so that sum(R_coalition) = 1.
-*   **Action mapping:** If the coalition strategy specifies action a with probability p, each opponent j plays action a with probability p * (R_j[b] / R_coalition[b]) at bucket b.
+*   **Range aggregation:** `R_coalition[b] = sum_{j != hero} R_j[b]` for each bucket b. Normalize so that `sum(R_coalition) = 1`.
+
+    **Important caveat — double-counting:** summing ranges across opponents treats the coalition as a single player who can hold bucket b. In reality, two opponents can simultaneously hold different hole cards that both map to bucket b. The summed range over-represents the coalition's threat for buckets that appear in multiple opponents' ranges. This is an approximation, not a correct probability. The correct treatment would compute joint probabilities over all opponent hand combinations, which is intractable. Accept this approximation and its consequence: coalition EV will be slightly overestimated for high-frequency buckets. Validate using range coherence checks (§10.8).
+
+*   **Action mapping:** If the coalition strategy specifies action a with probability p, each opponent j plays action a with probability `p * (R_j[b] / R_coalition[b])` at bucket b. This back-mapping is also approximate — it assumes opponents act proportionally to their contribution to the coalition range, not independently.
 *   **Payoff:** Hero's EV is computed against the coalition's joint strategy. Coalition EV is the sum of individual EVs.
 
 **Pros:**
@@ -810,7 +883,7 @@ Any multiway approximation must be checked for pathologies:
 ---
 
 
-### 10.10 Key Insight
+### 10.9 Key Insight
 
 Pluribus and other winning 6-max agents do not solve true multiway equilibrium. They solve 2-player and 3-player subgames with approximations, and rely on a strong value network to paper over the gaps. The goal is not optimality; it is to be unexploitable enough that opponents cannot systematically deviate for profit. Coalition approximation + learned value function achieves this at production scale.
 
@@ -876,9 +949,9 @@ else:
 ```
 Track which infosets are uint8 vs uint16 in a separate bitmap. At warm-start, dequantize back to float32 before loading into the regret table.
 
-**Convergence check:** after quantizing and reloading the blueprint, run 1000 sampled BR trajectories and compare exploitability vs. the unquantized strategy. If delta > 0.1% pot on high-reach infosets, the quantization is too coarse for those spots.
+**Quantization convergence check:** after quantizing and reloading the blueprint, run 1000 sampled BR trajectories and compare exploitability vs. the unquantized strategy. If delta > 0.1% pot on high-reach infosets, the quantization is too coarse for those spots.
 
-**Convergence check:** if switching from fp32 to bf16 for reach/cfv, run a calibration: compare exploitability at iteration 100k with full fp32 vs hybrid. Difference should be < 0.05% pot. If larger, your game scale has precision sensitivity and you should keep cfv in fp32.
+**Precision convergence check:** if switching from fp32 to bf16 for reach/cfv, run a calibration: compare exploitability at iteration 100k with full fp32 vs hybrid. Difference should be < 0.05% pot. If larger, your game scale has precision sensitivity and you should keep cfv in fp32.
 
 ---
 
@@ -1059,6 +1132,16 @@ blueprint = normalize_strategy_cuda(S, infoset_offsets)
 def resolve(game_state, blueprint, vnet, time_budget_sec):
     tree = build_public_tree(game_state, depth_limit=STREET_END)   # CPU
     R, S, sigma = warm_start_from_blueprint(tree, blueprint)        # CPU → GPU
+    # warm_start_from_blueprint must do ALL of the following (in order):
+    #   1. For each infoset in tree: look up blueprint by canonical infoset key
+    #      (board must be suit-normalized per §3.2 before lookup)
+    #   2. Apply action translation (§6.6) for any infoset whose actions differ
+    #      from the blueprint abstraction (off-tree bet sizes in current game state)
+    #   3. Dequantize blueprint_sigma from uint16/uint8 → float32 (§11.1)
+    #   4. Initialize opponent range from hand action history via Bayesian updates
+    #      (§6.4, §6.9) — do NOT use uniform range
+    #   5. Return R (fp32), S (fp32), sigma (fp32) tensors sized for this subgame
+    # Any of these steps done incorrectly silently degrades re-solving quality.
 
     R = R.cuda(); S = S.cuda(); sigma = sigma.cuda()
     infer_stream = torch.cuda.Stream()
