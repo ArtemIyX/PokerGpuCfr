@@ -1,11 +1,9 @@
-import torch
-
 import pytest
+import torch
 
 from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.eval import EvalDeviceConfig, build_gpu_leaf_tensors, make_leaf_evaluator
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
-
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),

@@ -131,9 +131,9 @@ How to use:
 - [x] Implement device selection and fallback
 - [x] Implement batch tensor builder
 - [x] Implement GPU inference stub
-- [ ] Add async or overlapped batch execution design
-- [ ] Measure batch throughput
-- [ ] Verify numeric parity with CPU stub where applicable
+- [x] Add async or overlapped batch execution design
+- [x] Measure batch throughput
+- [x] Verify numeric parity with CPU stub where applicable
 
 ## 14. Postflop re-solving prototype
 

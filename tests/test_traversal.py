@@ -15,8 +15,8 @@ from pokergpu.cfr import (
     update_regrets_from_traversal,
     update_regrets_from_traversal_parallel,
 )
-from pokergpu.eval import LeafFeatureBatch, LeafValueBatch
 from pokergpu.core.betting import Chips
+from pokergpu.eval import LeafFeatureBatch, LeafValueBatch
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
