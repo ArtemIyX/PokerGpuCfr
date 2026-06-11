@@ -36,10 +36,10 @@ How to use:
 
 ## 3. Finish action abstraction
 
-- [ ] Define fixed bet sizes by street
-- [ ] Split abstraction by position group
-- [ ] Handle min-raise and all-in rules
-- [ ] Keep action sets consistent across tree builds
+- [x] Define fixed bet sizes by street
+- [x] Split abstraction by position group
+- [x] Handle min-raise and all-in rules
+- [x] Keep action sets consistent across tree builds
 
 ## 4. Add private-hand indexing and range vectors
 
