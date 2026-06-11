@@ -16,6 +16,34 @@ from pokergpu.core.board import Board
 from pokergpu.core.state import GameState, PlayerState
 
 
+def _make_preflop_state(
+    *,
+    to_act: int,
+    dealer: int = 0,
+    stacks: tuple[int, ...] = (1000, 1000, 1000, 1000, 1000, 1000),
+    bets: tuple[int, ...] = (0, 0, 0, 0, 0, 0),
+) -> GameState:
+    players = tuple(PlayerState(player=PlayerIndex(index)) for index in range(6))
+    return GameState(
+        board=Board(cards=()),
+        players=players,
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(sum(bets) + 150)),
+            stacks=tuple(
+                PlayerStack(player=PlayerIndex(index), stack=chips(stack))
+                for index, stack in enumerate(stacks)
+            ),
+            bets=tuple(
+                PlayerBet(player=PlayerIndex(index), committed=chips(committed))
+                for index, committed in enumerate(bets)
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(to_act),
+        ),
+        dealer=PlayerIndex(dealer),
+    )
+
+
 def test_baseline_abstraction_returns_check_and_bet_when_unopened() -> None:
     state = GameState(
         board=Board(cards=()),
@@ -111,3 +139,74 @@ def test_profiles_can_change_generated_action_count() -> None:
     ).legal_actions(state)
 
     assert len(default_actions) >= len(compact_actions)
+
+
+def test_legal_actions_are_stable_for_same_state() -> None:
+    state = _make_preflop_state(to_act=1)
+    abstraction = BaselineActionAbstraction(profile=make_default_profile())
+
+    first = abstraction.legal_actions(state)
+    second = abstraction.legal_actions(state)
+
+    assert first == second
+
+
+def test_position_groups_change_preflop_action_sets() -> None:
+    abstraction = BaselineActionAbstraction(profile=make_default_profile())
+
+    early = abstraction.legal_actions(_make_preflop_state(to_act=1))
+    middle = abstraction.legal_actions(_make_preflop_state(to_act=3))
+    late = abstraction.legal_actions(_make_preflop_state(to_act=5))
+    blinds = abstraction.legal_actions(_make_preflop_state(to_act=0))
+
+    assert early != middle
+    assert middle != late
+    assert late != blinds
+
+
+def test_min_raise_is_respected() -> None:
+    state = GameState(
+        board=Board(cards=()),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(300)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(100)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(1),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    actions = BaselineActionAbstraction(profile=make_default_profile()).legal_actions(
+        state
+    )
+
+    raise_amounts = [
+        int(action.amount)
+        for action in actions
+        if action.amount is not None
+    ]
+    assert min(raise_amounts) >= 500
+
+
+def test_all_in_bet_is_retained_when_legal() -> None:
+    state = _make_preflop_state(to_act=1, stacks=(250, 90, 1000, 1000, 1000, 1000))
+
+    actions = BaselineActionAbstraction(profile=make_default_profile()).legal_actions(
+        state
+    )
+
+    assert any(
+        action.action_type.value == "bet" and int(action.amount or 0) == 90
+        for action in actions
+    )

@@ -18,6 +18,7 @@ class BuiltPublicTree:
     tree: PublicTree
     node_states: tuple[GameState, ...]
     actions_by_node: tuple[tuple[Action, ...], ...]
+    action_abstraction_id: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -130,6 +131,7 @@ def build_public_tree(
         tree=tree,
         node_states=tuple(node_states),
         actions_by_node=tuple(actions_by_node),
+        action_abstraction_id=abstraction_impl.abstraction_id(state),
     )
 
 
