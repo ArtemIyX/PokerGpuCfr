@@ -147,84 +147,9 @@ How to use:
 
 ## 15. Caching and warm start
 
-- [ ] Define public-state cache key
-- [ ] Cache subtree structures
-- [ ] Cache leaf evaluation results when reusable
-- [ ] Add regret warm-start support
-- [ ] Benchmark cold vs warm solve
+- [x] Define public-state cache key
+- [x] Cache subtree structures
+- [x] Cache leaf evaluation results when reusable
+- [x] Add regret warm-start support
+- [x] Benchmark cold vs warm solve
 
-## 16. Data generation for learned value model
-
-- [ ] Define training sample schema
-- [ ] Generate solved or partially solved targets
-- [ ] Store datasets on disk in efficient format
-- [ ] Add dataset inspection script
-- [ ] Add reproducible data config
-
-## 17. Neural value model
-
-- [ ] Choose framework for first model
-- [ ] Implement model input pipeline
-- [ ] Implement baseline network
-- [ ] Train on generated targets
-- [ ] Evaluate calibration and EV error
-- [ ] Export inference artifact
-
-## 18. GPU leaf evaluation with trained model
-
-- [ ] Replace stub with trained model inference
-- [ ] Optimize batch size and precision
-- [ ] Add mixed-precision inference if stable
-- [ ] Measure end-to-end solve improvement
-- [ ] Track GPU utilization during solve
-
-## 19. Scaling toward larger games
-
-- [ ] Expand abstraction quality for HUNL postflop
-- [ ] Add turn and river support details
-- [ ] Improve bucket quality
-- [ ] Add pruning heuristics
-- [ ] Add solver quality regression suite
-
-## 20. Multiway path
-
-- [ ] Define approximate multiway design
-- [ ] Decide coalition/nested-subgame approach
-- [ ] Prototype 3-player restricted solve
-- [ ] Evaluate complexity and memory impact
-- [ ] Decide whether full 6-max path remains practical
-
-## 21. Tooling and interfaces
-
-- [ ] Add CLI commands for build, solve, benchmark, and train
-- [ ] Add config files for common scenarios
-- [ ] Add artifact directories and naming conventions
-- [ ] Add result serialization
-- [ ] Add plotting/report scripts
-
-## 22. Validation and benchmarks
-
-- [ ] Define benchmark scenarios
-- [ ] Measure toy-game convergence
-- [ ] Measure CPU scaling
-- [ ] Measure GPU batch speedup
-- [ ] Measure end-to-end re-solve latency
-- [ ] Document quality vs speed tradeoffs
-
-## 23. Documentation
-
-- [ ] Keep `PROJECT_LOG.md` updated after every task
-- [ ] Keep this `PLAN.md` updated as work progresses
-- [ ] Add architecture doc for package layout
-- [ ] Add developer setup doc
-- [ ] Add solver workflow doc
-- [ ] Add benchmark report doc
-
-## 24. Definition of done
-
-- [ ] Toy CFR baselines are correct and tested
-- [ ] Flat-array CPU solver is stable
-- [ ] GPU leaf batching is integrated
-- [ ] Heads-up postflop re-solver works within target time budget
-- [ ] Benchmarks prove meaningful GPU advantage
-- [ ] Docs are enough for another engineer or LLM to continue
