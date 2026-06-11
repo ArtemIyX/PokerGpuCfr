@@ -515,8 +515,8 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
     validation_modulo = 10
     validation_remainder = 0
     max_nodes = 128
-    sampled_pairs = 0
-    sampled_runouts = 0
+    sampled_pairs = 256
+    sampled_runouts = 8
     workers = 1
     index = 0
     while index < len(args):
