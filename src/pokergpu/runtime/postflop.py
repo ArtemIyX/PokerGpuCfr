@@ -22,6 +22,12 @@ from pokergpu.core.cards import Card
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import CpuStubLeafEvaluator, LeafEvaluator
+from pokergpu.runtime.cache import WarmStartState
+from pokergpu.runtime.caching import (
+    PublicStateFingerprint,
+    SolveCacheState,
+    make_warm_start_state,
+)
 from pokergpu.tree import PublicTree
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
 
@@ -35,6 +41,7 @@ class PostflopResolveSpec:
     max_depth: int = 2
     max_nodes: int = 256
     min_reach_prob: float = 0.0
+    cache_state: SolveCacheState | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +85,11 @@ def resolve_postflop_hu(
     if not action_counts:
         raise ValueError("resolver requires at least one player infoset")
     store = InfosetStore.zeros(InfosetLayout.from_action_counts(action_counts))
+    public_fingerprint = _build_public_fingerprint(spec, tree, evaluator_impl)
+    if spec.cache_state is not None:
+        warm_start = spec.cache_state.lookup_warm_start(public_fingerprint.digest())
+        if warm_start is not None:
+            _apply_warm_start(store, warm_start)
 
     _, _, root_reach_p0, root_reach_p1 = _apply_root_ranges(
         spec.state,
@@ -129,6 +141,17 @@ def resolve_postflop_hu(
         iterations += 1
         if spec.time_budget_sec <= 0.0:
             break
+
+    if spec.cache_state is not None:
+        spec.cache_state.store_warm_start(
+            public_fingerprint.digest(),
+            make_warm_start_state(
+                regret=tuple(float(value) for value in store.regrets),
+                strategy_sum=tuple(float(value) for value in store.strategy_sums),
+                source_key=public_fingerprint.digest(),
+                blend_alpha=1.0,
+            ),
+        )
 
     root_strategy = store.average_strategy(0)
     return PostflopResolveResult(
@@ -195,3 +218,46 @@ def _terminal_value_player0(state: GameState) -> float:
     )
     other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
     return float(player0_payout - other_payouts)
+
+
+def _build_public_fingerprint(
+    spec: PostflopResolveSpec,
+    tree: object,
+    evaluator: LeafEvaluator,
+) -> PublicStateFingerprint:
+    built_tree = tree
+    canonical_board = getattr(built_tree, "canonical_board_key", "")
+    action_abstraction_id = getattr(built_tree, "action_abstraction_id", "")
+    return PublicStateFingerprint(
+        variant="nlhe",
+        street=spec.state.current_street.value,
+        acting_player=int(spec.state.betting_round.to_act),
+        pot=int(spec.state.betting_round.pot.amount),
+        stacks=tuple(int(stack.stack) for stack in spec.state.betting_round.stacks),
+        blinds=(
+            int(spec.state.betting_round.blinds.small_blind),
+            int(spec.state.betting_round.blinds.big_blind),
+        ),
+        antes=(int(spec.state.betting_round.blinds.ante),) * spec.state.player_count,
+        board=tuple(str(card) for card in spec.state.board.cards),
+        action_history=(),
+        action_abstraction_id=action_abstraction_id,
+        range_abstraction_id="private_hand_v1",
+        subtree_depth_limit=spec.max_depth,
+        evaluator_id=evaluator.__class__.__name__,
+        solver_version="1",
+        player_count=spec.state.player_count,
+        active_players=tuple(
+            int(player.player) for player in spec.state.active_players
+        ),
+        canonical_board=canonical_board,
+        card_removal_version="1",
+    )
+
+
+def _apply_warm_start(store: InfosetStore, warm_start: WarmStartState) -> None:
+    if len(warm_start.regret) == store.layout.total_actions:
+        store.regrets[:] = np.asarray(warm_start.regret, dtype=np.float32)
+    if (warm_start.strategy_sum and 
+        len(warm_start.strategy_sum) == store.layout.total_actions):
+        store.strategy_sums[:] = np.asarray(warm_start.strategy_sum, dtype=np.float32)

@@ -78,21 +78,8 @@ How to use:
 
 ## 9. Add heads-up postflop re-solving
 
-- [ ] Build depth-limited subtree solving
-- [ ] Add leaf evaluation at frontier nodes
-- [ ] Warm start from cached blueprint state
-- [ ] Return root strategy for real spots
+- [x] Build depth-limited subtree solving
+- [x] Add leaf evaluation at frontier nodes
+- [x] Warm start from cached blueprint state
+- [x] Return root strategy for real spots
 
-## 10. Add leaf batching and a trained value model
-
-- [ ] Define leaf feature tensors
-- [ ] Build training data from solved subgames
-- [ ] Train a small value model first
-- [ ] Add GPU inference for batch leaf eval
-
-## 11. Extend to cached blueprint solving and multiway 6-max approximation
-
-- [ ] Add blueprint export and reload
-- [ ] Add subtree caching and warm starts
-- [ ] Approximate multiway as restricted subgames
-- [ ] Measure solver quality and speed
