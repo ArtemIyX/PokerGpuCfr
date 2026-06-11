@@ -1,4 +1,5 @@
 from .checkpoint import ValueCheckpoint, load_checkpoint, save_checkpoint
+from .equity import EquityEvalConfig, build_postflop_equity_label
 from .dataset import (
     DatasetManifestEntry,
     DatasetSplitRule,
@@ -57,9 +58,11 @@ __all__ = [
     "ValueCheckpoint",
     "TrainingConfig",
     "TrainingResult",
+    "EquityEvalConfig",
     "ValueMLP",
     "ValueNetworkConfig",
     "build_value_feature_batch",
+    "build_postflop_equity_label",
     "build_dataset_manifest_entry",
     "build_value_model",
     "build_value_network_config",

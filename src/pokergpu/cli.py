@@ -48,11 +48,13 @@ from .runtime import PostflopResolveSpec, resolve_postflop_hu
 from .value_network import (
     DatasetManifestEntry,
     DatasetSplitRule,
+    EquityEvalConfig,
     FeatureNormalizer,
     LabelNormalizer,
     ValueDatasetSample,
     ValueFeatureSpec,
     ValueTargetKind,
+    build_postflop_equity_label,
     build_value_label,
     export_dataset_sample,
     export_value_sample,
@@ -937,14 +939,16 @@ def _solve_and_export_label(
             continue
     if result is None or resolve_spec is None:
         raise ValueError("unable to generate a valid solver label")
+    label = build_postflop_equity_label(
+        resolve_spec.state,
+        PlayerRangeVectors.from_values((resolve_spec.range_p0, resolve_spec.range_p1)),
+        config=EquityEvalConfig(max_range_combos=args.max_nodes),
+    )
     sample = export_value_sample(
         sample_id=f"solver-{index:05d}",
         state=resolve_spec.state,
         ranges=PlayerRangeVectors.from_values((resolve_spec.range_p0, resolve_spec.range_p1)),
-        label=build_value_label(
-            [result.root_ev_player0, result.root_ev_player1],
-            scalar_ev_target(args.player_count),
-        ),
+        label=label,
         feature_spec=feature_spec,
         metadata={
             "solver": "postflop_hu",
@@ -987,14 +991,16 @@ def _solve_curated_spot(
         max_nodes=128,
     )
     result = resolve_postflop_hu(spec)
+    label = build_postflop_equity_label(
+        spot_t.state,
+        PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
+        config=EquityEvalConfig(max_range_combos=128),
+    )
     sample = export_value_sample(
         sample_id=f"curated-{spot_t.family}-{index:05d}",
         state=spot_t.state,
         ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
-        label=build_value_label(
-            [result.root_ev_player0, result.root_ev_player1],
-            scalar_ev_target(2),
-        ),
+        label=label,
         feature_spec=feature_spec,
         metadata={
             "solver": "postflop_hu",
