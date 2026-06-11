@@ -54,13 +54,21 @@ def test_train_baseline_runs_and_returns_losses(tmp_path: Path) -> None:
         output_dir=output_dir,
         feature_spec=feature_spec,
         target_kind=ValueTargetKind.SCALAR_EV,
-        config=TrainingConfig(epochs=2, batch_size=2, learning_rate=1e-3),
-        normalizer=normalizer,
+        config=TrainingConfig(
+            epochs=2,
+            batch_size=2,
+            learning_rate=1e-3,
+            hidden_dim=768,
+            hidden_layers=8,
+        ),
+        feature_normalizer=normalizer,
     )
 
     assert result.train_loss >= 0.0
     assert result.val_loss >= 0.0
     assert result.checkpoint.best_metric >= 0.0
+    assert result.checkpoint.model_config.hidden_dim == 768
+    assert result.checkpoint.model_config.hidden_layers == 8
     assert result.predictions.shape[1] == 2
     assert result.labels.shape[1] == 2
     assert (output_dir / "best_checkpoint.pt").exists()

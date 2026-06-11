@@ -17,8 +17,11 @@ else:
 
 from pokergpu.abstraction.hands import PlayerRangeVectors
 from pokergpu.core.board import Board, Street
+from pokergpu.core.cards import Suit
 from pokergpu.core.state import GameState
 from pokergpu.eval.device import EvalDeviceConfig, resolve_eval_device
+
+_CHIP_SCALE = np.float32(10000.0)
 
 
 class ValueTargetKind(StrEnum):
@@ -115,7 +118,17 @@ def _encode_street(board: Board) -> np.float32:
 def _encode_board(board: Board) -> NDArray[np.float32]:
     encoded = np.zeros(5, dtype=np.float32)
     for index, _card in enumerate(board.cards):
-        encoded[index] = np.float32(index + 1)
+        card = board.cards[index]
+        rank_index = float(card.rank.order_value - 2)
+        suit_index = float(
+            {
+                Suit.CLUBS: 0,
+                Suit.DIAMONDS: 1,
+                Suit.HEARTS: 2,
+                Suit.SPADES: 3,
+            }[card.suit]
+        )
+        encoded[index] = np.float32((rank_index * 4.0 + suit_index + 1.0) / 52.0)
     return encoded
 
 
@@ -128,7 +141,7 @@ def _player_mask(state: GameState) -> NDArray[np.float32]:
 
 def _stack_features(state: GameState) -> NDArray[np.float32]:
     return np.asarray(
-        [float(stack.stack) for stack in state.betting_round.stacks],
+        [float(stack.stack) / float(_CHIP_SCALE) for stack in state.betting_round.stacks],
         dtype=np.float32,
     )
 
@@ -172,9 +185,9 @@ def build_value_feature_batch(
         features[row, offset] = _encode_street(state.board)
         offset += 1
         features[row, offset] = np.float32(
-            float(
-                sum(stack.stack for stack 
-                    in state.betting_round.stacks)))
+            float(sum(stack.stack for stack in state.betting_round.stacks))
+            / float(_CHIP_SCALE)
+        )
         offset += 1
         features[row, offset : offset + 5] = _encode_board(state.board)
         offset += 5

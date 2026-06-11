@@ -24,10 +24,17 @@ from pokergpu.value_network.model import (
 
 def test_value_network_config_uses_feature_spec() -> None:
     spec = ValueFeatureSpec(player_count=2, max_history_length=8)
-    config = build_value_network_config(spec, ValueTargetKind.SCALAR_EV)
+    config = build_value_network_config(
+        spec,
+        ValueTargetKind.SCALAR_EV,
+        hidden_dim=768,
+        hidden_layers=8,
+    )
 
     assert config.input_dim > 0
     assert config.output_dim == 2
+    assert config.hidden_dim == 768
+    assert config.hidden_layers == 8
 
 
 def test_value_model_forward_shape() -> None:

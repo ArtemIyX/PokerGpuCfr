@@ -98,6 +98,7 @@ def test_feature_batch_builds_expected_shape() -> None:
     assert batch.values.shape == (1, feature_dimension(spec))
     assert batch.values.dtype == np.float32
     assert math.isclose(float(batch.values[0, 0]), 1.0, abs_tol=1e-6)
+    assert float(batch.values[0, 1]) < 10.0
 
 
 def test_feature_batch_rejects_mismatched_inputs() -> None:

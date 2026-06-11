@@ -427,8 +427,8 @@ def _make_spot(
         "large": chips(800),
     }[pot_bucket]
     stack_amount = {
-        "shallow": chips(600),
-        "deep": chips(2000),
+        "shallow": chips(3000),
+        "deep": chips(10000),
     }[stack_bucket]
     state = GameState(
         board=board,

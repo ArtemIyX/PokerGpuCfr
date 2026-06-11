@@ -1,15 +1,16 @@
 import logging
 import json
+import concurrent.futures as futures
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from random import Random
-from typing import Callable
+from typing import Any, Callable, cast
 
 import numpy as np
 
-from .abstraction.hands import PlayerRangeVectors, RangeVector
+from .abstraction.hands import PlayerRangeVectors, RangeVector, private_hand_count
 from .app import create_app
 from .benchmarks import run_benchmark
 from .cfr import (
@@ -34,6 +35,7 @@ from .core.betting import (
     chips,
 )
 from .core.board import Board
+from .core.cards import Card, shuffled_deck
 from .core.state import GameState, PlayerState
 from .eval import (
     EvalDeviceConfig,
@@ -55,6 +57,9 @@ from .value_network import (
     export_dataset_sample,
     fit_feature_normalizer,
     fit_label_normalizer,
+    load_dataset_manifest,
+    load_feature_normalizer,
+    load_label_normalizer,
     load_value_sample,
     save_dataset_manifest,
     save_feature_normalizer,
@@ -135,7 +140,7 @@ def main() -> int:
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "postflop-resolve":
         print("pokergpu: postflop resolve")
-        demo_spec = _demo_postflop_spec(Random())
+        demo_spec = _real_postflop_spec(Random())
         demo_evaluator = _DemoBiasedLeafEvaluator(
             make_leaf_evaluator(EvalDeviceConfig(mode="cuda"))
         )
@@ -162,6 +167,10 @@ def main() -> int:
         print(f"manifest={value_data_args.manifest_path}")
         print(f"dataset_dir={value_data_args.output_dir}")
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "dataset-sanity-report":
+        report_args = _parse_dataset_sanity_report_args(sys.argv[2:])
+        _print_dataset_sanity_report(report_args)
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] == "export-solver-labels":
         solver_label_args = _parse_solver_label_args(sys.argv[2:])
         started_at = time.monotonic()
@@ -181,6 +190,7 @@ def main() -> int:
                     "solve_time_sec": solver_label_args.solve_time_sec,
                     "max_depth": solver_label_args.max_depth,
                     "max_nodes": solver_label_args.max_nodes,
+                    "workers": solver_label_args.workers,
                 },
                 sort_keys=True,
             )
@@ -209,6 +219,11 @@ def main() -> int:
                     "epochs": train_args.training_config.epochs,
                     "batch_size": train_args.training_config.batch_size,
                     "learning_rate": train_args.training_config.learning_rate,
+                    "hidden_dim": train_args.training_config.hidden_dim,
+                    "hidden_layers": train_args.training_config.hidden_layers,
+                    "dropout": train_args.training_config.dropout,
+                    "feature_normalizer": train_args.feature_normalizer is not None,
+                    "label_normalizer": train_args.label_normalizer is not None,
                     "validation_modulo": train_args.training_config.validation_modulo,
                     "validation_remainder": train_args.training_config.validation_remainder,
                 },
@@ -222,7 +237,8 @@ def main() -> int:
             feature_spec=train_args.feature_spec,
             target_kind=ValueTargetKind.SCALAR_EV,
             config=train_args.training_config,
-            normalizer=train_args.normalizer,
+            feature_normalizer=train_args.feature_normalizer,
+            label_normalizer=train_args.label_normalizer,
             progress_callback=_print_progress,
         )
         print(f"train_loss={training_result.train_loss:.6f}")
@@ -250,6 +266,7 @@ def main() -> int:
                     "output_dir": str(curated_args.output_dir),
                     "manifest_path": str(curated_args.manifest_path),
                     "limit": curated_args.limit,
+                    "workers": curated_args.workers,
                 },
                 sort_keys=True,
             )
@@ -289,7 +306,8 @@ class _ValueTrainArgs:
     output_dir: Path
     feature_spec: ValueFeatureSpec
     training_config: TrainingConfig
-    normalizer: FeatureNormalizer | None
+    feature_normalizer: FeatureNormalizer | None
+    label_normalizer: LabelNormalizer | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +321,7 @@ class _SolverLabelArgs:
     solve_time_sec: float
     max_depth: int
     max_nodes: int
+    workers: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +329,15 @@ class _CuratedSolverLabelArgs:
     output_dir: Path
     manifest_path: Path
     limit: int
+    workers: int
+
+
+@dataclass(frozen=True, slots=True)
+class _DatasetSanityReportArgs:
+    manifest_path: Path
+    dataset_dir: Path
+    feature_normalizer_path: Path | None
+    label_normalizer_path: Path | None
 
 
 def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
@@ -373,7 +401,11 @@ def _parse_value_train_args(args: list[str]) -> _ValueTrainArgs:
     epochs = 3
     batch_size = 8
     learning_rate = 1e-3
-    normalizer: FeatureNormalizer | None = None
+    hidden_dim = 512
+    hidden_layers = 6
+    dropout = 0.0
+    feature_normalizer: FeatureNormalizer | None = None
+    label_normalizer: LabelNormalizer | None = None
     index = 0
     while index < len(args):
         option = args[index]
@@ -409,8 +441,32 @@ def _parse_value_train_args(args: list[str]) -> _ValueTrainArgs:
             learning_rate = float(args[index + 1])
             index += 2
             continue
+        if option == "--hidden-dim" and index + 1 < len(args):
+            hidden_dim = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--hidden-layers" and index + 1 < len(args):
+            hidden_layers = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--dropout" and index + 1 < len(args):
+            dropout = float(args[index + 1])
+            index += 2
+            continue
         if option == "--normalizer" and index + 1 < len(args):
-            normalizer = FeatureNormalizer.from_json(
+            feature_normalizer = FeatureNormalizer.from_json(
+                json.loads(Path(args[index + 1]).read_text(encoding="utf-8"))
+            )
+            index += 2
+            continue
+        if option == "--feature-normalizer" and index + 1 < len(args):
+            feature_normalizer = FeatureNormalizer.from_json(
+                json.loads(Path(args[index + 1]).read_text(encoding="utf-8"))
+            )
+            index += 2
+            continue
+        if option == "--label-normalizer" and index + 1 < len(args):
+            label_normalizer = LabelNormalizer.from_json(
                 json.loads(Path(args[index + 1]).read_text(encoding="utf-8"))
             )
             index += 2
@@ -428,8 +484,12 @@ def _parse_value_train_args(args: list[str]) -> _ValueTrainArgs:
             epochs=epochs,
             batch_size=batch_size,
             learning_rate=learning_rate,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            dropout=dropout,
         ),
-        normalizer=normalizer,
+        feature_normalizer=feature_normalizer,
+        label_normalizer=label_normalizer,
     )
 
 
@@ -443,6 +503,7 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
     solve_time_sec = 0.25
     max_depth = 3
     max_nodes = 128
+    workers = 1
     index = 0
     while index < len(args):
         option = args[index]
@@ -483,6 +544,10 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
             max_nodes = int(args[index + 1])
             index += 2
             continue
+        if option == "--workers" and index + 1 < len(args):
+            workers = int(args[index + 1])
+            index += 2
+            continue
         raise ValueError(f"invalid export-solver-labels arguments: {args!r}")
     return _SolverLabelArgs(
         output_dir=output_dir,
@@ -494,6 +559,7 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
         solve_time_sec=solve_time_sec,
         max_depth=max_depth,
         max_nodes=max_nodes,
+        workers=workers,
     )
 
 
@@ -501,6 +567,7 @@ def _parse_curated_solver_label_args(args: list[str]) -> _CuratedSolverLabelArgs
     output_dir = Path("artifacts/curated_solver_labels").resolve()
     manifest_path = output_dir / "manifest.json"
     limit = 9
+    workers = 1
     index = 0
     while index < len(args):
         option = args[index]
@@ -517,12 +584,114 @@ def _parse_curated_solver_label_args(args: list[str]) -> _CuratedSolverLabelArgs
             limit = int(args[index + 1])
             index += 2
             continue
+        if option == "--workers" and index + 1 < len(args):
+            workers = int(args[index + 1])
+            index += 2
+            continue
         raise ValueError(f"invalid export-curated-solver-labels arguments: {args!r}")
     return _CuratedSolverLabelArgs(
         output_dir=output_dir,
         manifest_path=manifest_path,
         limit=limit,
+        workers=workers,
     )
+
+
+def _parse_dataset_sanity_report_args(args: list[str]) -> _DatasetSanityReportArgs:
+    manifest_path = Path("artifacts/value_data/manifest.json").resolve()
+    dataset_dir = Path("artifacts/value_data").resolve()
+    feature_normalizer_path: Path | None = dataset_dir / "normalizer.json"
+    label_normalizer_path: Path | None = dataset_dir / "label_normalizer.json"
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option == "--manifest" and index + 1 < len(args):
+            manifest_path = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        if option == "--dataset-dir" and index + 1 < len(args):
+            dataset_dir = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        if option == "--feature-normalizer" and index + 1 < len(args):
+            feature_normalizer_path = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        if option == "--label-normalizer" and index + 1 < len(args):
+            label_normalizer_path = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        if option == "--no-feature-normalizer":
+            feature_normalizer_path = None
+            index += 1
+            continue
+        if option == "--no-label-normalizer":
+            label_normalizer_path = None
+            index += 1
+            continue
+        raise ValueError(f"invalid dataset-sanity-report arguments: {args!r}")
+    return _DatasetSanityReportArgs(
+        manifest_path=manifest_path,
+        dataset_dir=dataset_dir,
+        feature_normalizer_path=feature_normalizer_path,
+        label_normalizer_path=label_normalizer_path,
+    )
+
+
+def _print_dataset_sanity_report(args: _DatasetSanityReportArgs) -> None:
+    entries = load_dataset_manifest(args.manifest_path)
+    train_entries = [entry for entry in entries if entry.split == "train"]
+    val_entries = [entry for entry in entries if entry.split == "val"]
+    samples = [load_value_sample(args.dataset_dir / entry.path) for entry in entries]
+    feature_counts = sorted({int(entry.feature_count) for entry in entries})
+    label_shapes = sorted({tuple(entry.label_shape) for entry in entries})
+    feature_normalizer = (
+        load_feature_normalizer(args.feature_normalizer_path)
+        if args.feature_normalizer_path is not None and args.feature_normalizer_path.exists()
+        else None
+    )
+    label_normalizer = (
+        load_label_normalizer(args.label_normalizer_path)
+        if args.label_normalizer_path is not None and args.label_normalizer_path.exists()
+        else None
+    )
+    feature_matrix = np.vstack([sample.features for sample in samples]).astype(np.float32)
+    label_matrix = np.concatenate([sample.label for sample in samples], axis=0).astype(np.float32)
+    print("pokergpu: dataset-sanity-report")
+    print(f"manifest={args.manifest_path}")
+    print(f"dataset_dir={args.dataset_dir}")
+    print(f"samples={len(samples)}")
+    print(f"train_samples={len(train_entries)}")
+    print(f"val_samples={len(val_entries)}")
+    print(f"feature_counts={','.join(str(value) for value in feature_counts)}")
+    print(
+        "label_shapes="
+        + ",".join(f"{shape[0]}x{shape[1]}" for shape in label_shapes)
+    )
+    print(
+        "features_mean="
+        + ",".join(f"{float(value):.6f}" for value in feature_matrix.mean(axis=0)[:8])
+    )
+    feature_std = feature_matrix.std(axis=0)
+    print(
+        "features_std="
+        + ",".join(f"{float(value):.6f}" for value in feature_std[:8])
+    )
+    print(f"feature_std_nonzero={int(np.count_nonzero(feature_std > 0.0))}")
+    print(f"feature_std_min={float(feature_std.min()):.6f}")
+    print(f"feature_std_max={float(feature_std.max()):.6f}")
+    print(
+        "labels_mean="
+        + ",".join(f"{float(value):.6f}" for value in label_matrix.mean(axis=0))
+    )
+    print(
+        "labels_std="
+        + ",".join(f"{float(value):.6f}" for value in label_matrix.std(axis=0))
+    )
+    if feature_normalizer is not None:
+        print(f"feature_normalizer_count={feature_normalizer.feature_count}")
+    if label_normalizer is not None:
+        print(f"label_normalizer_count={label_normalizer.label_count}")
 
 
 def _generate_value_data(args: _ValueDataArgs) -> None:
@@ -592,44 +761,51 @@ def _export_solver_labels(
         validation_remainder=args.validation_remainder,
     )
     feature_spec = ValueFeatureSpec(player_count=args.player_count, max_history_length=8)
-    target = scalar_ev_target(args.player_count)
-    for index in range(args.sample_count):
-        spec = _demo_postflop_spec(Random(9000 + index))
-        spec = PostflopResolveSpec(
-            state=spec.state,
-            range_p0=spec.range_p0,
-            range_p1=spec.range_p1,
-            time_budget_sec=args.solve_time_sec,
-            max_depth=args.max_depth,
-            max_nodes=args.max_nodes,
-            min_reach_prob=spec.min_reach_prob,
-            cache_state=spec.cache_state,
-        )
-        result = resolve_postflop_hu(spec)
-        entry = export_dataset_sample(
-            sample_id=f"solver-{index:05d}",
-            state=spec.state,
-            ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
-            label=build_value_label(
-                [result.root_ev_player0, result.root_ev_player1],
-                target,
-            ),
-            feature_spec=feature_spec,
-            output_dir=args.output_dir,
-            split_rule=split_rule,
-            metadata={
-                "solver": "postflop_hu",
-                "iterations": result.iterations,
-                "elapsed_seconds": result.elapsed_seconds,
-                "root_infoset_id": result.root_infoset_id,
-                "root_actions": result.root_actions,
-            },
-        )
-        entries.append(entry)
-        loaded = load_value_sample(args.output_dir / entry.path)
-        samples.append(loaded)
-        if progress_callback is not None:
-            progress_callback(index + 1, args.sample_count, "export labels")
+    if progress_callback is not None:
+        progress_callback(0, args.sample_count, "export labels")
+    completed = 0
+    if progress_callback is not None:
+        _print_progress_detail(0, args.sample_count, args.workers, "export labels")
+    with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+        in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
+        next_index = 0
+        max_in_flight = max(1, args.workers * 2)
+        while next_index < args.sample_count or in_flight:
+            while next_index < args.sample_count and len(in_flight) < max_in_flight:
+                in_flight.add(
+                    executor.submit(
+                        _solve_and_export_label,
+                        next_index,
+                        args,
+                        feature_spec,
+                        split_rule,
+                    )
+                )
+                next_index += 1
+            done, in_flight = futures.wait(
+                in_flight,
+                timeout=0.25,
+                return_when=futures.FIRST_COMPLETED,
+            )
+            if progress_callback is not None:
+                _print_progress_detail(
+                    completed,
+                    args.sample_count,
+                    len(in_flight),
+                    "export labels",
+                )
+            for job in done:
+                entry, sample = job.result()
+                entries.append(entry)
+                samples.append(sample)
+                completed += 1
+                if progress_callback is not None:
+                    _print_progress_detail(
+                        completed,
+                        args.sample_count,
+                        len(in_flight),
+                        "export labels",
+                    )
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
     save_dataset_manifest(entries, args.manifest_path)
@@ -650,40 +826,52 @@ def _export_curated_solver_labels(
     samples: list[ValueDatasetSample] = []
     split_rule = DatasetSplitRule()
     feature_spec = ValueFeatureSpec(player_count=2, max_history_length=8)
-    target = scalar_ev_target(2)
-    for index, spot in enumerate(spots):
-        spec = PostflopResolveSpec(
-            state=spot.state,
-            range_p0=RangeVector.uniform(),
-            range_p1=RangeVector.uniform(),
-            time_budget_sec=0.25,
-            max_depth=3,
-            max_nodes=128,
-        )
-        result = resolve_postflop_hu(spec)
-        entry = export_dataset_sample(
-            sample_id=f"curated-{index:05d}",
-            state=spot.state,
-            ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
-            label=build_value_label(
-                [result.root_ev_player0, result.root_ev_player1],
-                target,
-            ),
-            feature_spec=feature_spec,
-            output_dir=args.output_dir,
-            split_rule=split_rule,
-            metadata={
-                "solver": "postflop_hu",
-                "board_texture": spot.board_texture,
-                "pot_bucket": spot.pot_bucket,
-                "stack_bucket": spot.stack_bucket,
-                "action_line": spot.action_line,
-            },
-        )
-        entries.append(entry)
-        samples.append(load_value_sample(args.output_dir / entry.path))
-        if progress_callback is not None:
-            progress_callback(index + 1, len(spots), "curated export")
+    if progress_callback is not None:
+        progress_callback(0, len(spots), "curated export")
+    completed = 0
+    if progress_callback is not None:
+        _print_progress_detail(0, len(spots), args.workers, "curated export")
+    with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+        in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
+        next_index = 0
+        max_in_flight = max(1, args.workers * 2)
+        while next_index < len(spots) or in_flight:
+            while next_index < len(spots) and len(in_flight) < max_in_flight:
+                in_flight.add(
+                    executor.submit(
+                        _solve_curated_spot,
+                        next_index,
+                        spots[next_index],
+                        args.output_dir,
+                        feature_spec,
+                        split_rule,
+                    )
+                )
+                next_index += 1
+            done, in_flight = futures.wait(
+                in_flight,
+                timeout=0.25,
+                return_when=futures.FIRST_COMPLETED,
+            )
+            if progress_callback is not None:
+                _print_progress_detail(
+                    completed,
+                    len(spots),
+                    len(in_flight),
+                    "curated export",
+                )
+            for job in done:
+                entry, sample = job.result()
+                entries.append(entry)
+                samples.append(sample)
+                completed += 1
+                if progress_callback is not None:
+                    _print_progress_detail(
+                        completed,
+                        len(spots),
+                        len(in_flight),
+                        "curated export",
+                    )
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
     save_dataset_manifest(entries, args.manifest_path)
@@ -691,18 +879,120 @@ def _export_curated_solver_labels(
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
 
 
-def _demo_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
+def _solve_and_export_label(
+    index: int,
+    args: _SolverLabelArgs,
+    feature_spec: ValueFeatureSpec,
+    split_rule: DatasetSplitRule,
+) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
+    from .runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
+
+    spec = _real_postflop_spec(Random(9000 + index))
+    resolve_spec = PostflopResolveSpec(
+        state=spec.state,
+        range_p0=spec.range_p0,
+        range_p1=spec.range_p1,
+        time_budget_sec=args.solve_time_sec,
+        max_depth=args.max_depth,
+        max_nodes=args.max_nodes,
+        min_reach_prob=spec.min_reach_prob,
+        cache_state=spec.cache_state,
+    )
+    result = resolve_postflop_hu(resolve_spec)
+    sample = export_dataset_sample(
+        sample_id=f"solver-{index:05d}",
+        state=resolve_spec.state,
+        ranges=PlayerRangeVectors.from_values((resolve_spec.range_p0, resolve_spec.range_p1)),
+        label=build_value_label(
+            [result.root_ev_player0, result.root_ev_player1],
+            scalar_ev_target(args.player_count),
+        ),
+        feature_spec=feature_spec,
+        output_dir=args.output_dir,
+        split_rule=split_rule,
+        metadata={
+            "solver": "postflop_hu",
+            "iterations": result.iterations,
+            "elapsed_seconds": result.elapsed_seconds,
+            "root_infoset_id": result.root_infoset_id,
+            "root_actions": result.root_actions,
+        },
+    )
+    loaded = load_value_sample(args.output_dir / sample.path)
+    _validate_exported_sample(loaded)
+    return sample, loaded
+
+
+def _solve_curated_spot(
+    index: int,
+    spot: object,
+    output_dir: Path,
+    feature_spec: ValueFeatureSpec,
+    split_rule: DatasetSplitRule,
+) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
+    from .runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
+    spot_t = cast(Any, spot)
+    spec = PostflopResolveSpec(
+        state=spot_t.state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.25,
+        max_depth=3,
+        max_nodes=128,
+    )
+    result = resolve_postflop_hu(spec)
+    entry = export_dataset_sample(
+        sample_id=f"curated-{index:05d}",
+        state=spot_t.state,
+        ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
+        label=build_value_label(
+            [result.root_ev_player0, result.root_ev_player1],
+            scalar_ev_target(2),
+        ),
+        feature_spec=feature_spec,
+        output_dir=output_dir,
+        split_rule=split_rule,
+        metadata={
+            "solver": "postflop_hu",
+            "board_texture": spot_t.board_texture,
+            "pot_bucket": spot_t.pot_bucket,
+            "stack_bucket": spot_t.stack_bucket,
+            "action_line": spot_t.action_line,
+        },
+    )
+    loaded = load_value_sample(output_dir / entry.path)
+    _validate_exported_sample(loaded)
+    return entry, loaded
+
+
+def _real_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
     rng = rng or Random()
-    boards = ("AhKdTc", "QsJh9d", "Ac7c2d", "KhQh8s")
-    board = Board.from_str(boards[rng.randrange(len(boards))])
-    pot = chips(200 + 100 * rng.randrange(1, 4))
-    stack_p0 = chips(1500 + 100 * rng.randrange(0, 6))
-    stack_p1 = chips(1500 + 100 * rng.randrange(0, 6))
+    deck = shuffled_deck(rng)
+    hole0 = (deck.pop(), deck.pop())
+    hole1 = (deck.pop(), deck.pop())
+    street = rng.randrange(3)
+    if street == 0:
+        board_cards = tuple(deck.pop() for _ in range(3))
+        max_depth = 2
+    elif street == 1:
+        board_cards = tuple(deck.pop() for _ in range(4))
+        max_depth = 3
+    else:
+        board_cards = tuple(deck.pop() for _ in range(5))
+        max_depth = 4
+    board = Board(cards=board_cards)
+    pot = chips(100 + 100 * rng.randrange(1, 9))
+    stack_p0 = chips(5000 + 500 * rng.randrange(0, 16))
+    stack_p1 = chips(5000 + 500 * rng.randrange(0, 16))
+    bets = (
+        PlayerBet(player=PlayerIndex(0), committed=chips(50 * rng.randrange(0, 5))),
+        PlayerBet(player=PlayerIndex(1), committed=chips(50 * rng.randrange(0, 5))),
+    )
     state = GameState(
         board=board,
         players=(
-            PlayerState(player=PlayerIndex(0)),
-            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(0), hole_cards=hole0),
+            PlayerState(player=PlayerIndex(1), hole_cards=hole1),
         ),
         betting_round=BettingRoundState(
             pot=Pot(amount=pot),
@@ -710,23 +1000,47 @@ def _demo_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
                 PlayerStack(player=PlayerIndex(0), stack=stack_p0),
                 PlayerStack(player=PlayerIndex(1), stack=stack_p1),
             ),
-            bets=(
-                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
-                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
-            ),
+            bets=bets,
             blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
-            to_act=PlayerIndex(0),
+            to_act=PlayerIndex(rng.randrange(2)),
         ),
-        dealer=PlayerIndex(0),
+        dealer=PlayerIndex(rng.randrange(2)),
     )
+    range_p0 = _random_range_vector(rng)
+    range_p1 = _random_range_vector(rng)
     return PostflopResolveSpec(
         state=state,
-        range_p0=RangeVector.uniform(),
-        range_p1=RangeVector.uniform(),
+        range_p0=range_p0.masked(tuple(board_cards + hole1)),
+        range_p1=range_p1.masked(tuple(board_cards + hole0)),
         time_budget_sec=0.5,
-        max_depth=3,
+        max_depth=max_depth,
         max_nodes=128,
     )
+
+
+def _random_range_vector(rng: Random) -> RangeVector:
+    values = np.zeros(private_hand_count(), dtype=np.float32)
+    for _ in range(12):
+        values[rng.randrange(private_hand_count())] = np.float32(rng.random())
+    total = float(values.sum())
+    if total <= 0.0:
+        values[0] = np.float32(1.0)
+        total = 1.0
+    values /= np.float32(total)
+    return RangeVector.from_values(values)
+
+
+def _validate_exported_sample(sample: ValueDatasetSample) -> None:
+    if sample.features.ndim != 1:
+        raise ValueError("exported sample features must be one-dimensional")
+    if sample.label.ndim != 2:
+        raise ValueError("exported sample label must be two-dimensional")
+    if not np.isfinite(sample.features).all():
+        raise ValueError("exported sample features must be finite")
+    if not np.isfinite(sample.label).all():
+        raise ValueError("exported sample labels must be finite")
+    if float(np.std(sample.features)) <= 0.0:
+        raise ValueError("exported sample features must vary")
 
 
 class _DemoBiasedLeafEvaluator(LeafEvaluator):
@@ -809,6 +1123,22 @@ def _print_progress(current: int, total: int, label: str) -> None:
     print(
         f"\rprogress [{bar}] {current}/{total} {label}",
         end="" if current < total else "\n",
+        flush=True,
+    )
+
+
+def _print_progress_detail(
+    completed: int,
+    total: int,
+    active: int,
+    label: str,
+) -> None:
+    width = 24
+    filled = width if total == 0 else int(width * completed / total)
+    bar = "#" * filled + "-" * (width - filled)
+    print(
+        f"\rprogress [{bar}] done={completed}/{total} active={active} {label}",
+        end="" if completed < total else "\n",
         flush=True,
     )
 

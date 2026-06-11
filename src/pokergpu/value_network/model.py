@@ -74,6 +74,9 @@ def build_value_network_config(
     feature_spec: ValueFeatureSpec,
     target_kind: ValueTargetKind,
     bucket_count: int = 1,
+    hidden_dim: int = 256,
+    hidden_layers: int = 4,
+    dropout: float = 0.0,
 ) -> ValueNetworkConfig:
     input_dim = (
         1
@@ -87,7 +90,13 @@ def build_value_network_config(
     output_dim = (feature_spec.player_count 
                   if target_kind is ValueTargetKind.SCALAR_EV 
                   else bucket_count)
-    return ValueNetworkConfig(input_dim=input_dim, output_dim=output_dim)
+    return ValueNetworkConfig(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        hidden_layers=hidden_layers,
+        output_dim=output_dim,
+        dropout=dropout,
+    )
 
 
 def build_value_model(config: ValueNetworkConfig, 

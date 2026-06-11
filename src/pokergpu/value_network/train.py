@@ -40,6 +40,9 @@ class TrainingConfig:
     epochs: int = 3
     batch_size: int = 8
     learning_rate: float = 1e-3
+    hidden_dim: int = 512
+    hidden_layers: int = 6
+    dropout: float = 0.0
     validation_modulo: int = 10
     validation_remainder: int = 0
     amp: bool = False
@@ -51,6 +54,12 @@ class TrainingConfig:
             raise ValueError("batch size must be positive")
         if self.learning_rate <= 0:
             raise ValueError("learning rate must be positive")
+        if self.hidden_dim <= 0:
+            raise ValueError("hidden dim must be positive")
+        if self.hidden_layers <= 0:
+            raise ValueError("hidden layers must be positive")
+        if not 0.0 <= self.dropout < 1.0:
+            raise ValueError("dropout must be in [0, 1)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +134,8 @@ def train_baseline(
     feature_spec: ValueFeatureSpec,
     target_kind: ValueTargetKind,
     config: TrainingConfig | None = None,
-    normalizer: FeatureNormalizer | None = None,
+    feature_normalizer: FeatureNormalizer | None = None,
+    label_normalizer: LabelNormalizer | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> TrainingResult:
     if config is None:
@@ -142,11 +152,18 @@ def train_baseline(
     if not train_samples:
         raise ValueError("training split is empty")
 
-    if normalizer is None:
-        normalizer = fit_feature_normalizer(train_samples)
-    label_normalizer = fit_label_normalizer(train_samples)
+    if feature_normalizer is None:
+        feature_normalizer = fit_feature_normalizer(train_samples)
+    if label_normalizer is None:
+        label_normalizer = fit_label_normalizer(train_samples)
 
-    model_config = build_value_network_config(feature_spec, target_kind)
+    model_config = build_value_network_config(
+        feature_spec,
+        target_kind,
+        hidden_dim=config.hidden_dim,
+        hidden_layers=config.hidden_layers,
+        dropout=config.dropout,
+    )
     device = default_value_device()
     model = build_value_model(model_config, device=device)
     import torch
@@ -166,7 +183,7 @@ def train_baseline(
             features, targets = _batch_slice(train_samples, start, stop)
             normalized = normalize_feature_batch(
                 ValueFeatureBatch(features),
-                normalizer,
+                feature_normalizer,
             ).values
             targets = label_normalizer.normalize(targets)
             epoch_losses.append(
@@ -185,7 +202,7 @@ def train_baseline(
         val_loss = _evaluate_loss(
             model,
             val_samples,
-            normalizer,
+            feature_normalizer,
             label_normalizer,
             config.batch_size,
         )
@@ -198,7 +215,7 @@ def train_baseline(
                 target_kind=target_kind,
                 target_bucket_count=model_config.output_dim,
                 model_config=model_config,
-                normalizer=normalizer,
+                normalizer=feature_normalizer,
             )
             save_checkpoint(output_dir / "best_checkpoint.pt", 
                             model, 
@@ -213,7 +230,7 @@ def train_baseline(
             target_kind=target_kind,
             target_bucket_count=model_config.output_dim,
             model_config=model_config,
-            normalizer=normalizer,
+            normalizer=feature_normalizer,
         )
 
     preview_predictions = np.zeros((0, model_config.output_dim), dtype=np.float32)
@@ -225,7 +242,7 @@ def train_baseline(
                                              config.batch_size))
         normalized = normalize_feature_batch(
             ValueFeatureBatch(features),
-            normalizer,
+            feature_normalizer,
         ).values
         preview_predictions = label_normalizer.denormalize(
             infer_value(model, normalized)
