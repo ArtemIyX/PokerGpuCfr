@@ -194,6 +194,23 @@ Produce a strategy table over the full abstract game. Used directly in low-varia
 | Fits in VRAM (< 12GB) | Matrix-op CFR+ on GPU (Strategy B below) |
 | Larger, sampling required | MCCFR (external sampling) + GPU batch eval |
 
+**Decision rule:**
+
+Before starting, estimate peak VRAM cost:
+```
+regret_bytes   = num_infosets * max_actions * 4
+reach_bytes    = num_nodes * num_buckets * 4
+strategy_bytes = num_infosets * max_actions * 4  # S table
+adjacency_bytes = num_edges * 8
+
+total_est = regret_bytes + 2 * reach_bytes + strategy_bytes + adjacency_bytes
+```
+If `total_est < 12GB`: use Strategy B (matrix-op CFR+ on GPU, all arrays resident).
+If `total_est > 12GB` but `< 40GB`: tile reach/value arrays by subtree depth, keep regret/strategy tables in VRAM, stream reach passes in chunks.
+If `total_est > 40GB`: switch to Strategy A (MCCFR + GPU batch eval). Regret tables stay in CPU RAM; only the VNet and current leaf batch go to GPU.
+
+Recheck this estimate after any change to action abstraction or bucket count — both scale the tree linearly.
+
 ### 5.3 Strategy A — MCCFR + GPU Batch Evaluation
 
 CPU orchestrates tree traversal (sampling). GPU accelerates:
@@ -217,6 +234,13 @@ Rewrite CFR iteration as bulk-synchronous linear algebra:
 3. Backward pass: propagate counterfactual values level by level (SpMV transpose)
 4. Regret update pass: elementwise RM+ per infoset (parallelized over all infosets)
 5. Average strategy accumulation
+
+**SpMV kernel notes:** standard `torch.sparse.mm` or cuSPARSE `cusparseScsrmv` work for regular trees. Poker trees are irregular (fan-out varies by node type and action count), which causes warp divergence and poor memory access patterns in naive CSR SpMV. Practical mitigations:
+- Sort nodes within each level by fan-out before building CSR (improves coalescing).
+- Use ELL format instead of CSR for levels with near-uniform fan-out (common on lower streets where action abstraction is fixed).
+- For the backward pass (CSR transpose), build and store the transpose CSR explicitly during preprocessing rather than computing it at runtime.
+- cuSPARSE Generic API (`cusparseSpMM`) with `CUSPARSE_SPMM_ALG_DEFAULT` selects a tuned algorithm per shape; prefer it over direct kernel calls unless you have profiling data showing a specific kernel is better.
+- Reference: the gpucfr repo (linked above) has a working CUDA SpMV for poker trees; study the level scheduling before writing your own.
 
 ```python
 # Python + CUDA (PyTorch/CuPy style)
@@ -337,7 +361,29 @@ for iter in 1..time_budget:
 return average_strategy[root_infoset]
 ```
 
-### 6.6 GPU Overlap in Runtime
+### 6.6 Action Translation
+
+When the live game presents a bet size not in your action abstraction, you must map it to a nearby abstract action before looking up the blueprint or running re-solving. This is called action translation, and getting it wrong produces exploitable behavior.
+
+**Problem:** if a player bets 47% pot and your abstraction only has {33%, 75%}, naively rounding to 33% systematically underestimates the threat; rounding to 75% overestimates it.
+
+**Standard approach (pseudo-harmonic mapping):**
+- Map the real bet `b` to a probability-weighted mixture of the two bracketing abstract bets `b_lo` and `b_hi`.
+- Pseudo-harmonic weights (Brown & Sandholm, Libratus): `w_hi = (b - b_lo) / (b_hi - b_lo)` adjusted by harmonic interpolation to avoid linear bias at extremes.
+- Apply the blended strategy: `sigma_translated = (1 - w_hi) * sigma[b_lo] + w_hi * sigma[b_hi]`
+
+**All-in translation:** if the real bet exceeds the largest abstract bet, use the all-in action. Do not extrapolate.
+
+**Consistency requirement:** the same translation function must be used during:
+- Blueprint lookup (before warm-start)
+- Re-solving initialization
+- Opponent range update after observing their action
+
+If any of these use different translation logic, opponent ranges will drift from reality.
+
+**Reference:** Libratus supplementary material covers pseudo-harmonic mapping in detail. Implement and test this before using the blueprint at a real table.
+
+### 6.7 GPU Overlap in Runtime
 
 ```
 iteration k:
@@ -353,7 +399,7 @@ iteration k+1:
 
 Keep GPU fed at all times. Don't wait for GPU synchronously inside the CFR loop.
 
-### 6.7 Multiway Handling at Runtime
+### 6.8 Multiway Handling at Runtime
 
 6-max real-time:
 - Identify players still in the hand with non-trivial ranges
@@ -372,6 +418,19 @@ The value network handles multiway implicitly if trained on multiway states.
 Evaluates leaf nodes at depth limit. Takes public state + both players' range vectors as input, outputs EV per player (or advantage).
 
 Replaces full rollout. Quality of the value network determines quality of runtime re-solving.
+
+**The value network is the final layer of the system and is optional.**
+
+Without it, you must either solve to terminal nodes (only feasible for very small trees) or use Monte Carlo rollouts from leaf nodes (high variance, not real-time compatible). For real-time re-solving on a postflop subgame, a VNet is a practical necessity. For offline blueprint generation with full tree traversal (no depth limit), you do not need one.
+
+Build order recommendation:
+1. Build and validate the offline CFR solver without a VNet (full tree depth, no leaf approximation).
+2. Generate ground-truth training data from step 1.
+3. Train the VNet on that data.
+4. Integrate the VNet as a leaf evaluator in the runtime re-solving pipeline.
+5. Regenerate data with the VNet-assisted solver and iterate.
+
+The system is functional and produces a valid blueprint at step 1. Steps 2–5 are required only for real-time re-solving (the runtime layer).
 
 ### 7.2 Architecture
 
@@ -398,6 +457,8 @@ Architecture: MLP with 4–8 layers, residual connections, LayerNorm. Wider is b
 - ~10M–100M samples needed for good coverage
 - Ground truth quality; the only reliable approach
 
+**Bootstrapping problem:** the first training run has no VNet, so you cannot use depth-limited re-solving during data generation. For the initial dataset, run CFR to full tree depth (no depth limit, no VNet) on a set of sampled subgames. This is slow but produces clean ground truth. Once you have a trained VNet v0, regenerate data using depth-limited solving with v0 at leaves, producing a better dataset for v1. Iterate 2–3 rounds. Do not skip this: a VNet trained only on blueprint rollouts (Option B) learns to approximate a weak baseline, and the error compounds through re-solving.
+
 **Option B (Bootstrap from blueprint) — acceptable as warm-start only:**
 - Use blueprint strategy to simulate rollouts forward
 - Cheap but biased toward blueprint quality
@@ -410,12 +471,12 @@ Architecture: MLP with 4–8 layers, residual connections, LayerNorm. Wider is b
 - Avoid for production; use solver rollouts (Option A) as the primary signal
 
 **A note on value networks as leaf evaluators:**
-A value network at the depth limit is a practical necessity for real-time re-solving, but it is not the best possible approach — it is the tractable one. The VNet approximates the EV of continuing play under the blueprint strategy, which means errors in the blueprint propagate into the value estimate. Alternatives:
+A value network at the depth limit is the tractable alternative to full tree rollout. The VNet approximates the EV of continuing play, which means errors in its training data propagate into re-solving quality. Alternatives at the depth limit:
 - **Longer depth limit with no VNet**: more accurate but runtime explodes
 - **Nested subgame solving at leaves**: correct but recursively expensive
 - **Monte Carlo rollouts from leaves**: unbiased but high variance; not real-time compatible
 
-For 2–8 second decision budgets, a TensorRT-compiled MLP value network is the only practical option on current hardware. Accept the approximation error; minimize it by training on high-quality solver data.
+For 2–8 second decision budgets, a TensorRT-compiled MLP value network is the only practical option on current hardware. Accept the approximation error; minimize it via iterative bootstrapped training (see bootstrapping note above).
 
 ### 7.4 Deployment
 
@@ -684,6 +745,23 @@ cfv = torch.zeros(num_nodes * num_buckets, dtype=torch.bfloat16, device='cuda')
 - Optionally quantize to uint8 for aggressive compression (coarser strategy, acceptable for low-reach infosets).
 - Regrets for warm-starting: export as fp16 after clipping to [-1000, 1000] (values outside this range have negligible RM+ impact after normalization).
 - Expected blueprint size: 1M infosets × 7 actions × uint16 ≈ 14MB. 10M infosets ≈ 140MB. Fits in VRAM easily for warm-starting.
+
+**Quantization error tradeoffs:**
+
+uint16 (2 bytes/action): ~4 decimal digits of precision per action probability. For a 7-action infoset, the worst-case rounding error per action is `1/65535 ≈ 0.0015%`. This is negligible for all infosets; use uint16 by default.
+
+uint8 (1 byte/action): ~2 decimal digits of precision. Worst-case rounding `1/255 ≈ 0.4%` per action. Acceptable for infosets with low reach probability (rare board/range combinations that are almost never encountered). Not acceptable for high-reach infosets (preflop, common flop textures) — mixed strategies that should be close to 50/50 can round to 48/52 or 45/55, which is meaningful exploitability at high frequency.
+
+**Recommended tiered compression:**
+```
+if infoset_reach > REACH_THRESHOLD:   # e.g. 1e-3
+    store as uint16
+else:
+    store as uint8  # halves storage for rare spots
+```
+Track which infosets are uint8 vs uint16 in a separate bitmap. At warm-start, dequantize back to float32 before loading into the regret table.
+
+**Convergence check:** after quantizing and reloading the blueprint, run 1000 sampled BR trajectories and compare exploitability vs. the unquantized strategy. If delta > 0.1% pot on high-reach infosets, the quantization is too coarse for those spots.
 
 **Convergence check:** if switching from fp32 to bf16 for reach/cfv, run a calibration: compare exploitability at iteration 100k with full fp32 vs hybrid. Difference should be < 0.05% pot. If larger, your game scale has precision sensitivity and you should keep cfv in fp32.
 
