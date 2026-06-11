@@ -1,5 +1,10 @@
 from .compare import ComparisonRow, run_toy_game_comparison
-from .infosets import InfosetLayout, InfosetStore, regret_matching
+from .infosets import (
+    InfosetLayout,
+    InfosetStore,
+    build_infoset_layout,
+    regret_matching,
+)
 from .iteration import CFRIterationResult, CFRVariant, DCFRConfig, run_cfr_iteration
 from .kuhn import (
     KuhnAction,
@@ -60,6 +65,7 @@ __all__ = [
     "ForwardPassResult",
     "InfosetLayout",
     "InfosetStore",
+    "build_infoset_layout",
     "LeducAction",
     "LeducCard",
     "LeducInfoset",

@@ -57,10 +57,10 @@ How to use:
 
 ## 6. Build dense infoset/regret/strategy storage
 
-- [ ] Replace dynamic lookup paths in hot code
-- [ ] Use flat offsets for regrets and strategy sums
-- [ ] Precompute infoset to action-count mapping
-- [ ] Keep all solver tables contiguous
+- [x] Replace dynamic lookup paths in hot code
+- [x] Use flat offsets for regrets and strategy sums
+- [x] Precompute infoset to action-count mapping
+- [x] Keep all solver tables contiguous
 
 ## 7. Implement full CFR traversal
 

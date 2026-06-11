@@ -57,6 +57,10 @@ class InfosetLayout:
         return slice(start, start + self.action_counts[infoset_index])
 
 
+def build_infoset_layout(action_counts: tuple[int, ...] | list[int]) -> InfosetLayout:
+    return InfosetLayout.from_action_counts(action_counts)
+
+
 @dataclass(slots=True)
 class InfosetStore:
     layout: InfosetLayout
