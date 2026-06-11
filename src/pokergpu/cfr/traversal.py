@@ -103,6 +103,28 @@ def scatter_leaf_values(
         node_values_player1[node_index] = values.ev_player1[batch_index]
 
 
+def evaluate_frontier_nodes(
+    tree: PublicTree,
+    evaluator: LeafEvaluator,
+    *,
+    reach_p0: NDArray[np.float32] | None = None,
+    reach_p1: NDArray[np.float32] | None = None,
+) -> tuple[tuple[int, ...], LeafValueBatch]:
+    frontier_nodes = tuple(
+        node_index
+        for node_index in range(tree.node_count)
+        if tree.is_frontier[node_index]
+        and tree.node_types[node_index] is not NodeType.TERMINAL
+    )
+    batch = build_leaf_feature_batch(
+        tree,
+        frontier_nodes,
+        reach_p0=reach_p0,
+        reach_p1=reach_p1,
+    )
+    return frontier_nodes, evaluator.evaluate(batch)
+
+
 def compute_reach_probabilities(
     tree: PublicTree,
     store: InfosetStore,
@@ -238,15 +260,8 @@ def compute_counterfactual_values(
         leaf_p1[:] = -leaf_p0
 
     if evaluator is not None:
-        frontier_nodes = tuple(
-            node_index
-            for node_index in range(tree.node_count)
-            if (tree.is_frontier[node_index] 
-                and tree.node_types[node_index] is not NodeType.TERMINAL)
-        )
+        frontier_nodes, leaf_values = evaluate_frontier_nodes(tree, evaluator)
         if frontier_nodes:
-            leaf_batch = build_leaf_feature_batch(tree, frontier_nodes)
-            leaf_values = evaluator.evaluate(leaf_batch)
             scatter_leaf_values(
                 frontier_nodes,
                 leaf_values,
@@ -361,15 +376,8 @@ def compute_counterfactual_values_parallel(
         leaf_p1[:] = -leaf_p0
 
     if evaluator is not None:
-        frontier_nodes = tuple(
-            node_index
-            for node_index in range(tree.node_count)
-            if (tree.is_frontier[node_index] 
-                and tree.node_types[node_index] is not NodeType.TERMINAL)
-        )
+        frontier_nodes, leaf_values = evaluate_frontier_nodes(tree, evaluator)
         if frontier_nodes:
-            leaf_batch = build_leaf_feature_batch(tree, frontier_nodes)
-            leaf_values = evaluator.evaluate(leaf_batch)
             scatter_leaf_values(
                 frontier_nodes,
                 leaf_values,

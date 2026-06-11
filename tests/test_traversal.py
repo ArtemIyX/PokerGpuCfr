@@ -15,8 +15,8 @@ from pokergpu.cfr import (
     update_regrets_from_traversal,
     update_regrets_from_traversal_parallel,
 )
+from pokergpu.eval import LeafFeatureBatch, LeafValueBatch
 from pokergpu.core.betting import Chips
-from pokergpu.eval import LeafValueBatch
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
@@ -146,7 +146,7 @@ def test_frontier_nodes_use_leaf_values_in_backward_pass() -> None:
 
 def test_evaluator_populates_frontier_values_in_backward_pass() -> None:
     class ConstantEvaluator:
-        def evaluate(self, batch):
+        def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
             size = batch.size
             return LeafValueBatch(
                 ev_player0=np.full(size, 7.0, dtype=np.float32),

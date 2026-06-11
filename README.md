@@ -35,6 +35,20 @@ The project is not trying to exactly solve full 6-max no-limit Hold'em. That gam
 - **ML / GPU path**
   - [![torch](https://img.shields.io/badge/torch-%3E%3D2.3-orange?logo=pytorch)](https://pypi.org/project/torch/)
 
+### CUDA install
+
+For GPU support on Windows, install the CUDA wheel from PyTorch:
+
+```powershell
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+Verify with:
+
+```powershell
+python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
+```
+
 - **Data / experiments**
   - [![pandas](https://img.shields.io/badge/pandas-%3E%3D2.2-blue?logo=pandas)](https://pypi.org/project/pandas/)
   - [![matplotlib](https://img.shields.io/badge/matplotlib-%3E%3D3.8-blue)](https://pypi.org/project/matplotlib/)

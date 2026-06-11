@@ -13,6 +13,10 @@ treys>=0.1.8
 # ML / GPU path
 torch>=2.3
 
+# CUDA install note:
+# If you want GPU support, install the CUDA wheel from PyTorch, e.g.
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
 # Data / experiments
 pandas>=2.2
 matplotlib>=3.8

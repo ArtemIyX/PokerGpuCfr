@@ -127,10 +127,10 @@ How to use:
 
 ## 13. GPU path for batched evaluation
 
-- [ ] Choose first GPU backend for Python
-- [ ] Implement device selection and fallback
-- [ ] Implement batch tensor builder
-- [ ] Implement GPU inference stub
+- [x] Choose first GPU backend for Python
+- [x] Implement device selection and fallback
+- [x] Implement batch tensor builder
+- [x] Implement GPU inference stub
 - [ ] Add async or overlapped batch execution design
 - [ ] Measure batch throughput
 - [ ] Verify numeric parity with CPU stub where applicable
