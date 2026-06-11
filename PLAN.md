@@ -137,12 +137,13 @@ How to use:
 
 ## 14. Postflop re-solving prototype
 
-- [ ] Limit scope to heads-up postflop first
-- [ ] Build public subtree from current state
-- [ ] Support player ranges at root
-- [ ] Run time-budgeted solving loop
-- [ ] Return root mixed strategy
-- [ ] Add CLI or script demo for one postflop spot
+- [x] Limit scope to heads-up postflop first
+- [x] Build public subtree from current state
+- [x] Support player ranges at root
+- [x] Run time-budgeted solving loop
+- [x] Return root mixed strategy
+- [x] Add CLI or script demo for one postflop spot
+  - Added `postflop-resolve` CLI path and runtime resolver module.
 
 ## 15. Caching and warm start
 

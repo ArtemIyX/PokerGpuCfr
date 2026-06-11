@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
+from typing import Any
 
 import pytest
 import torch
@@ -9,8 +11,8 @@ import torch
 from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.eval import (
     AsyncLeafEvaluator,
-    EvalDeviceConfig,
     CpuStubLeafEvaluator,
+    EvalDeviceConfig,
     make_leaf_evaluator,
 )
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
@@ -26,7 +28,7 @@ def test_leaf_evaluation_cpu_single_cpu_multi_gpu_cuda_50x() -> None:
     _run_and_print("50x", 65_536 * 50, repeats=5, workers=8)
 
 
-def _build_batch(batch_size: int):
+def _build_batch(batch_size: int) -> Any:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0, NodeType.LEAF),
         is_frontier=(False, True),
@@ -57,7 +59,7 @@ def _run_and_print(name: str, batch_size: int, *, repeats: int, workers: int) ->
     assert gpu_seconds >= 0.0
 
 
-def _time_single_thread(batch, *, repeats: int) -> float:
+def _time_single_thread(batch: Any, *, repeats: int) -> float:
     evaluator = CpuStubLeafEvaluator()
     start = perf_counter()
     for _ in range(repeats):
@@ -66,7 +68,7 @@ def _time_single_thread(batch, *, repeats: int) -> float:
     return perf_counter() - start
 
 
-def _time_multi_thread(batch, *, workers: int, repeats: int) -> float:
+def _time_multi_thread(batch: Any, *, workers: int, repeats: int) -> float:
     evaluator = AsyncLeafEvaluator(CpuStubLeafEvaluator(), max_workers=workers)
     start = perf_counter()
     sub_batches = _split_batch(batch, workers)
@@ -83,7 +85,7 @@ def _time_multi_thread(batch, *, workers: int, repeats: int) -> float:
     return elapsed
 
 
-def _time_gpu_cuda(batch, *, repeats: int) -> float:
+def _time_gpu_cuda(batch: Any, *, repeats: int) -> float:
     if not torch.cuda.is_available():
         return 0.0
     evaluator = make_leaf_evaluator(EvalDeviceConfig(mode="cuda"))
@@ -96,7 +98,7 @@ def _time_gpu_cuda(batch, *, repeats: int) -> float:
     return perf_counter() - start
 
 
-def _split_batch(batch, chunks: int):
+def _split_batch(batch: Any, chunks: int) -> Iterator[Any]:
     size = batch.size
     chunk_size = max(1, (size + chunks - 1) // chunks)
     for start in range(0, size, chunk_size):

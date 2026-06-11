@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 
+from .abstraction.hands import RangeVector
 from .app import create_app
 from .benchmarks import run_benchmark
 from .cfr import (
@@ -16,6 +17,18 @@ from .cfr import (
     train_kuhn_cfr,
     train_leduc_cfr,
 )
+from .core.betting import (
+    BettingRoundState,
+    BlindStructure,
+    PlayerBet,
+    PlayerIndex,
+    PlayerStack,
+    Pot,
+    chips,
+)
+from .core.board import Board
+from .core.state import GameState, PlayerState
+from .runtime import PostflopResolveSpec, resolve_postflop_hu
 
 
 def main() -> int:
@@ -85,9 +98,53 @@ def main() -> int:
         print("root_bet_Q=" f"{queen_bet:.12f}")
         print("root_bet_K=" f"{king_bet:.12f}")
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "postflop-resolve":
+        resolve_result = resolve_postflop_hu(_demo_postflop_spec())
+        print(f"root_infoset_id={resolve_result.root_infoset_id}")
+        print(f"root_actions={','.join(resolve_result.root_actions)}")
+        print(
+            "root_strategy="
+            + ",".join(
+                f"{float(value):.6f}" for value in resolve_result.root_strategy
+            )
+        )
+        print(f"iterations={resolve_result.iterations}")
+        print(f"node_count={resolve_result.node_count}")
+        print(f"leaf_count={resolve_result.leaf_count}")
+        return 0
     logger.info("PokerGPU initialized")
     print(f"PokerGPU ready on device={settings.device}")
     return 0
+
+
+def _demo_postflop_spec() -> PostflopResolveSpec:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(PlayerState(player=PlayerIndex(0)), 
+                 PlayerState(player=PlayerIndex(1))),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    return PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.01,
+        max_depth=2,
+        max_nodes=64,
+    )
 
 
 def _parse_solver_args(
