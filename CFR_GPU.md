@@ -92,7 +92,18 @@ Action count directly controls solver cost: fewer actions = faster convergence. 
 - Per-infoset isomorphism check at flop/turn/river construction time.
 - Shared regret tables for isomorphic board classes.
 
-This is non-trivial to implement correctly but cuts postflop infoset count by 10–12× on average. Most production solvers implement this; skipping it is a significant memory waste. The canonical normalization must be applied consistently across blueprint generation, value network training data, and runtime re-solving — any mismatch causes lookup errors.
+This is non-trivial to implement correctly but cuts postflop infoset count by 10–12× on average. Most production solvers implement this; skipping it is a significant memory waste. The canonical normalization must be applied consistently across blueprint generation, value network training data, and runtime re-solving — any mismatch causes silent lookup errors where two isomorphic boards get separate regret entries and the blueprint diverges.
+
+**Canonical suit normalization algorithm (concrete):**
+1. Count the frequency of each suit across the board cards.
+2. Sort suits by descending frequency. Break ties by the highest rank of any card in that suit (higher rank = earlier in canonical order). Break remaining ties arbitrarily but deterministically (e.g., alphabetical: c < d < h < s).
+3. Assign canonical suit labels 0–3 in that sorted order.
+4. Apply the same suit permutation to all hole cards in the infoset.
+5. The result is the canonical form. Two boards/infosets are isomorphic if and only if they produce the same canonical form.
+
+Example: board A♠K♠Q♥. Spades appear twice (highest freq), hearts once. Highest spade rank = A (rank 14). Canonical: spades → suit 0, hearts → suit 1. Canonical board: A0K0Q1. Board A♥K♥Q♠ maps to same canonical form. Board A♠K♥Q♦ has three different suits (freq 1 each); break ties by highest rank per suit: A♠ (rank 14) > K♥ (rank 13) > Q♦ (rank 12), so spades → 0, hearts → 1, diamonds → 2. Canonical: A0K1Q2.
+
+This algorithm must be a single shared function imported by the blueprint builder, VNet data generator, and runtime resolver. Do not re-implement it in each module.
 
 **Postflop bucketing** (critical for GPU feasibility):
 - Target: 500–5000 buckets per street
@@ -267,7 +278,7 @@ S += t_weight * regret_matching_cuda(R, infoset_offsets)
 Exploitability = how much a best-response opponent can gain per game against your strategy. True exploitability requires computing an exact best response over the full tree, which is intractable for large abstractions. Use sampled BR instead.
 
 **Algorithm (sampled BR):**
-1. Fix your current average strategy `sigma`.
+1. Fix your current average strategy `sigma`. **When using DCFR, this is the weighted average strategy `S_weighted = sum_t w(t) * sigma_t / sum_t w(t)`, not the simple cumulative average. Evaluating the wrong object (e.g., the current iterate `sigma_t` or the unweighted sum) gives misleading exploitability numbers — the current iterate is far from Nash at any individual step; the unweighted average converges slower than the weighted average under DCFR.**
 2. For each player `i`, compute an approximate best response `BR_i` by traversing the tree and greedily selecting the action with the highest counterfactual value at each infoset, using MCCFR sampling to cover a fraction of the tree.
 3. Estimate exploitability as: `eps = sum_i [ EV(BR_i, sigma_{-i}) - EV(sigma_i, sigma_{-i}) ] / 2`
 4. Normalize by pot size for interpretability (mbb/hand or % of pot).
@@ -307,6 +318,52 @@ Exploitability = how much a best-response opponent can gain per game against you
 - Overlap CPU prep with GPU kernel execution at all times
 - For MCCFR: multiple CPU threads each run independent traversals, coalesce leaf eval requests into GPU batches
 
+**Thread safety for parallel MCCFR regret updates:**
+
+When multiple CPU threads run independent MCCFR trajectories and write to shared regret tables, you have a data race. Do not use a global lock — it serializes all updates and eliminates parallelism. The correct approaches:
+
+**Option A — Per-thread accumulators + periodic merge (recommended):**
+```python
+# Each thread maintains its own local regret delta array
+local_R_delta = np.zeros(total_actions, dtype=np.float32)
+
+# Thread accumulates deltas from its trajectories
+for traj in thread_trajectories:
+    local_R_delta += compute_regret_delta(traj)
+
+# Periodic merge (e.g., every 1000 trajectories) with atomic add
+with merge_lock:
+    global_R += local_R_delta
+    local_R_delta[:] = 0
+```
+This minimizes lock contention. Merge lock is held for a single bulk add, not per-trajectory.
+
+**Option B — Lock striping:**
+Partition infosets into B buckets (e.g., B = 256). Each bucket has its own lock. A thread locks only the bucket containing the infosets it is updating. Reduces contention by 1/B.
+
+**Option C — Atomic float adds (acceptable for GPU, avoid on CPU):**
+`std::atomic<float>` on x86 requires a compare-exchange loop (no native float atomic add before C++20). High contention makes this slower than Option A for shared infosets. Use only if infoset access patterns are nearly disjoint across threads.
+
+**Recommended:** Option A with merge every 500–2000 trajectories depending on trajectory length. The slight staleness of the strategy (threads read global sigma that is a few merges behind) is acceptable for MCCFR — it is equivalent to running a few extra iterations before syncing.
+
+### 5.9 Regret-Based Pruning (MCCFR, Required)
+
+For MCCFR (Strategy A), regret-based pruning is not optional — it typically cuts 60–80% of tree traversals and is necessary to reach convergence in reasonable time.
+
+**Algorithm (Brown & Sandholm 2015):**
+At each player node during traversal, before recursing:
+1. Compute the sum of positive regrets: `R_plus = sum_a max(0, R[I,a])`
+2. For each action `a`: if `R[I,a] < -PRUNE_THRESHOLD` and `R_plus > 0`, skip this subtree entirely.
+3. Do not prune if ALL regrets are negative (no positive baseline to compare against).
+
+**Threshold choice:** `PRUNE_THRESHOLD` is typically a small negative value proportional to the pot size at that node — e.g., `-0.01 * pot`. Too aggressive (large threshold) prunes actions that haven't converged yet. Too conservative (near zero) provides no speedup. Start at `-0.01 * pot` and tighten if convergence is good.
+
+**When to enable:** do not prune for the first `T_min` iterations (e.g., first 1000 iterations). Regrets need time to stabilize before pruning is safe.
+
+**Implementation:** track a `prunable[I,a]` boolean per infoset-action. Set it when `R[I,a]` has been below threshold for `K` consecutive checkpoints (e.g., K=3). Clear it whenever `R[I,a]` rises above zero (action becomes relevant again).
+
+**GPU note:** for matrix-op CFR (Strategy B), pruning is applied differently — zero out rows of the adjacency matrix for pruned subtrees rather than skipping traversal. Rebuild pruned CSR every N iterations.
+
 ---
 
 ## 6. Runtime Mode — Real-Time Re-Solving
@@ -335,9 +392,27 @@ Before beginning re-solving:
 1. Load blueprint regrets/strategy for all infosets in the current subtree into CPU memory (or VRAM if budget allows)
 2. Initialize `R[I,a]` from blueprint regrets (CFR+ warm-start)
 3. Initialize `S[I,a]` from blueprint average strategy
-4. Run re-solving iterations until time budget
+4. **Initialize opponent ranges from observed action history** (see below)
+5. Run re-solving iterations until time budget
 
 This typically converges 10–50× faster than cold-start.
+
+**Opponent range initialization (required):**
+
+Do not initialize opponent ranges to uniform. By the time you reach a re-solving decision point, you have observed a sequence of actions. Each observed action is a Bayesian update on your opponent's range:
+
+```python
+# After observing opponent play action a at infoset I:
+for b in range(num_buckets):
+    opponent_range[b] *= blueprint_sigma[I, a, b]  # P(bucket b | action a)
+opponent_range /= opponent_range.sum()              # normalize
+```
+
+Apply this update for every action in the hand history before warm-starting. At a flop decision point after preflop action UTG-raise / BB-call, apply two Bayesian updates: one for the raise, one for the call.
+
+If a bucket's range mass drops below `1e-6`, zero it out and renormalize (numerical stability). If the opponent played an action with near-zero blueprint probability for some bucket, that bucket is essentially removed from their range.
+
+Skipping this step means re-solving always assumes a uniform starting range, which discards all information from the hand history and significantly degrades decision quality.
 
 ### 6.5 Real-Time Pipeline (Per Decision)
 
@@ -360,6 +435,16 @@ for iter in 1..time_budget:
     ↓
 return average_strategy[root_infoset]
 ```
+
+**Warning: unsafe re-solving and manipulation.**
+
+Depth-limited re-solving without safe subgame solving (as described in Libratus §4, "safe endgame solving") is exploitable in theory: an opponent who knows you re-solve can choose lines that lead to subgames where your re-solved strategy is weaker than the blueprint. This is the "unsafe re-solving" problem.
+
+In practice the risk is low for most use cases (human opponents do not know your solver architecture and cannot precisely exploit it), but be aware of it:
+- Unsafe re-solving means your strategy in the full game is not guaranteed to be an improvement over the blueprint, even if the subgame re-solve looks good in isolation.
+- Safe re-solving requires computing counterfactual values for the "gift" given to the opponent (the trunk strategy that led to this subgame), which is significantly more expensive.
+- For a production bot, safe re-solving is the correct approach. See Brown & Sandholm (2017) Libratus supplementary for the algorithm.
+- For a research/study tool, unsafe re-solving is acceptable.
 
 ### 6.6 Action Translation
 
@@ -399,7 +484,35 @@ iteration k+1:
 
 Keep GPU fed at all times. Don't wait for GPU synchronously inside the CFR loop.
 
-### 6.8 Multiway Handling at Runtime
+### 6.9 Opponent Range Update Protocol
+
+At every observed action during the hand, update opponent ranges before the next re-solve. This is distinct from the warm-start initialization (§6.4) — it must happen continuously throughout the hand, not just once.
+
+**Per-action Bayesian update:**
+```python
+def update_range_on_action(range_vec, blueprint_sigma, infoset_id, action_idx):
+    # range_vec: float32[NumBuckets], opponent's current range
+    # blueprint_sigma: float32[NumBuckets] per action at this infoset
+    #   (or re-solved sigma if available for this node)
+    likelihoods = blueprint_sigma[infoset_id, action_idx]  # P(action | bucket)
+    range_vec *= likelihoods
+    total = range_vec.sum()
+    if total < 1e-9:
+        # opponent played an off-tree action; range has collapsed
+        # fall back to uniform or raise a flag for action translation
+        range_vec[:] = 1.0 / num_buckets
+    else:
+        range_vec /= total
+```
+
+**What strategy to use for likelihood:**
+- If the action was in the abstraction and the current node was re-solved: use the re-solved sigma.
+- If the action was in the abstraction but not re-solved: use the blueprint sigma.
+- If the action was off-abstraction: apply action translation (§6.6) to get a blended sigma, then update.
+
+**Storage:** maintain one `float32[NumBuckets]` range vector per opponent per street. Reset to uniform at the start of each hand. Save range state after each action so re-solving can be warm-started from the correct range at any point in the hand.
+
+**Range coherence across streets:** when a new community card is dealt, ranges do not reset — they carry forward. The card is a chance event that filters buckets: remove any bucket whose hole cards conflict with the new board card (impossible holdings). Renormalize after removal.
 
 6-max real-time:
 - Identify players still in the hand with non-trivial ranges
@@ -435,13 +548,13 @@ The system is functional and produces a valid blueprint at step 1. Steps 2–5 a
 ### 7.2 Architecture
 
 Input features per leaf node:
-- Board cards (one-hot or suit-normalized encoding)
+- Board cards (one-hot or suit-normalized encoding, using canonical suit normalization from §3.2)
 - Pot size, stack sizes (normalized)
 - Street
-- Action history encoding (fixed-width sequence)
+- **Action history encoding (fixed-width sequence, player-tagged):** encode each action as a tuple `(player_seat, action_type, bet_size_normalized)`. Player seat must be included — a 3-way pot where UTG bets and BTN calls has a different EV profile than BTN bets and UTG calls, but an encoding without player identity cannot distinguish them. Use a fixed-length sequence padded to max history length (e.g., 20 actions). Represent each action as a small embedding or one-hot over `(seat, action_type, size_bucket)`.
 - Player 0 range: `float32[NumBuckets]`
 - Player 1 range: `float32[NumBuckets]`
-- (Multiway: one range per player)
+- (Multiway: one range per player, pad to max_players with zeros for folded seats; include a `active_players` bitmask)
 
 Output:
 - `EV[player]` for each active player (sum to pot, verify)
@@ -506,6 +619,8 @@ For 2–8 second decision budgets, a TensorRT-compiled MLP value network is the 
 - Matrix-op CFR (small abstract game, fits VRAM): 50–100× vs single-thread CPU
 - MCCFR + GPU leaf eval (large game): 5–20× depending on batch efficiency
 - Real-time re-solving (depth-limited, warm-start): 10–30× vs CPU-only, enabling 100+ CFR iterations in 5 seconds
+
+**Cold-start latency:** the VNet latency figure of `< 5ms per batch at 4096 leaves` (§7.4) assumes the model is already warmed in VRAM. First inference after process start on a cold TensorRT engine can be 50–200ms due to kernel autotuning and CUDA context initialization. Always call a dummy forward pass (e.g., `vnet.infer(zeros_batch)`) at game start before any real decision. Do this during the waiting period before cards are dealt, not at the first decision point.
 
 ---
 
@@ -849,7 +964,7 @@ This section describes the computational boundaries of solving preflop scenarios
 |----------|---------|-------------------|-----------|--------|------|----------------|
 | HU preflop | 2 | 1.7 × 10^6 | Yes | CFR+ / DCFR | Hours | < 0.5% pot |
 | 3-way preflop | 3 | 2.3 × 10^9 | Barely | MCCFR + heavy abstraction | Days-weeks | 2-5% pot |
-| 6-max preflop | 6 | 5.2 × 10^18 | Possible | Blueprint + nested subgames | N/A (offline weeks) | Unknown, high |
+| 6-max preflop | 6 | 5.2 × 10^18 | No — approximated only | Blueprint (MCCFR) + nested subgames | Offline weeks for blueprint | Unknown, high |
 
 
 We don't solve 6max preflop. We approximate it.
