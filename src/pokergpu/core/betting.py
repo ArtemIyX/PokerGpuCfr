@@ -91,6 +91,11 @@ class BettingRoundState:
         stack_players = {stack.player for stack in self.stacks}
         bet_players = {bet.player for bet in self.bets}
 
+        if len(stack_players) != len(self.stacks):
+            raise ValueError("stack players must be unique")
+        if len(bet_players) != len(self.bets):
+            raise ValueError("bet players must be unique")
+
         if stack_players != bet_players:
             raise ValueError("stack players and bet players must match")
         if self.to_act not in stack_players:

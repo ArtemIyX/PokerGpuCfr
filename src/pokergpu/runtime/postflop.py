@@ -16,9 +16,11 @@ from pokergpu.cfr import (
     update_regrets_from_traversal,
 )
 from pokergpu.core.actions import Action
+from pokergpu.core.betting import Chips
 from pokergpu.core.board import Street
 from pokergpu.core.cards import Card
-from pokergpu.core.state import GameState
+from pokergpu.core.payouts import compute_payouts
+from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import CpuStubLeafEvaluator, LeafEvaluator
 from pokergpu.tree import PublicTree
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
@@ -77,24 +79,37 @@ def resolve_postflop_hu(
         raise ValueError("resolver requires at least one player infoset")
     store = InfosetStore.zeros(InfosetLayout.from_action_counts(action_counts))
 
-    _masked_root_ranges = _apply_root_ranges(
+    _, _, root_reach_p0, root_reach_p1 = _apply_root_ranges(
         spec.state,
         spec.range_p0,
         spec.range_p1,
+    )
+    terminal_values_player0 = np.array(
+        [
+            np.float32(_terminal_value_player0(node_state))
+            for node_state in tree.node_states
+        ],
+        dtype=np.float32,
     )
 
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     iterations = 0
     leaf_count = int(np.count_nonzero(tree.tree.is_frontier))
     while time.monotonic() < deadline or iterations == 0:
-        compute_reach_probabilities(
+        forward = compute_reach_probabilities(
             tree.tree,
             store,
+            root_player0_reach=root_reach_p0,
+            root_player1_reach=root_reach_p1,
             min_reach_prob=spec.min_reach_prob,
         )
         backward = compute_counterfactual_values(
             tree.tree,
             store,
+            node_states=tree.node_states,
+            reach_p0=forward.player0_reach,
+            reach_p1=forward.player1_reach,
+            terminal_values_player0=terminal_values_player0,
             evaluator=evaluator_impl,
         )
         update_regrets_from_traversal(
@@ -102,12 +117,14 @@ def resolve_postflop_hu(
             store,
             backward,
             active_player=0,
+            strategy_weight=root_reach_p0,
         )
         update_regrets_from_traversal(
             tree.tree,
             store,
             backward,
             active_player=1,
+            strategy_weight=root_reach_p1,
         )
         iterations += 1
         if spec.time_budget_sec <= 0.0:
@@ -129,14 +146,22 @@ def _apply_root_ranges(
     state: GameState,
     range_p0: RangeVector,
     range_p1: RangeVector,
-) -> tuple[RangeVector, RangeVector]:
+) -> tuple[RangeVector, RangeVector, float, float]:
     dead_cards: list[Card] = list(state.board.cards)
     for player in state.players:
         if player.hole_cards is not None:
             dead_cards.extend(player.hole_cards)
-    masked_p0 = range_p0.normalized_masked(dead_cards)
-    masked_p1 = range_p1.normalized_masked(dead_cards)
-    return masked_p0, masked_p1
+    raw_masked_p0 = range_p0.masked(dead_cards)
+    raw_masked_p1 = range_p1.masked(dead_cards)
+    weight_p0 = raw_masked_p0.total_weight()
+    weight_p1 = raw_masked_p1.total_weight()
+    if weight_p0 <= 0.0 or weight_p1 <= 0.0:
+        raise ValueError(
+            "root ranges must retain positive weight after dead-card masking"
+        )
+    masked_p0 = raw_masked_p0.normalized()
+    masked_p1 = raw_masked_p1.normalized()
+    return masked_p0, masked_p1, weight_p0, weight_p1
 
 
 def _build_infoset_action_counts(
@@ -158,3 +183,15 @@ def _format_action(action: Action) -> str:
     if action.amount is None:
         return action.action_type.value
     return f"{action.action_type.value}({int(action.amount)})"
+
+
+def _terminal_value_player0(state: GameState) -> float:
+    if state.phase is not HandPhase.TERMINAL:
+        return 0.0
+    payouts = compute_payouts(state)
+    player0_payout = next(
+        (payout.amount for payout in payouts if payout.player == 0),
+        Chips(0),
+    )
+    other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
+    return float(player0_payout - other_payouts)

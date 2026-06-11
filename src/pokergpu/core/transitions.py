@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from .actions import Action, ActionType
 from .betting import BettingRoundState, Chips, PlayerBet, PlayerIndex, PlayerStack
+from .board import Board, Street
+from .cards import Card, make_deck
 from .legality import is_legal_action
 from .state import GameState, HandPhase, PlayerState
 from .terminal import non_all_in_active_players
@@ -36,16 +38,27 @@ def apply_action_with_record(state: GameState, action: Action) -> AppliedTransit
             state,
             player,
             Chips(state.betting_round.amount_to_call(player)),
+            action=action,
         )
     elif action.action_type is ActionType.BET:
         if action.amount is None:
             raise ValueError("bet action requires amount")
-        next_state = _apply_contribution(state, player, Chips(action.amount))
+        next_state = _apply_contribution(
+            state,
+            player,
+            Chips(action.amount),
+            action=action,
+        )
     elif action.action_type is ActionType.RAISE:
         if action.amount is None:
             raise ValueError("raise action requires amount")
         current = _player_bet(state.betting_round, player).committed
-        next_state = _apply_contribution(state, player, Chips(action.amount - current))
+        next_state = _apply_contribution(
+            state,
+            player,
+            Chips(action.amount - current),
+            action=action,
+        )
     else:
         raise ValueError("unsupported action type")
 
@@ -90,6 +103,7 @@ def _apply_fold(state: GameState, player: PlayerIndex) -> GameState:
         state,
         players=updated_players,
         betting_round=updated_round,
+        action=Action(ActionType.FOLD),
     )
 
 
@@ -98,6 +112,7 @@ def _advance_without_bet_change(state: GameState) -> GameState:
         state,
         players=state.players,
         betting_round=state.betting_round,
+        action=Action(ActionType.CHECK),
     )
 
 
@@ -105,6 +120,8 @@ def _apply_contribution(
     state: GameState,
     player: PlayerIndex,
     contribution: Chips,
+    *,
+    action: Action,
 ) -> GameState:
     updated_stacks = []
     updated_bets = []
@@ -153,6 +170,7 @@ def _apply_contribution(
         state,
         players=updated_players,
         betting_round=updated_round,
+        action=action,
     )
 
 
@@ -161,10 +179,13 @@ def _finalize_state(
     *,
     players: tuple[PlayerState, ...],
     betting_round: BettingRoundState,
+    action: Action,
 ) -> GameState:
     active_player_states = tuple(player for player in players if not player.folded)
     if len(active_player_states) <= 1:
         phase = HandPhase.TERMINAL
+        board = state.board
+        round_state = betting_round
         to_act = betting_round.to_act
     else:
         candidate_state = GameState(
@@ -179,25 +200,131 @@ def _finalize_state(
         )
         if len(eligible_players) <= 1:
             phase = HandPhase.SHOWDOWN
+            board = state.board
+            round_state = betting_round
             to_act = betting_round.to_act
+        elif _is_betting_round_complete(
+            betting_round,
+            eligible_players=eligible_players,
+            action=action,
+        ):
+            round_state = _collect_bets_into_pot(
+                betting_round,
+                to_act=_first_player_to_act_for_new_round(
+                    betting_round,
+                    dealer=state.dealer,
+                    eligible_players=eligible_players,
+                ),
+            )
+            if state.current_street is Street.RIVER:
+                phase = HandPhase.SHOWDOWN
+                board = state.board
+            else:
+                phase = HandPhase.IN_PROGRESS
+                board = _advance_board(state)
+            to_act = round_state.to_act
         else:
             phase = HandPhase.IN_PROGRESS
+            board = state.board
+            round_state = betting_round
             to_act = _next_player_to_act(betting_round, eligible_players)
 
     updated_round = BettingRoundState(
-        pot=betting_round.pot,
-        stacks=betting_round.stacks,
-        bets=betting_round.bets,
-        blinds=betting_round.blinds,
+        pot=round_state.pot,
+        stacks=round_state.stacks,
+        bets=round_state.bets,
+        blinds=round_state.blinds,
         to_act=to_act,
     )
     return GameState(
-        board=state.board,
+        board=board,
         players=players,
         betting_round=updated_round,
         phase=phase,
         dealer=state.dealer,
     )
+
+
+def _is_betting_round_complete(
+    betting_round: BettingRoundState,
+    *,
+    eligible_players: tuple[PlayerIndex, ...],
+    action: Action,
+) -> bool:
+    commitments = tuple(
+        _player_bet(betting_round, player).committed for player in eligible_players
+    )
+    if len(set(commitments)) != 1:
+        return False
+    if action.action_type is not ActionType.CHECK:
+        return False
+
+    next_player = _next_player_to_act(betting_round, eligible_players)
+    return next_player == eligible_players[0]
+
+
+def _collect_bets_into_pot(
+    betting_round: BettingRoundState,
+    *,
+    to_act: PlayerIndex,
+) -> BettingRoundState:
+    total_committed = sum(bet.committed for bet in betting_round.bets)
+    reset_bets = tuple(
+        PlayerBet(
+            player=bet.player,
+            committed=Chips(0),
+            folded=bet.folded,
+            all_in=bet.all_in,
+        )
+        for bet in betting_round.bets
+    )
+    return BettingRoundState(
+        pot=betting_round.pot.add(Chips(total_committed)),
+        stacks=betting_round.stacks,
+        bets=reset_bets,
+        blinds=betting_round.blinds,
+        to_act=to_act,
+    )
+
+
+def _first_player_to_act_for_new_round(
+    betting_round: BettingRoundState,
+    *,
+    dealer: PlayerIndex,
+    eligible_players: tuple[PlayerIndex, ...],
+) -> PlayerIndex:
+    order = tuple(stack.player for stack in betting_round.stacks)
+    dealer_index = order.index(dealer)
+    for offset in range(1, len(order) + 1):
+        candidate = order[(dealer_index + offset) % len(order)]
+        if candidate in eligible_players:
+            return candidate
+    return betting_round.to_act
+
+
+def _advance_board(state: GameState) -> Board:
+    cards_to_add = {
+        Street.PREFLOP: 3,
+        Street.FLOP: 1,
+        Street.TURN: 1,
+    }.get(state.current_street, 0)
+    if cards_to_add == 0:
+        return state.board
+
+    seen_cards: set[Card] = set(state.board.cards)
+    for player in state.players:
+        if player.hole_cards is not None:
+            seen_cards.update(player.hole_cards)
+
+    revealed_cards = list(state.board.cards)
+    for card in make_deck():
+        if card in seen_cards:
+            continue
+        revealed_cards.append(card)
+        seen_cards.add(card)
+        if len(revealed_cards) == len(state.board.cards) + cards_to_add:
+            return Board(cards=tuple(revealed_cards))
+    raise ValueError("not enough remaining cards to advance the board")
 
 
 def _next_player_to_act(

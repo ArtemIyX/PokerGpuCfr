@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from pokergpu.core.payouts import total_pot
+from pokergpu.core.state import GameState
 from pokergpu.eval import LeafEvaluator, LeafFeatureBatch, LeafValueBatch
 from pokergpu.tree import NodeId, NodeType, PublicTree
 
@@ -41,6 +43,7 @@ def build_leaf_feature_batch(
     tree: PublicTree,
     node_indices: tuple[int, ...],
     *,
+    node_states: tuple[GameState, ...] | None = None,
     player_to_act: int | None = None,
     reach_p0: NDArray[np.float32] | None = None,
     reach_p1: NDArray[np.float32] | None = None,
@@ -61,11 +64,20 @@ def build_leaf_feature_batch(
 
     for batch_index, node_index in enumerate(node_indices):
         node_type = tree.node_types[node_index]
-        player_to_act_arr[batch_index] = (
-            int(player_to_act) if player_to_act is not None else 0
-        )
-        street[batch_index] = 0
-        board_size[batch_index] = 0
+        if node_states is not None:
+            node_state = node_states[node_index]
+            player_to_act_arr[batch_index] = int(node_state.betting_round.to_act)
+            street[batch_index] = _street_to_index(node_state.current_street)
+            pot[batch_index] = np.float32(total_pot(node_state))
+            stack_p0[batch_index] = np.float32(_stack_for_player(node_state, 0))
+            stack_p1[batch_index] = np.float32(_stack_for_player(node_state, 1))
+            board_size[batch_index] = len(node_state.board.cards)
+        else:
+            player_to_act_arr[batch_index] = (
+                int(player_to_act) if player_to_act is not None else 0
+            )
+            street[batch_index] = 0
+            board_size[batch_index] = 0
         is_terminal[batch_index] = node_type is NodeType.TERMINAL
         is_frontier[batch_index] = tree.is_frontier[node_index]
         infoset = tree.infoset_ids[node_index]
@@ -107,6 +119,7 @@ def evaluate_frontier_nodes(
     tree: PublicTree,
     evaluator: LeafEvaluator,
     *,
+    node_states: tuple[GameState, ...] | None = None,
     reach_p0: NDArray[np.float32] | None = None,
     reach_p1: NDArray[np.float32] | None = None,
 ) -> tuple[tuple[int, ...], LeafValueBatch]:
@@ -119,6 +132,7 @@ def evaluate_frontier_nodes(
     batch = build_leaf_feature_batch(
         tree,
         frontier_nodes,
+        node_states=node_states,
         reach_p0=reach_p0,
         reach_p1=reach_p1,
     )
@@ -213,6 +227,7 @@ def compute_reach_probabilities_parallel(
                         node_index,
                         np.float32(player0_reach[node_index]),
                         np.float32(player1_reach[node_index]),
+                        np.float32(min_reach_prob),
                     ),
                     level,
                 )
@@ -236,6 +251,9 @@ def compute_counterfactual_values(
     tree: PublicTree,
     store: InfosetStore,
     *,
+    node_states: tuple[GameState, ...] | None = None,
+    reach_p0: NDArray[np.float32] | None = None,
+    reach_p1: NDArray[np.float32] | None = None,
     leaf_values_player0: NDArray[np.float32] | None = None,
     leaf_values_player1: NDArray[np.float32] | None = None,
     terminal_values_player0: NDArray[np.float32] | None = None,
@@ -260,7 +278,13 @@ def compute_counterfactual_values(
         leaf_p1[:] = -leaf_p0
 
     if evaluator is not None:
-        frontier_nodes, leaf_values = evaluate_frontier_nodes(tree, evaluator)
+        frontier_nodes, leaf_values = evaluate_frontier_nodes(
+            tree,
+            evaluator,
+            node_states=node_states,
+            reach_p0=reach_p0,
+            reach_p1=reach_p1,
+        )
         if frontier_nodes:
             scatter_leaf_values(
                 frontier_nodes,
@@ -338,6 +362,9 @@ def compute_counterfactual_values_parallel(
     tree: PublicTree,
     store: InfosetStore,
     *,
+    node_states: tuple[GameState, ...] | None = None,
+    reach_p0: NDArray[np.float32] | None = None,
+    reach_p1: NDArray[np.float32] | None = None,
     leaf_values_player0: NDArray[np.float32] | None = None,
     leaf_values_player1: NDArray[np.float32] | None = None,
     terminal_values_player0: NDArray[np.float32] | None = None,
@@ -350,6 +377,9 @@ def compute_counterfactual_values_parallel(
         return compute_counterfactual_values(
             tree,
             store,
+            node_states=node_states,
+            reach_p0=reach_p0,
+            reach_p1=reach_p1,
             leaf_values_player0=leaf_values_player0,
             leaf_values_player1=leaf_values_player1,
             terminal_values_player0=terminal_values_player0,
@@ -376,13 +406,19 @@ def compute_counterfactual_values_parallel(
         leaf_p1[:] = -leaf_p0
 
     if evaluator is not None:
-        frontier_nodes, leaf_values = evaluate_frontier_nodes(tree, evaluator)
+        frontier_nodes, leaf_values = evaluate_frontier_nodes(
+            tree,
+            evaluator,
+            node_states=node_states,
+            reach_p0=reach_p0,
+            reach_p1=reach_p1,
+        )
         if frontier_nodes:
             scatter_leaf_values(
                 frontier_nodes,
                 leaf_values,
-                node_values_player0,
-                node_values_player1,
+                leaf_p0,
+                leaf_p1,
             )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -671,9 +707,16 @@ def _forward_node_update(
     node_index: int,
     node_player0_reach: np.float32,
     node_player1_reach: np.float32,
+    min_reach_prob: np.float32,
 ) -> tuple[tuple[tuple[int, np.float32], ...], tuple[tuple[int, np.float32], ...]]:
     node_type = tree.node_types[node_index]
     if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+        return (), ()
+    if tree.is_frontier[node_index]:
+        return (), ()
+    if min_reach_prob > 0.0 and float(node_player0_reach + node_player1_reach) < float(
+        min_reach_prob
+    ):
         return (), ()
 
     updates_p0: list[tuple[int, np.float32]] = []
@@ -749,3 +792,20 @@ def _backward_node_update(
         child_values_p0 if node_type is NodeType.PLAYER0 else child_values_p1
     )
     return node_index, value_p0, value_p1, infoset_index, action_values
+
+
+def _stack_for_player(state: GameState, player: int) -> int:
+    for stack in state.betting_round.stacks:
+        if int(stack.player) == player:
+            return int(stack.stack)
+    return 0
+
+
+def _street_to_index(street: object) -> int:
+    value = getattr(street, "value", "")
+    return {
+        "preflop": 0,
+        "flop": 1,
+        "turn": 2,
+        "river": 3,
+    }.get(value, 0)

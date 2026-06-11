@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pokergpu.abstraction.actions import ActionAbstraction, BaselineActionAbstraction
 from pokergpu.core.actions import Action
 from pokergpu.core.betting import Chips
+from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.core.transitions import apply_action
 
@@ -163,5 +164,13 @@ def _infoset_id_for_state(
 
 def _terminal_payoff_for_state(state: GameState) -> Chips | None:
     if state.phase is HandPhase.TERMINAL:
-        return Chips(0)
+        payouts = compute_payouts(state)
+        player0_payout = next(
+            (payout.amount for payout in payouts if payout.player == 0),
+            Chips(0),
+        )
+        other_payouts = sum(
+            payout.amount for payout in payouts if payout.player != 0
+        )
+        return Chips(player0_payout - other_payouts)
     return None
