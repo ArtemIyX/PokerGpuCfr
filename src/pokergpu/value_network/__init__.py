@@ -35,6 +35,7 @@ from .target import (
     feature_dimension,
     scalar_ev_target,
 )
+from .train import TrainingConfig, TrainingResult, train_baseline
 
 __all__ = [
     "PokerValueLabel",
@@ -47,6 +48,8 @@ __all__ = [
     "FeatureNormalizer",
     "ValueDatasetSample",
     "ValueCheckpoint",
+    "TrainingConfig",
+    "TrainingResult",
     "ValueMLP",
     "ValueNetworkConfig",
     "build_value_feature_batch",
@@ -69,5 +72,6 @@ __all__ = [
     "save_feature_normalizer",
     "save_value_sample",
     "scalar_ev_target",
+    "train_baseline",
     "train_value_step",
 ]

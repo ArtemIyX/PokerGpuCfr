@@ -180,9 +180,9 @@ These help track:
 
 ### Goal 4: Train a baseline
 
-- run a short supervised training session
-- verify loss decreases
-- compare predictions against solver labels
+- [x] run a short supervised training session
+- [x] verify loss decreases
+- [x] compare predictions against solver labels
 
 ### Goal 5: Integrate with CFR runtime
 
