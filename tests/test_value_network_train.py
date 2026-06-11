@@ -9,8 +9,8 @@ from pokergpu.value_network import (
     ValueDatasetSample,
     ValueFeatureSpec,
     ValueTargetKind,
+    save_value_sample_pack,
     save_dataset_manifest,
-    save_value_sample,
 )
 from pokergpu.value_network.train import TrainingConfig, train_baseline
 
@@ -43,7 +43,7 @@ def test_train_baseline_runs_and_returns_losses(tmp_path: Path) -> None:
                 label_shape=(1, 2),
             )
         )
-        save_value_sample(sample, dataset_dir / f"{split}/{sample.sample_id}.npz")
+        save_value_sample_pack([sample], dataset_dir / f"{split}.pack.npz")
 
     manifest_path = tmp_path / "manifest.json"
     save_dataset_manifest(entries, manifest_path)

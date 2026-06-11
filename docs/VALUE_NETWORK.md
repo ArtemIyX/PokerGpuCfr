@@ -190,13 +190,6 @@ These help track:
 - keep CFR as the decision engine
 - measure runtime speed and EV quality
 
-### Goal 6: Improve gradually
-
-- add harder subgames
-- add better features
-- refine output targets
-- retrain from newer solver data
-
 ## Rule of thumb
 
 The value network should be good enough to support solving, not good enough to replace solving.

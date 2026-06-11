@@ -45,6 +45,9 @@ __all__ = [
     "save_dataset_manifest",
     "save_feature_normalizer",
     "save_value_sample",
+    "save_value_sample_pack",
+    "load_value_sample_pack",
+    "load_value_pack_manifest",
 ]
 
 DATASET_VERSION = 1
@@ -69,6 +72,8 @@ class DatasetManifestEntryPayload(TypedDict):
     feature_count: int
     label_shape: list[int]
     metadata: dict[str, object]
+    pack_path: str
+    pack_index: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +110,7 @@ class ValueDatasetSample:
 class DatasetSplitRule:
     validation_modulo: int = 10
     validation_remainder: int = 0
+    split_key: str = "sample_id"
 
     def __post_init__(self) -> None:
         if self.validation_modulo <= 1:
@@ -113,8 +119,17 @@ class DatasetSplitRule:
             raise ValueError("validation remainder out of range")
 
     def is_validation(self, sample_id: str) -> bool:
-        return (_sample_hash(sample_id) % self.validation_modulo 
-                == self.validation_remainder)
+        return self.is_validation_key(sample_id)
+
+    def is_validation_key(self, key: str) -> bool:
+        return _sample_hash(key) % self.validation_modulo == self.validation_remainder
+
+    def split_for_metadata(self, sample_id: str, metadata: dict[str, object] | None) -> str:
+        if self.split_key == "template_family" and metadata is not None:
+            family = metadata.get("template_family")
+            if isinstance(family, str) and family:
+                return "val" if self.is_validation_key(family) else "train"
+        return self.split(sample_id)
 
     def split(self, sample_id: str) -> str:
         return "val" if self.is_validation(sample_id) else "train"
@@ -234,6 +249,8 @@ class DatasetManifestEntry:
     feature_count: int
     label_shape: tuple[int, int]
     metadata: dict[str, object] | None = None
+    pack_path: str = ""
+    pack_index: int = 0
 
     def to_dict(self) -> DatasetManifestEntryPayload:
         return {
@@ -243,6 +260,8 @@ class DatasetManifestEntry:
             "feature_count": self.feature_count,
             "label_shape": list(self.label_shape),
             "metadata": dict(self.metadata or {}),
+            "pack_path": self.pack_path,
+            "pack_index": self.pack_index,
         }
 
     @classmethod
@@ -257,6 +276,8 @@ class DatasetManifestEntry:
             feature_count=payload["feature_count"],
             label_shape=(shape[0], shape[1]),
             metadata=dict(payload.get("metadata", {})),
+            pack_path=str(payload.get("pack_path", "")),
+            pack_index=int(payload.get("pack_index", 0)),
         )
 
 
@@ -327,7 +348,34 @@ def save_value_sample(sample: ValueDatasetSample, path: Path) -> None:
     )
 
 
+def save_value_sample_pack(samples: list[ValueDatasetSample], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sample_ids: list[str] = []
+    feature_rows: list[NDArray[np.float32]] = []
+    label_rows: list[NDArray[np.float32]] = []
+    metadata_rows: list[str] = []
+    for sample in samples:
+        sample_ids.append(sample.sample_id)
+        feature_rows.append(sample.features)
+        label_rows.append(sample.label)
+        metadata_rows.append(json.dumps(sample.metadata, sort_keys=True))
+    np.savez_compressed(
+        path,
+        sample_ids=np.asarray(sample_ids, dtype=np.str_),
+        features=np.asarray(feature_rows, dtype=np.float32),
+        labels=np.asarray(label_rows, dtype=np.float32),
+        metadata=np.asarray(metadata_rows, dtype=np.str_),
+    )
+
+
+def load_value_pack_manifest(path: Path) -> list[DatasetManifestEntry]:
+    payload = cast(list[DatasetManifestEntryPayload], json.loads(path.read_text(encoding="utf-8")))
+    return [DatasetManifestEntry.from_dict(item) for item in payload]
+
+
 def load_value_sample(path: Path) -> ValueDatasetSample:
+    if path.name.endswith(".pack.npz"):
+        raise ValueError("use load_value_sample_pack for packed files")
     with np.load(path, allow_pickle=False) as data:
         metadata = json.loads(str(data["metadata"].item()))
         return ValueDatasetSample(
@@ -336,6 +384,25 @@ def load_value_sample(path: Path) -> ValueDatasetSample:
             label=np.asarray(data["label"], dtype=np.float32),
             metadata=metadata,
         )
+
+
+def load_value_sample_pack(path: Path) -> list[ValueDatasetSample]:
+    with np.load(path, allow_pickle=False) as data:
+        sample_ids = [str(item) for item in np.asarray(data["sample_ids"], dtype=np.str_)]
+        features = np.asarray(data["features"], dtype=np.float32)
+        labels = np.asarray(data["labels"], dtype=np.float32)
+        metadata_rows = [json.loads(str(item)) for item in np.asarray(data["metadata"], dtype=np.str_)]
+        samples: list[ValueDatasetSample] = []
+        for index, sample_id in enumerate(sample_ids):
+            samples.append(
+                ValueDatasetSample(
+                    sample_id=sample_id,
+                    features=np.asarray(features[index], dtype=np.float32),
+                    label=np.asarray(labels[index], dtype=np.float32),
+                    metadata=metadata_rows[index],
+                )
+            )
+        return samples
 
 
 def save_dataset_manifest(entries: list[DatasetManifestEntry], path: Path) -> None:
@@ -379,13 +446,17 @@ def build_dataset_manifest_entry(
     split_rule: DatasetSplitRule,
     relative_path: str,
 ) -> DatasetManifestEntry:
+    pack_index_value = sample.metadata.get("pack_index", 0)
+    pack_index = int(str(pack_index_value))
     return DatasetManifestEntry(
         sample_id=sample.sample_id,
-        split=split_rule.split(sample.sample_id),
+        split=split_rule.split_for_metadata(sample.sample_id, sample.metadata),
         path=relative_path,
         feature_count=int(sample.features.shape[0]),
         label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
         metadata=dict(sample.metadata),
+        pack_path=str(sample.metadata.get("pack_path", "")),
+        pack_index=pack_index,
     )
 
 
@@ -405,10 +476,9 @@ def export_dataset_sample(
                                  label, 
                                  feature_spec, 
                                  metadata)
-    split = split_rule.split(sample.sample_id)
+    split = split_rule.split_for_metadata(sample.sample_id, sample.metadata)
     file_name = f"{sample.sample_id}.npz"
     relative_path = f"{split}/{file_name}"
-    save_value_sample(sample, output_dir / relative_path)
     return build_dataset_manifest_entry(sample, split_rule, relative_path)
 
 

@@ -141,6 +141,7 @@ def test_dataset_sanity_report_prints_stats(
             dataset_dir=dataset_dir,
             feature_normalizer_path=dataset_dir / "normalizer.json",
             label_normalizer_path=dataset_dir / "label_normalizer.json",
+            split_key="sample_id",
         )
     )
     captured = capsys.readouterr()

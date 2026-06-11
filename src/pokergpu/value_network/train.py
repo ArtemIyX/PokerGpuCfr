@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
+import time
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,6 +19,7 @@ from .dataset import (
     fit_feature_normalizer,
     fit_label_normalizer,
     load_dataset_manifest,
+    load_value_sample_pack,
     load_value_sample,
     normalize_feature_batch,
 )
@@ -75,8 +77,30 @@ class TrainingResult:
 def _load_samples(
     entries: list[DatasetManifestEntry],
     dataset_dir: Path,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    label: str = "load samples",
 ) -> list[ValueDatasetSample]:
-    return [load_value_sample(dataset_dir / entry.path) for entry in entries]
+    pack_path = dataset_dir / "samples.pack.npz"
+    if pack_path.exists():
+        packed_samples = load_value_sample_pack(pack_path)
+        if progress_callback is not None:
+            progress_callback(len(packed_samples), len(packed_samples), label)
+        return packed_samples
+    shard_paths = sorted(dataset_dir.glob("*.pack.npz"))
+    if shard_paths:
+        shard_samples: list[ValueDatasetSample] = []
+        for shard_index, shard_path in enumerate(shard_paths, start=1):
+            shard_samples.extend(load_value_sample_pack(shard_path))
+            if progress_callback is not None:
+                progress_callback(shard_index, len(shard_paths), label)
+        return shard_samples
+    samples: list[ValueDatasetSample] = []
+    total = len(entries)
+    for index, entry in enumerate(entries, start=1):
+        samples.append(load_value_sample(dataset_dir / entry.path))
+        if progress_callback is not None:
+            progress_callback(index, total, label)
+    return samples
 
 
 def _split_entries(
@@ -86,7 +110,8 @@ def _split_entries(
     train_entries: list[DatasetManifestEntry] = []
     val_entries: list[DatasetManifestEntry] = []
     for entry in entries:
-        if rule.is_validation(entry.sample_id):
+        metadata = entry.metadata or {}
+        if rule.split_for_metadata(entry.sample_id, metadata) == "val":
             val_entries.append(entry)
         else:
             train_entries.append(entry)
@@ -140,6 +165,7 @@ def train_baseline(
 ) -> TrainingResult:
     if config is None:
         config = TrainingConfig()
+    print("train: load manifest")
 
     entries = load_dataset_manifest(manifest_path)
     split_rule = DatasetSplitRule(
@@ -147,16 +173,32 @@ def train_baseline(
         validation_remainder=config.validation_remainder,
     )
     train_entries, val_entries = _split_entries(entries, split_rule)
-    train_samples = _load_samples(train_entries, dataset_dir)
-    val_samples = _load_samples(val_entries, dataset_dir)
+    print(f"train: load samples train={len(train_entries)} val={len(val_entries)}")
+    train_samples = _load_samples(
+        train_entries,
+        dataset_dir,
+        progress_callback=progress_callback,
+        label="load train samples",
+    )
+    val_samples = _load_samples(
+        val_entries,
+        dataset_dir,
+        progress_callback=progress_callback,
+        label="load val samples",
+    )
     if not train_samples:
         raise ValueError("training split is empty")
 
     if feature_normalizer is None:
+        print("train: fit feature normalizer")
         feature_normalizer = fit_feature_normalizer(train_samples)
     if label_normalizer is None:
+        print("train: fit label normalizer")
         label_normalizer = fit_label_normalizer(train_samples)
+    if progress_callback is not None:
+        progress_callback(1, 1, "normalizers ready")
 
+    print("train: build model")
     model_config = build_value_network_config(
         feature_spec,
         target_kind,
@@ -165,8 +207,10 @@ def train_baseline(
         dropout=config.dropout,
     )
     device = default_value_device()
+    print(f"train: device={device}")
     model = build_value_model(model_config, device=device)
     import torch
+    print("train: build optimizer")
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
     best_val = float("inf")
@@ -175,6 +219,7 @@ def train_baseline(
     val_loss = 0.0
 
     for epoch in range(config.epochs):
+        epoch_started_at = time.monotonic()
         epoch_losses: list[float] = []
         batch_total = (len(train_samples) + config.batch_size - 1) // config.batch_size
         batch_index = 0
@@ -206,6 +251,12 @@ def train_baseline(
             label_normalizer,
             config.batch_size,
         )
+        epoch_elapsed = time.monotonic() - epoch_started_at
+        print(
+            f"train: epoch={epoch + 1}/{config.epochs} "
+            f"train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
+            f"elapsed_seconds={epoch_elapsed:.3f}"
+        )
         if val_loss <= best_val:
             best_val = val_loss
             best_checkpoint = ValueCheckpoint(
@@ -221,6 +272,7 @@ def train_baseline(
                             model, 
                             optimizer, 
                             best_checkpoint)
+            print("train: saved best checkpoint")
 
     if best_checkpoint is None:
         best_checkpoint = ValueCheckpoint(
@@ -236,6 +288,7 @@ def train_baseline(
     preview_predictions = np.zeros((0, model_config.output_dim), dtype=np.float32)
     preview_labels = np.zeros((0, model_config.output_dim), dtype=np.float32)
     if val_samples:
+        print("train: build preview")
         features, targets = _batch_slice(val_samples, 
                                          0, 
                                          min(len(val_samples), 

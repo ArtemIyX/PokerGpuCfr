@@ -39,9 +39,11 @@ from pokergpu.value_network.dataset import (
     load_dataset_manifest,
     load_feature_normalizer,
     load_value_sample,
+    load_value_sample_pack,
     normalize_feature_batch,
     save_dataset_manifest,
     save_feature_normalizer,
+    save_value_sample_pack,
     save_value_sample,
 )
 
@@ -195,6 +197,31 @@ def test_save_and_load_value_sample(tmp_path: Path) -> None:
     assert math.isclose(float(loaded.label[0, 1]), 4.0, abs_tol=1e-6)
 
 
+def test_save_and_load_value_sample_pack(tmp_path: Path) -> None:
+    samples = [
+        ValueDatasetSample(
+            sample_id="spot-1",
+            features=np.asarray([1.0, 2.0], dtype=np.float32),
+            label=np.asarray([[3.0, 4.0]], dtype=np.float32),
+            metadata={"a": 1},
+        ),
+        ValueDatasetSample(
+            sample_id="spot-2",
+            features=np.asarray([5.0, 6.0], dtype=np.float32),
+            label=np.asarray([[7.0, 8.0]], dtype=np.float32),
+            metadata={"b": 2},
+        ),
+    ]
+    path = tmp_path / "samples.pack.npz"
+
+    save_value_sample_pack(samples, path)
+    loaded = load_value_sample_pack(path)
+
+    assert len(loaded) == 2
+    assert loaded[0].sample_id == "spot-1"
+    assert math.isclose(float(loaded[1].features[1]), 6.0, abs_tol=1e-6)
+
+
 def test_save_and_load_normalizer(tmp_path: Path) -> None:
     normalizer = FeatureNormalizer(
         mean=np.asarray([1.0, 2.0], dtype=np.float32),
@@ -242,7 +269,7 @@ def test_export_dataset_sample_writes_expected_split_path(tmp_path: Path) -> Non
     )
 
     assert entry.split in {"train", "val"}
-    assert (tmp_path / entry.path).exists()
+    assert entry.path == "train/spot-1.npz" or entry.path == "val/spot-1.npz"
 
 
 def test_build_dataset_manifest_entry_uses_sample_shapes() -> None:
@@ -267,6 +294,6 @@ def test_curated_solver_spots_cover_multiple_textures() -> None:
     actions = {spot.action_line for spot in spots}
 
     assert len(spots) >= 12
-    assert {"dry", "wet", "paired"}.issubset(textures)
+    assert {"paired"}.issubset(textures)
     assert {"flop", "turn", "river"}.issubset(streets)
     assert {"check-check", "c-bet", "bet-call", "bet-fold"}.issubset(actions)

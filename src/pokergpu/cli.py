@@ -55,14 +55,17 @@ from .value_network import (
     ValueTargetKind,
     build_value_label,
     export_dataset_sample,
+    export_value_sample,
     fit_feature_normalizer,
     fit_label_normalizer,
     load_dataset_manifest,
     load_feature_normalizer,
     load_label_normalizer,
     load_value_sample,
+    load_value_sample_pack,
     save_dataset_manifest,
     save_feature_normalizer,
+    save_value_sample_pack,
     save_label_normalizer,
     save_value_sample,
     scalar_ev_target,
@@ -338,6 +341,7 @@ class _DatasetSanityReportArgs:
     dataset_dir: Path
     feature_normalizer_path: Path | None
     label_normalizer_path: Path | None
+    split_key: str
 
 
 def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
@@ -602,6 +606,7 @@ def _parse_dataset_sanity_report_args(args: list[str]) -> _DatasetSanityReportAr
     dataset_dir = Path("artifacts/value_data").resolve()
     feature_normalizer_path: Path | None = dataset_dir / "normalizer.json"
     label_normalizer_path: Path | None = dataset_dir / "label_normalizer.json"
+    split_key = "sample_id"
     index = 0
     while index < len(args):
         option = args[index]
@@ -629,12 +634,17 @@ def _parse_dataset_sanity_report_args(args: list[str]) -> _DatasetSanityReportAr
             label_normalizer_path = None
             index += 1
             continue
+        if option == "--split-key" and index + 1 < len(args):
+            split_key = args[index + 1]
+            index += 2
+            continue
         raise ValueError(f"invalid dataset-sanity-report arguments: {args!r}")
     return _DatasetSanityReportArgs(
         manifest_path=manifest_path,
         dataset_dir=dataset_dir,
         feature_normalizer_path=feature_normalizer_path,
         label_normalizer_path=label_normalizer_path,
+        split_key=split_key,
     )
 
 
@@ -642,7 +652,13 @@ def _print_dataset_sanity_report(args: _DatasetSanityReportArgs) -> None:
     entries = load_dataset_manifest(args.manifest_path)
     train_entries = [entry for entry in entries if entry.split == "train"]
     val_entries = [entry for entry in entries if entry.split == "val"]
-    samples = [load_value_sample(args.dataset_dir / entry.path) for entry in entries]
+    pack_paths = sorted({args.dataset_dir / entry.pack_path for entry in entries if entry.pack_path})
+    if pack_paths:
+        samples: list[ValueDatasetSample] = []
+        for pack_path in pack_paths:
+            samples.extend(load_value_sample_pack(pack_path))
+    else:
+        samples = [load_value_sample(args.dataset_dir / entry.path) for entry in entries]
     feature_counts = sorted({int(entry.feature_count) for entry in entries})
     label_shapes = sorted({tuple(entry.label_shape) for entry in entries})
     feature_normalizer = (
@@ -739,9 +755,9 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
                 label_shape=(sample.label.shape[0], sample.label.shape[1]),
             )
         )
-        save_value_sample(sample, args.output_dir / relative_path)
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
+    _write_packed_samples(args.output_dir, entries, samples)
     save_dataset_manifest(entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
@@ -813,6 +829,7 @@ def _export_solver_labels(
                     )
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
+    _write_packed_samples(args.output_dir, entries, samples)
     save_dataset_manifest(entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
@@ -884,6 +901,7 @@ def _export_curated_solver_labels(
                     )
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
+    _write_packed_samples(args.output_dir, entries, samples)
     save_dataset_manifest(entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
@@ -919,7 +937,7 @@ def _solve_and_export_label(
             continue
     if result is None or resolve_spec is None:
         raise ValueError("unable to generate a valid solver label")
-    sample = export_dataset_sample(
+    sample = export_value_sample(
         sample_id=f"solver-{index:05d}",
         state=resolve_spec.state,
         ranges=PlayerRangeVectors.from_values((resolve_spec.range_p0, resolve_spec.range_p1)),
@@ -928,8 +946,6 @@ def _solve_and_export_label(
             scalar_ev_target(args.player_count),
         ),
         feature_spec=feature_spec,
-        output_dir=args.output_dir,
-        split_rule=split_rule,
         metadata={
             "solver": "postflop_hu",
             "iterations": result.iterations,
@@ -938,9 +954,19 @@ def _solve_and_export_label(
             "root_actions": result.root_actions,
         },
     )
-    loaded = load_value_sample(args.output_dir / sample.path)
-    _validate_exported_sample(loaded)
-    return sample, loaded
+    split = split_rule.split_for_metadata(sample.sample_id, sample.metadata)
+    entry = DatasetManifestEntry(
+        sample_id=sample.sample_id,
+        split=split,
+        path=f"{split}.pack.npz",
+        feature_count=int(sample.features.shape[0]),
+        label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
+        metadata=dict(sample.metadata),
+        pack_path=f"{split}.pack.npz",
+        pack_index=index,
+    )
+    _validate_exported_sample(sample)
+    return entry, sample
 
 
 def _solve_curated_spot(
@@ -961,7 +987,7 @@ def _solve_curated_spot(
         max_nodes=128,
     )
     result = resolve_postflop_hu(spec)
-    entry = export_dataset_sample(
+    sample = export_value_sample(
         sample_id=f"curated-{spot_t.family}-{index:05d}",
         state=spot_t.state,
         ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
@@ -970,8 +996,6 @@ def _solve_curated_spot(
             scalar_ev_target(2),
         ),
         feature_spec=feature_spec,
-        output_dir=output_dir,
-        split_rule=split_rule,
         metadata={
             "solver": "postflop_hu",
             "board_texture": spot_t.board_texture,
@@ -981,9 +1005,19 @@ def _solve_curated_spot(
             "template_family": spot_t.family,
         },
     )
-    loaded = load_value_sample(output_dir / entry.path)
-    _validate_exported_sample(loaded)
-    return entry, loaded
+    split = split_rule.split_for_metadata(sample.sample_id, sample.metadata)
+    entry = DatasetManifestEntry(
+        sample_id=sample.sample_id,
+        split=split,
+        path=f"{split}.pack.npz",
+        feature_count=int(sample.features.shape[0]),
+        label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
+        metadata=dict(sample.metadata),
+        pack_path=f"{split}.pack.npz",
+        pack_index=index,
+    )
+    _validate_exported_sample(sample)
+    return entry, sample
 
 
 def _real_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
@@ -1061,6 +1095,20 @@ def _validate_exported_sample(sample: ValueDatasetSample) -> None:
         raise ValueError("exported sample labels must be finite")
     if float(np.std(sample.features)) <= 0.0:
         raise ValueError("exported sample features must vary")
+    if float(np.std(sample.label)) <= 0.0:
+        raise ValueError("exported sample labels must vary")
+
+
+def _write_packed_samples(
+    output_dir: Path,
+    entries: list[DatasetManifestEntry],
+    samples: list[ValueDatasetSample],
+) -> None:
+    by_split: dict[str, list[ValueDatasetSample]] = {}
+    for entry, sample in zip(entries, samples, strict=True):
+        by_split.setdefault(entry.split, []).append(sample)
+    for split, split_samples in by_split.items():
+        save_value_sample_pack(split_samples, output_dir / f"{split}.pack.npz")
 
 
 class _DemoBiasedLeafEvaluator(LeafEvaluator):
