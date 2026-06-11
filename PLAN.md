@@ -119,11 +119,11 @@ How to use:
 
 ## 12. Leaf evaluation interface
 
-- [ ] Define leaf feature schema
-- [ ] Define evaluator interface returning EVs
-- [ ] Implement CPU stub evaluator
-- [ ] Integrate evaluator into CFR loop
-- [ ] Add tests for batch build and scatter logic
+- [x] Define leaf feature schema
+- [x] Define evaluator interface returning EVs
+- [x] Implement CPU stub evaluator
+- [x] Integrate evaluator into CFR loop
+- [x] Add tests for batch build and scatter logic
 
 ## 13. GPU path for batched evaluation
 

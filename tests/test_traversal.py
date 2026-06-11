@@ -16,6 +16,7 @@ from pokergpu.cfr import (
     update_regrets_from_traversal_parallel,
 )
 from pokergpu.core.betting import Chips
+from pokergpu.eval import LeafValueBatch
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
@@ -141,6 +142,35 @@ def test_frontier_nodes_use_leaf_values_in_backward_pass() -> None:
     )
 
     assert math.isclose(float(backward.node_values_player0[1]), 5.0, abs_tol=1e-6)
+
+
+def test_evaluator_populates_frontier_values_in_backward_pass() -> None:
+    class ConstantEvaluator:
+        def evaluate(self, batch):
+            size = batch.size
+            return LeafValueBatch(
+                ev_player0=np.full(size, 7.0, dtype=np.float32),
+                ev_player1=np.full(size, -7.0, dtype=np.float32),
+            )
+
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
+        infoset_ids=(InfosetId(0), None, None),
+        terminal_payoffs=(None, None, None),
+    )
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([2]))
+
+    backward = compute_counterfactual_values(
+        tree,
+        store,
+        evaluator=ConstantEvaluator(),
+    )
+
+    assert math.isclose(float(backward.node_values_player0[1]), 7.0, abs_tol=1e-6)
 
 
 def test_parallel_infoset_updates_match_serial_updates() -> None:

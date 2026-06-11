@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from pokergpu.eval import LeafEvaluator, LeafFeatureBatch, LeafValueBatch
 from pokergpu.tree import NodeId, NodeType, PublicTree
 
 from .infosets import InfosetStore
@@ -34,6 +35,72 @@ class RegretUpdateResult:
 class TreeLevels:
     forward_levels: tuple[tuple[int, ...], ...]
     backward_levels: tuple[tuple[int, ...], ...]
+
+
+def build_leaf_feature_batch(
+    tree: PublicTree,
+    node_indices: tuple[int, ...],
+    *,
+    player_to_act: int | None = None,
+    reach_p0: NDArray[np.float32] | None = None,
+    reach_p1: NDArray[np.float32] | None = None,
+) -> LeafFeatureBatch:
+    node_indices = tuple(node_indices)
+    size = len(node_indices)
+    player_to_act_arr = np.zeros(size, dtype=np.int32)
+    street = np.zeros(size, dtype=np.int32)
+    pot = np.zeros(size, dtype=np.float32)
+    stack_p0 = np.zeros(size, dtype=np.float32)
+    stack_p1 = np.zeros(size, dtype=np.float32)
+    board_size = np.zeros(size, dtype=np.int32)
+    reach_p0_arr = np.zeros(size, dtype=np.float32)
+    reach_p1_arr = np.zeros(size, dtype=np.float32)
+    is_terminal = np.zeros(size, dtype=np.bool_)
+    is_frontier = np.zeros(size, dtype=np.bool_)
+    infoset_id = np.full(size, -1, dtype=np.int32)
+
+    for batch_index, node_index in enumerate(node_indices):
+        node_type = tree.node_types[node_index]
+        player_to_act_arr[batch_index] = (
+            int(player_to_act) if player_to_act is not None else 0
+        )
+        street[batch_index] = 0
+        board_size[batch_index] = 0
+        is_terminal[batch_index] = node_type is NodeType.TERMINAL
+        is_frontier[batch_index] = tree.is_frontier[node_index]
+        infoset = tree.infoset_ids[node_index]
+        if infoset is not None:
+            infoset_id[batch_index] = int(infoset)
+        if reach_p0 is not None:
+            reach_p0_arr[batch_index] = np.float32(reach_p0[node_index])
+        if reach_p1 is not None:
+            reach_p1_arr[batch_index] = np.float32(reach_p1[node_index])
+
+    return LeafFeatureBatch(
+        node_indices=node_indices,
+        player_to_act=player_to_act_arr,
+        street=street,
+        pot=pot,
+        stack_p0=stack_p0,
+        stack_p1=stack_p1,
+        board_size=board_size,
+        reach_p0=reach_p0_arr,
+        reach_p1=reach_p1_arr,
+        is_terminal=is_terminal,
+        is_frontier=is_frontier,
+        infoset_id=infoset_id,
+    )
+
+
+def scatter_leaf_values(
+    node_indices: tuple[int, ...],
+    values: LeafValueBatch,
+    node_values_player0: NDArray[np.float32],
+    node_values_player1: NDArray[np.float32],
+) -> None:
+    for batch_index, node_index in enumerate(node_indices):
+        node_values_player0[node_index] = values.ev_player0[batch_index]
+        node_values_player1[node_index] = values.ev_player1[batch_index]
 
 
 def compute_reach_probabilities(
@@ -150,6 +217,7 @@ def compute_counterfactual_values(
     leaf_values_player0: NDArray[np.float32] | None = None,
     leaf_values_player1: NDArray[np.float32] | None = None,
     terminal_values_player0: NDArray[np.float32] | None = None,
+    evaluator: LeafEvaluator | None = None,
 ) -> BackwardPassResult:
     node_values_player0 = np.zeros(tree.node_count, dtype=np.float32)
     node_values_player1 = np.zeros(tree.node_count, dtype=np.float32)
@@ -160,16 +228,31 @@ def compute_counterfactual_values(
         if terminal_values_player0 is None
         else np.asarray(terminal_values_player0, dtype=np.float32)
     )
-    leaf_p0 = (
-        np.zeros(tree.node_count, dtype=np.float32)
-        if leaf_values_player0 is None
-        else np.asarray(leaf_values_player0, dtype=np.float32)
-    )
-    leaf_p1 = (
-        -leaf_p0
-        if leaf_values_player1 is None
-        else np.asarray(leaf_values_player1, dtype=np.float32)
-    )
+    leaf_p0 = np.zeros(tree.node_count, dtype=np.float32)
+    leaf_p1 = np.zeros(tree.node_count, dtype=np.float32)
+    if leaf_values_player0 is not None:
+        leaf_p0[:] = np.asarray(leaf_values_player0, dtype=np.float32)
+    if leaf_values_player1 is not None:
+        leaf_p1[:] = np.asarray(leaf_values_player1, dtype=np.float32)
+    if leaf_values_player1 is None:
+        leaf_p1[:] = -leaf_p0
+
+    if evaluator is not None:
+        frontier_nodes = tuple(
+            node_index
+            for node_index in range(tree.node_count)
+            if (tree.is_frontier[node_index] 
+                and tree.node_types[node_index] is not NodeType.TERMINAL)
+        )
+        if frontier_nodes:
+            leaf_batch = build_leaf_feature_batch(tree, frontier_nodes)
+            leaf_values = evaluator.evaluate(leaf_batch)
+            scatter_leaf_values(
+                frontier_nodes,
+                leaf_values,
+                leaf_p0,
+                leaf_p1,
+            )
 
     for node_index in range(tree.node_count - 1, -1, -1):
         node_type = tree.node_types[node_index]
@@ -243,6 +326,7 @@ def compute_counterfactual_values_parallel(
     leaf_values_player0: NDArray[np.float32] | None = None,
     leaf_values_player1: NDArray[np.float32] | None = None,
     terminal_values_player0: NDArray[np.float32] | None = None,
+    evaluator: LeafEvaluator | None = None,
     max_workers: int = 1,
 ) -> BackwardPassResult:
     if max_workers <= 0:
@@ -254,6 +338,7 @@ def compute_counterfactual_values_parallel(
             leaf_values_player0=leaf_values_player0,
             leaf_values_player1=leaf_values_player1,
             terminal_values_player0=terminal_values_player0,
+            evaluator=evaluator,
         )
 
     levels = build_tree_levels(tree)
@@ -266,16 +351,31 @@ def compute_counterfactual_values_parallel(
         if terminal_values_player0 is None
         else np.asarray(terminal_values_player0, dtype=np.float32)
     )
-    leaf_p0 = (
-        np.zeros(tree.node_count, dtype=np.float32)
-        if leaf_values_player0 is None
-        else np.asarray(leaf_values_player0, dtype=np.float32)
-    )
-    leaf_p1 = (
-        -leaf_p0
-        if leaf_values_player1 is None
-        else np.asarray(leaf_values_player1, dtype=np.float32)
-    )
+    leaf_p0 = np.zeros(tree.node_count, dtype=np.float32)
+    leaf_p1 = np.zeros(tree.node_count, dtype=np.float32)
+    if leaf_values_player0 is not None:
+        leaf_p0[:] = np.asarray(leaf_values_player0, dtype=np.float32)
+    if leaf_values_player1 is not None:
+        leaf_p1[:] = np.asarray(leaf_values_player1, dtype=np.float32)
+    if leaf_values_player1 is None:
+        leaf_p1[:] = -leaf_p0
+
+    if evaluator is not None:
+        frontier_nodes = tuple(
+            node_index
+            for node_index in range(tree.node_count)
+            if (tree.is_frontier[node_index] 
+                and tree.node_types[node_index] is not NodeType.TERMINAL)
+        )
+        if frontier_nodes:
+            leaf_batch = build_leaf_feature_batch(tree, frontier_nodes)
+            leaf_values = evaluator.evaluate(leaf_batch)
+            scatter_leaf_values(
+                frontier_nodes,
+                leaf_values,
+                node_values_player0,
+                node_values_player1,
+            )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for level in levels.backward_levels:
