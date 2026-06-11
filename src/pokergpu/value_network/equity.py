@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
+from functools import lru_cache
 from random import Random
 
 import numpy as np
@@ -10,6 +11,7 @@ from numpy.typing import NDArray
 from pokergpu.abstraction.hands import (
     PlayerRangeVectors,
     PrivateHandIndex,
+    all_private_hands,
     private_hand_from_index,
 )
 from pokergpu.core.board import Board, Street
@@ -91,8 +93,8 @@ def _compute_heads_up_ev(
     range0 = masked_ranges.values[0]
     range1 = masked_ranges.values[1]
 
-    hands0 = _weighted_private_hands(range0.values)
-    hands1 = _weighted_private_hands(range1.values)
+    hands0 = _weighted_private_hands(range0.values, dead_cards)
+    hands1 = _weighted_private_hands(range1.values, dead_cards)
     if config.max_range_combos is not None:
         hands0 = hands0[: config.max_range_combos]
         hands1 = hands1[: config.max_range_combos]
@@ -105,17 +107,20 @@ def _compute_heads_up_ev(
         for hand1, weight1 in hands1:
             if _hands_conflict(hand0, hand1):
                 continue
-            used_cards = dead_cards + hand0 + hand1
-            runouts = _board_runouts(state.board, used_cards)
+            runouts = _cached_runouts(state.board, dead_cards + hand0 + hand1)
             if not runouts:
                 continue
             pair_weight = weight0 * weight1
-            for final_board in runouts:
-                score0 = evaluator.evaluate_seven_card_hand(hand0 + final_board).score
-                score1 = evaluator.evaluate_seven_card_hand(hand1 + final_board).score
-                if score0 < score1:
+            score0_batch = evaluator.evaluate_seven_card_hands(
+                tuple(hand0 + final_board for final_board in runouts)
+            )
+            score1_batch = evaluator.evaluate_seven_card_hands(
+                tuple(hand1 + final_board for final_board in runouts)
+            )
+            for score0, score1 in zip(score0_batch, score1_batch, strict=True):
+                if score0.score < score1.score:
                     payoff0 = pot
-                elif score1 < score0:
+                elif score1.score < score0.score:
                     payoff0 = 0.0
                 else:
                     payoff0 = pot * 0.5
@@ -145,8 +150,8 @@ def _compute_heads_up_ev_sampled(
         ]
     )
     masked_ranges = ranges.masked(dead_cards).normalized()
-    hands0 = _weighted_private_hands(masked_ranges.values[0].values)
-    hands1 = _weighted_private_hands(masked_ranges.values[1].values)
+    hands0 = _weighted_private_hands(masked_ranges.values[0].values, dead_cards)
+    hands1 = _weighted_private_hands(masked_ranges.values[1].values, dead_cards)
     if config.max_range_combos is not None:
         hands0 = hands0[: config.max_range_combos]
         hands1 = hands1[: config.max_range_combos]
@@ -171,12 +176,16 @@ def _compute_heads_up_ev_sampled(
         if not runouts:
             continue
         pair_weight = weight0 * weight1
-        for final_board in runouts:
-            score0 = evaluator.evaluate_seven_card_hand(hand0 + final_board).score
-            score1 = evaluator.evaluate_seven_card_hand(hand1 + final_board).score
-            if score0 < score1:
+        score0_batch = evaluator.evaluate_seven_card_hands(
+            tuple(hand0 + final_board for final_board in runouts)
+        )
+        score1_batch = evaluator.evaluate_seven_card_hands(
+            tuple(hand1 + final_board for final_board in runouts)
+        )
+        for score0, score1 in zip(score0_batch, score1_batch, strict=True):
+            if score0.score < score1.score:
                 payoff0 = pot
-            elif score1 < score0:
+            elif score1.score < score0.score:
                 payoff0 = 0.0
             else:
                 payoff0 = pot * 0.5
@@ -185,14 +194,36 @@ def _compute_heads_up_ev_sampled(
     return float(expected_payout0 * 2.0 - pot)
 
 
-def _weighted_private_hands(range_values: NDArray[np.float32]) -> list[tuple[tuple[Card, Card], float]]:
+def _weighted_private_hands(
+    range_values: NDArray[np.float32],
+    dead_cards: tuple[Card, ...],
+) -> list[tuple[tuple[Card, Card], float]]:
+    hand_indices = _legal_hand_indices(dead_cards)
+    active_mask = range_values[hand_indices] > 0.0
+    if not np.any(active_mask):
+        return []
+    filtered_indices = hand_indices[active_mask]
+    filtered_weights = range_values[filtered_indices].astype(np.float32, copy=False)
+    total = float(np.sum(filtered_weights, dtype=np.float64))
+    if total <= 0.0:
+        return []
+    normalized = filtered_weights / np.float32(total)
     hands: list[tuple[tuple[Card, Card], float]] = []
-    for index, weight in enumerate(range_values):
-        if weight <= 0.0:
-            continue
-        hand = private_hand_from_index(PrivateHandIndex(index))
+    for index, weight in zip(filtered_indices, normalized, strict=True):
+        hand = private_hand_from_index(PrivateHandIndex(int(index)))
         hands.append(((hand.first, hand.second), float(weight)))
     return hands
+
+
+@lru_cache(maxsize=256)
+def _legal_hand_indices(dead_cards: tuple[Card, ...]) -> NDArray[np.int32]:
+    dead_set = set(dead_cards)
+    indices = [
+        index
+        for index, hand in enumerate(all_private_hands())
+        if hand.first not in dead_set and hand.second not in dead_set
+    ]
+    return np.asarray(indices, dtype=np.int32)
 
 
 def _board_runouts(board: Board, dead_cards: tuple[Card, ...]) -> list[tuple[Card, ...]]:
@@ -216,6 +247,11 @@ def _sample_runouts(
     if sample_count <= 0 or len(all_runouts) <= sample_count:
         return all_runouts
     return [all_runouts[rng.randrange(len(all_runouts))] for _ in range(sample_count)]
+
+
+@lru_cache(maxsize=512)
+def _cached_runouts(board: Board, dead_cards: tuple[Card, ...]) -> tuple[tuple[Card, ...], ...]:
+    return tuple(_board_runouts(board, dead_cards))
 
 
 def _hands_conflict(hand0: tuple[Card, Card], hand1: tuple[Card, Card]) -> bool:

@@ -327,6 +327,7 @@ class _SolverLabelArgs:
     max_nodes: int
     sampled_pairs: int
     sampled_runouts: int
+    batch_size: int
     workers: int
 
 
@@ -335,6 +336,7 @@ class _CuratedSolverLabelArgs:
     output_dir: Path
     manifest_path: Path
     limit: int
+    batch_size: int
     workers: int
 
 
@@ -517,6 +519,7 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
     max_nodes = 128
     sampled_pairs = 256
     sampled_runouts = 8
+    batch_size = 16
     workers = 1
     index = 0
     while index < len(args):
@@ -562,6 +565,10 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
             workers = int(args[index + 1])
             index += 2
             continue
+        if option == "--batch-size" and index + 1 < len(args):
+            batch_size = int(args[index + 1])
+            index += 2
+            continue
         raise ValueError(f"invalid export-solver-labels arguments: {args!r}")
     return _SolverLabelArgs(
         output_dir=output_dir,
@@ -573,6 +580,7 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
         max_nodes=max_nodes,
         sampled_pairs=sampled_pairs,
         sampled_runouts=sampled_runouts,
+        batch_size=batch_size,
         workers=workers,
     )
 
@@ -581,6 +589,7 @@ def _parse_curated_solver_label_args(args: list[str]) -> _CuratedSolverLabelArgs
     output_dir = Path("artifacts/curated_solver_labels").resolve()
     manifest_path = output_dir / "manifest.json"
     limit = 9
+    batch_size = 16
     workers = 1
     index = 0
     while index < len(args):
@@ -602,11 +611,16 @@ def _parse_curated_solver_label_args(args: list[str]) -> _CuratedSolverLabelArgs
             workers = int(args[index + 1])
             index += 2
             continue
+        if option == "--batch-size" and index + 1 < len(args):
+            batch_size = int(args[index + 1])
+            index += 2
+            continue
         raise ValueError(f"invalid export-curated-solver-labels arguments: {args!r}")
     return _CuratedSolverLabelArgs(
         output_dir=output_dir,
         manifest_path=manifest_path,
         limit=limit,
+        batch_size=batch_size,
         workers=workers,
     )
 
@@ -801,21 +815,24 @@ def _export_solver_labels(
         heartbeat_stop,
     )
     with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
-        in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
+        in_flight: set[futures.Future[list[tuple[DatasetManifestEntry, ValueDatasetSample]]]] = set()
         next_index = 0
         max_in_flight = max(1, args.workers * 2)
         while next_index < args.sample_count or in_flight:
             while next_index < args.sample_count and len(in_flight) < max_in_flight:
+                start = next_index
+                stop = min(next_index + max(1, args.batch_size), args.sample_count)
                 in_flight.add(
                     executor.submit(
-                        _solve_and_export_label,
-                        next_index,
+                        _solve_and_export_label_batch,
+                        start,
+                        stop,
                         args,
                         feature_spec,
                         split_rule,
                     )
                 )
-                next_index += 1
+                next_index = stop
             progress_state["active"] = len(in_flight)
             done, in_flight = futures.wait(
                 in_flight,
@@ -824,14 +841,14 @@ def _export_solver_labels(
             )
             progress_state["active"] = len(in_flight)
             for job in done:
-                entry, sample = job.result()
-                signature = tuple(np.round(sample.features[:32], 3).tolist())
-                if signature in seen_signatures:
-                    continue
-                seen_signatures.add(signature)
-                entries.append(entry)
-                samples.append(sample)
-                completed += 1
+                for entry, sample in job.result():
+                    signature = tuple(np.round(sample.features[:32], 3).tolist())
+                    if signature in seen_signatures:
+                        continue
+                    seen_signatures.add(signature)
+                    entries.append(entry)
+                    samples.append(sample)
+                    completed += 1
     heartbeat_stop.set()
     if heartbeat is not None:
         heartbeat.join()
@@ -872,22 +889,25 @@ def _export_curated_solver_labels(
         heartbeat_stop,
     )
     with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
-        in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
+        in_flight: set[futures.Future[list[tuple[DatasetManifestEntry, ValueDatasetSample]]]] = set()
         next_index = 0
         max_in_flight = max(1, args.workers * 2)
         while next_index < len(spots) or in_flight:
             while next_index < len(spots) and len(in_flight) < max_in_flight:
+                start = next_index
+                stop = min(next_index + max(1, args.batch_size), len(spots))
                 in_flight.add(
                     executor.submit(
-                        _solve_curated_spot,
-                        next_index,
-                        spots[next_index],
+                        _solve_curated_spot_batch,
+                        start,
+                        stop,
+                        spots,
                         args.output_dir,
                         feature_spec,
                         split_rule,
                     )
                 )
-                next_index += 1
+                next_index = stop
             progress_state["active"] = len(in_flight)
             done, in_flight = futures.wait(
                 in_flight,
@@ -896,14 +916,14 @@ def _export_curated_solver_labels(
             )
             progress_state["active"] = len(in_flight)
             for job in done:
-                entry, sample = job.result()
-                signature = tuple(np.round(sample.features[:32], 3).tolist())
-                if signature in seen_signatures:
-                    continue
-                seen_signatures.add(signature)
-                entries.append(entry)
-                samples.append(sample)
-                completed += 1
+                for entry, sample in job.result():
+                    signature = tuple(np.round(sample.features[:32], 3).tolist())
+                    if signature in seen_signatures:
+                        continue
+                    seen_signatures.add(signature)
+                    entries.append(entry)
+                    samples.append(sample)
+                    completed += 1
     heartbeat_stop.set()
     if heartbeat is not None:
         heartbeat.join()
@@ -959,6 +979,19 @@ def _solve_and_export_label(
     return entry, sample
 
 
+def _solve_and_export_label_batch(
+    start: int,
+    stop: int,
+    args: _SolverLabelArgs,
+    feature_spec: ValueFeatureSpec,
+    split_rule: DatasetSplitRule,
+) -> list[tuple[DatasetManifestEntry, ValueDatasetSample]]:
+    return [
+        _solve_and_export_label(index, args, feature_spec, split_rule)
+        for index in range(start, stop)
+    ]
+
+
 def _solve_curated_spot(
     index: int,
     spot: object,
@@ -1001,6 +1034,20 @@ def _solve_curated_spot(
     )
     _validate_exported_sample(sample)
     return entry, sample
+
+
+def _solve_curated_spot_batch(
+    start: int,
+    stop: int,
+    spots: tuple[object, ...] | list[object],
+    output_dir: Path,
+    feature_spec: ValueFeatureSpec,
+    split_rule: DatasetSplitRule,
+) -> list[tuple[DatasetManifestEntry, ValueDatasetSample]]:
+    return [
+        _solve_curated_spot(index, spots[index], output_dir, feature_spec, split_rule)
+        for index in range(start, stop)
+    ]
 
 
 def _real_postflop_resolve_spec(rng: Random | None = None) -> PostflopResolveSpec:
