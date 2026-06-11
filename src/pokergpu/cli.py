@@ -1,7 +1,7 @@
 import logging
 import sys
-from random import Random
 from pathlib import Path
+from random import Random
 
 import numpy as np
 
@@ -31,8 +31,13 @@ from .core.betting import (
 )
 from .core.board import Board
 from .core.state import GameState, PlayerState
-from .eval import EvalDeviceConfig, make_leaf_evaluator
-from .eval import LeafEvaluator, LeafFeatureBatch, LeafValueBatch
+from .eval import (
+    EvalDeviceConfig,
+    LeafEvaluator,
+    LeafFeatureBatch,
+    LeafValueBatch,
+    make_leaf_evaluator,
+)
 from .runtime import PostflopResolveSpec, resolve_postflop_hu
 
 

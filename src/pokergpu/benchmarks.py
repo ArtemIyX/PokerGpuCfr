@@ -29,3 +29,9 @@ def run_benchmark(
         iterations=iterations,
         total_seconds=total_seconds,
     )
+
+
+__all__ = [
+    "BenchmarkResult",
+    "run_benchmark",
+]

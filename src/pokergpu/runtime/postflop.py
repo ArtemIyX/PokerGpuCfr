@@ -15,8 +15,8 @@ from pokergpu.cfr import (
     compute_reach_probabilities,
     update_regrets_from_traversal,
 )
-from pokergpu.core.board import Street
 from pokergpu.core.actions import Action
+from pokergpu.core.board import Street
 from pokergpu.core.cards import Card
 from pokergpu.core.state import GameState
 from pokergpu.eval import CpuStubLeafEvaluator, LeafEvaluator

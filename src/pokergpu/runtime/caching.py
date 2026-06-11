@@ -111,7 +111,10 @@ class SolveCacheState:
             self.counters.hit()
         return warm
 
-    def store_warm_start(self, key: str, warm: WarmStartState, size_bytes: int = 0) -> None:
+    def store_warm_start(self, 
+                         key: str, 
+                         warm: WarmStartState, 
+                         size_bytes: int = 0) -> None:
         self.bundle.warm_start.put(key, warm, size_bytes=size_bytes)
 
     def stats(self) -> dict[str, Any]:
@@ -140,7 +143,8 @@ def blend_regret(
         raise ValueError("regret vectors must have the same length")
     alpha = max(0.0, min(1.0, alpha))
     beta = 1.0 - alpha
-    return tuple((alpha * c) + (beta * f) for c, f in zip(cached_regret, fresh_prior))
+    return tuple((alpha * c) + (beta * f) for c, f in 
+                 zip(cached_regret, fresh_prior, strict= False))
 
 
 def build_benchmark(

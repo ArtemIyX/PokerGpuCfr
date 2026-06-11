@@ -9,7 +9,6 @@ from pokergpu.runtime import (
     make_leaf_key,
     make_warm_start_state,
     normalize_sequence,
-    stable_hash,
 )
 
 
@@ -64,7 +63,8 @@ def test_leaf_key_and_warm_state() -> None:
         range_signature="r0:r1",
         board_signature="AsKh7d",
     )
-    leaf = CachedLeafResult(value=(0.25, -0.25), evaluator_id="cpu_stub_v1", leaf_key=leaf_key)
+    leaf = CachedLeafResult(value=(0.25, -0.25), 
+                            evaluator_id="cpu_stub_v1", leaf_key=leaf_key)
     warm = make_warm_start_state(
         regret=(0.1, 0.2),
         strategy_sum=(1.0, 2.0),
@@ -103,7 +103,7 @@ def test_benchmark_shape() -> None:
 
 
 def test_lru_cache_replaces_old_entries() -> None:
-    cache = LruCache(max_entries=1)
+    cache: LruCache[int] = LruCache(max_entries=1)
     cache.put("a", 1)
     cache.put("b", 2)
     assert cache.get("a") is None

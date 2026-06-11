@@ -3,9 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from hashlib import blake2b
-from typing import Any, Generic, TypeVar
-
-T = TypeVar("T")
+from typing import Any
 
 
 def _stable_bytes(value: Any) -> bytes:
@@ -87,7 +85,7 @@ class PublicStateKey:
 
 
 @dataclass(slots=True)
-class CacheEntry(Generic[T]):
+class CacheEntry[T]:
     key: str
     value: T
     size_bytes: int = 0
@@ -96,7 +94,7 @@ class CacheEntry(Generic[T]):
     last_used_tick: int = 0
 
 
-class LruCache(Generic[T]):
+class LruCache[T]:
     def __init__(self, max_entries: int = 128, max_bytes: int = 0) -> None:
         self.max_entries = max_entries
         self.max_bytes = max_bytes
@@ -179,12 +177,17 @@ class WarmStartState:
     source_key: str = ""
     blend_alpha: float = 1.0
 
-
 @dataclass(slots=True)
 class CacheBundle:
-    tree: LruCache[CachedTree] = field(default_factory=lambda: LruCache(max_entries=64))
-    leaf: LruCache[CachedLeafResult] = field(default_factory=lambda: LruCache(max_entries=4096))
-    warm_start: LruCache[WarmStartState] = field(default_factory=lambda: LruCache(max_entries=128))
+    tree: LruCache[CachedTree] = field(
+        default_factory=lambda: LruCache(max_entries=64)
+    )
+    leaf: LruCache[CachedLeafResult] = field(
+        default_factory=lambda: LruCache(max_entries=4096)
+    )
+    warm_start: LruCache[WarmStartState] = field(
+        default_factory=lambda: LruCache(max_entries=128)
+    )
 
 
 @dataclass(slots=True)

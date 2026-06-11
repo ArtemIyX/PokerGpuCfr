@@ -8,8 +8,8 @@ from pokergpu.runtime import (
     CachedTree,
     PublicStateFingerprint,
     SolveCacheState,
-    build_benchmark,
     blend_regret,
+    build_benchmark,
     make_leaf_key,
     make_warm_start_state,
 )
@@ -62,7 +62,9 @@ def run_caching_benchmark(iterations: int = 20000) -> list[dict[str, object]]:
         range_signature="r0:r1",
         board_signature="AsKh7d",
     )
-    leaf = CachedLeafResult(value=(0.25, -0.25), evaluator_id="cpu_stub_v1", leaf_key=leaf_key)
+    leaf = CachedLeafResult(value=(0.25, -0.25), 
+                            evaluator_id="cpu_stub_v1", 
+                            leaf_key=leaf_key)
     warm = make_warm_start_state(
         regret=(0.1, -0.1, 0.05, -0.05),
         strategy_sum=(10.0, 20.0, 30.0, 40.0),
