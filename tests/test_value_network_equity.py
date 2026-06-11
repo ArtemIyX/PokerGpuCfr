@@ -1,6 +1,11 @@
 import numpy as np
 
-from pokergpu.abstraction.hands import PlayerRangeVectors, RangeVector, private_hand_index
+from pokergpu.abstraction.hands import (
+    PlayerRangeVectors,
+    RangeVector,
+    all_private_hands,
+    private_hand_index,
+)
 from pokergpu.core.betting import (
     BettingRoundState,
     BlindStructure,
@@ -13,7 +18,7 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board
 from pokergpu.core.cards import Card, Rank, Suit
 from pokergpu.core.state import GameState, PlayerState
-from pokergpu.value_network.equity import build_postflop_equity_label
+from pokergpu.value_network.equity import EquityEvalConfig, build_postflop_equity_label
 
 
 def test_build_postflop_equity_label_returns_exact_zero_sum_river_value() -> None:
@@ -54,4 +59,44 @@ def test_build_postflop_equity_label_returns_exact_zero_sum_river_value() -> Non
     assert label.values.shape == (1, 2)
     assert np.isclose(float(label.values[0, 0]), 300.0)
     assert np.isclose(float(label.values[0, 1]), -300.0)
+    assert np.isclose(float(label.values[0, 0] + label.values[0, 1]), 0.0)
+
+
+def test_build_postflop_equity_label_supports_sampled_mode() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdQc"),
+        players=(PlayerState(player=PlayerIndex(0)), PlayerState(player=PlayerIndex(1))),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(900)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    p0 = np.zeros(1326, dtype=np.float32)
+    p1 = np.zeros(1326, dtype=np.float32)
+    for index, hand in enumerate(all_private_hands()):
+        if not hand.contains_any(state.board.cards):
+            p0[index] = 1.0
+            p1[index] = 1.0
+    ranges = PlayerRangeVectors.from_values(
+        (RangeVector.from_values(p0), RangeVector.from_values(p1))
+    )
+
+    label = build_postflop_equity_label(
+        state,
+        ranges,
+        config=EquityEvalConfig(max_range_combos=1, sampled_pairs=8, sampled_runouts=4),
+    )
+
+    assert label.values.shape == (1, 2)
+    assert np.isfinite(label.values).all()
     assert np.isclose(float(label.values[0, 0] + label.values[0, 1]), 0.0)

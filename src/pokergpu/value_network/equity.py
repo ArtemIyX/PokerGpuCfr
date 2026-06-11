@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
+from random import Random
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +23,9 @@ from .target import PokerValueLabel, build_value_label, scalar_ev_target
 @dataclass(frozen=True, slots=True)
 class EquityEvalConfig:
     max_range_combos: int | None = None
+    sampled_pairs: int = 0
+    sampled_runouts: int = 0
+    random_seed: int = 0
 
 
 def build_postflop_equity_label(
@@ -38,8 +42,34 @@ def build_postflop_equity_label(
 
     evaluator_impl = evaluator or TreysHandEvaluator()
     cfg = config or EquityEvalConfig()
+    if _should_sample(state, ranges, cfg):
+        ev0 = _compute_heads_up_ev_sampled(state, ranges, evaluator_impl, cfg)
+        return build_value_label([ev0, -ev0], scalar_ev_target(2))
     ev0 = _compute_heads_up_ev(state, ranges, evaluator_impl, cfg)
     return build_value_label([ev0, -ev0], scalar_ev_target(2))
+
+
+def _should_sample(
+    state: GameState,
+    ranges: PlayerRangeVectors,
+    config: EquityEvalConfig,
+) -> bool:
+    dead_cards: tuple[Card, ...] = tuple(
+        list(state.board.cards)
+        + [
+            card
+            for player in state.players
+            if player.hole_cards is not None
+            for card in player.hole_cards
+        ]
+    )
+    masked_ranges = ranges.masked(dead_cards)
+    active0 = int(np.count_nonzero(masked_ranges.values[0].values))
+    active1 = int(np.count_nonzero(masked_ranges.values[1].values))
+    pair_count = active0 * active1
+    if config.sampled_pairs > 0 or config.sampled_runouts > 0:
+        return True
+    return config.max_range_combos is not None and pair_count > config.max_range_combos
 
 
 def _compute_heads_up_ev(
@@ -98,6 +128,63 @@ def _compute_heads_up_ev(
     return float(expected_payout0 * 2.0 - pot)
 
 
+def _compute_heads_up_ev_sampled(
+    state: GameState,
+    ranges: PlayerRangeVectors,
+    evaluator: TreysHandEvaluator,
+    config: EquityEvalConfig,
+) -> float:
+    rng = Random(config.random_seed)
+    dead_cards: tuple[Card, ...] = tuple(
+        list(state.board.cards)
+        + [
+            card
+            for player in state.players
+            if player.hole_cards is not None
+            for card in player.hole_cards
+        ]
+    )
+    masked_ranges = ranges.masked(dead_cards).normalized()
+    hands0 = _weighted_private_hands(masked_ranges.values[0].values)
+    hands1 = _weighted_private_hands(masked_ranges.values[1].values)
+    if config.max_range_combos is not None:
+        hands0 = hands0[: config.max_range_combos]
+        hands1 = hands1[: config.max_range_combos]
+    max_pairs = len(hands0) * len(hands1)
+    pair_count = config.sampled_pairs if config.sampled_pairs > 0 else min(max_pairs, 4096)
+    runout_count = config.sampled_runouts if config.sampled_runouts > 0 else 64
+    if pair_count <= 0:
+        raise ValueError("sampled equity requires positive sample count")
+    pot = float(state.betting_round.pot.amount + sum(bet.committed for bet in state.betting_round.bets))
+    total = 0.0
+    for _ in range(pair_count):
+        hand0, weight0 = hands0[rng.randrange(len(hands0))]
+        hand1, weight1 = hands1[rng.randrange(len(hands1))]
+        if _hands_conflict(hand0, hand1):
+            continue
+        runouts = _sample_runouts(
+            state.board,
+            dead_cards + hand0 + hand1,
+            runout_count,
+            rng,
+        )
+        if not runouts:
+            continue
+        pair_weight = weight0 * weight1
+        for final_board in runouts:
+            score0 = evaluator.evaluate_seven_card_hand(hand0 + final_board).score
+            score1 = evaluator.evaluate_seven_card_hand(hand1 + final_board).score
+            if score0 < score1:
+                payoff0 = pot
+            elif score1 < score0:
+                payoff0 = 0.0
+            else:
+                payoff0 = pot * 0.5
+            total += pair_weight * payoff0
+    expected_payout0 = total / float(max(pair_count, 1))
+    return float(expected_payout0 * 2.0 - pot)
+
+
 def _weighted_private_hands(range_values: NDArray[np.float32]) -> list[tuple[tuple[Card, Card], float]]:
     hands: list[tuple[tuple[Card, Card], float]] = []
     for index, weight in enumerate(range_values):
@@ -117,6 +204,18 @@ def _board_runouts(board: Board, dead_cards: tuple[Card, ...]) -> list[tuple[Car
     if need == 0:
         return [board.cards]
     return [board.cards + runout for runout in combinations(remaining, need)]
+
+
+def _sample_runouts(
+    board: Board,
+    dead_cards: tuple[Card, ...],
+    sample_count: int,
+    rng: Random,
+) -> list[tuple[Card, ...]]:
+    all_runouts = _board_runouts(board, dead_cards)
+    if sample_count <= 0 or len(all_runouts) <= sample_count:
+        return all_runouts
+    return [all_runouts[rng.randrange(len(all_runouts))] for _ in range(sample_count)]
 
 
 def _hands_conflict(hand0: tuple[Card, Card], hand1: tuple[Card, Card]) -> bool:

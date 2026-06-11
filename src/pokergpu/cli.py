@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from random import Random
+from threading import Event, Thread
 from typing import Any, Callable, cast
 
 import numpy as np
@@ -145,7 +146,7 @@ def main() -> int:
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "postflop-resolve":
         print("pokergpu: postflop resolve")
-        demo_spec = _real_postflop_spec(Random())
+        demo_spec = _real_postflop_resolve_spec(Random())
         demo_evaluator = _DemoBiasedLeafEvaluator(
             make_leaf_evaluator(EvalDeviceConfig(mode="cuda"))
         )
@@ -192,9 +193,9 @@ def main() -> int:
                     "player_count": solver_label_args.player_count,
                     "validation_modulo": solver_label_args.validation_modulo,
                     "validation_remainder": solver_label_args.validation_remainder,
-                    "solve_time_sec": solver_label_args.solve_time_sec,
-                    "max_depth": solver_label_args.max_depth,
                     "max_nodes": solver_label_args.max_nodes,
+                    "sampled_pairs": solver_label_args.sampled_pairs,
+                    "sampled_runouts": solver_label_args.sampled_runouts,
                     "workers": solver_label_args.workers,
                 },
                 sort_keys=True,
@@ -323,9 +324,9 @@ class _SolverLabelArgs:
     player_count: int
     validation_modulo: int
     validation_remainder: int
-    solve_time_sec: float
-    max_depth: int
     max_nodes: int
+    sampled_pairs: int
+    sampled_runouts: int
     workers: int
 
 
@@ -344,6 +345,13 @@ class _DatasetSanityReportArgs:
     feature_normalizer_path: Path | None
     label_normalizer_path: Path | None
     split_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class _PostflopSampleSpec:
+    state: GameState
+    range_p0: RangeVector
+    range_p1: RangeVector
 
 
 def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
@@ -506,9 +514,9 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
     player_count = 2
     validation_modulo = 10
     validation_remainder = 0
-    solve_time_sec = 0.25
-    max_depth = 3
     max_nodes = 128
+    sampled_pairs = 0
+    sampled_runouts = 0
     workers = 1
     index = 0
     while index < len(args):
@@ -538,16 +546,16 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
             validation_remainder = int(args[index + 1])
             index += 2
             continue
-        if option == "--time" and index + 1 < len(args):
-            solve_time_sec = float(args[index + 1])
-            index += 2
-            continue
-        if option == "--depth" and index + 1 < len(args):
-            max_depth = int(args[index + 1])
-            index += 2
-            continue
         if option == "--nodes" and index + 1 < len(args):
             max_nodes = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--sampled-pairs" and index + 1 < len(args):
+            sampled_pairs = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--sampled-runouts" and index + 1 < len(args):
+            sampled_runouts = int(args[index + 1])
             index += 2
             continue
         if option == "--workers" and index + 1 < len(args):
@@ -562,9 +570,9 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
         player_count=player_count,
         validation_modulo=validation_modulo,
         validation_remainder=validation_remainder,
-        solve_time_sec=solve_time_sec,
-        max_depth=max_depth,
         max_nodes=max_nodes,
+        sampled_pairs=sampled_pairs,
+        sampled_runouts=sampled_runouts,
         workers=workers,
     )
 
@@ -769,8 +777,6 @@ def _export_solver_labels(
     args: _SolverLabelArgs,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> None:
-    from .runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
-
     args.output_dir.mkdir(parents=True, exist_ok=True)
     entries: list[DatasetManifestEntry] = []
     samples: list[ValueDatasetSample] = []
@@ -783,8 +789,17 @@ def _export_solver_labels(
     if progress_callback is not None:
         progress_callback(0, args.sample_count, "export labels")
     completed = 0
-    if progress_callback is not None:
-        _print_progress_detail(0, args.sample_count, args.workers, "export labels")
+    progress_state = {"active": 0}
+    heartbeat_stop = Event()
+    heartbeat = _start_progress_heartbeat(
+        lambda: _print_progress_detail(
+            completed,
+            args.sample_count,
+            progress_state["active"],
+            "export labels",
+        ),
+        heartbeat_stop,
+    )
     with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
         in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
         next_index = 0
@@ -801,18 +816,13 @@ def _export_solver_labels(
                     )
                 )
                 next_index += 1
+            progress_state["active"] = len(in_flight)
             done, in_flight = futures.wait(
                 in_flight,
                 timeout=0.25,
                 return_when=futures.FIRST_COMPLETED,
             )
-            if progress_callback is not None:
-                _print_progress_detail(
-                    completed,
-                    args.sample_count,
-                    len(in_flight),
-                    "export labels",
-                )
+            progress_state["active"] = len(in_flight)
             for job in done:
                 entry, sample = job.result()
                 signature = tuple(np.round(sample.features[:32], 3).tolist())
@@ -822,13 +832,9 @@ def _export_solver_labels(
                 entries.append(entry)
                 samples.append(sample)
                 completed += 1
-                if progress_callback is not None:
-                    _print_progress_detail(
-                        completed,
-                        args.sample_count,
-                        len(in_flight),
-                        "export labels",
-                    )
+    heartbeat_stop.set()
+    if heartbeat is not None:
+        heartbeat.join()
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
     _write_packed_samples(args.output_dir, entries, samples)
@@ -854,8 +860,17 @@ def _export_curated_solver_labels(
     if progress_callback is not None:
         progress_callback(0, len(spots), "curated export")
     completed = 0
-    if progress_callback is not None:
-        _print_progress_detail(0, len(spots), args.workers, "curated export")
+    progress_state = {"active": 0}
+    heartbeat_stop = Event()
+    heartbeat = _start_progress_heartbeat(
+        lambda: _print_progress_detail(
+            completed,
+            len(spots),
+            progress_state["active"],
+            "curated export",
+        ),
+        heartbeat_stop,
+    )
     with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
         in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
         next_index = 0
@@ -873,18 +888,13 @@ def _export_curated_solver_labels(
                     )
                 )
                 next_index += 1
+            progress_state["active"] = len(in_flight)
             done, in_flight = futures.wait(
                 in_flight,
                 timeout=0.25,
                 return_when=futures.FIRST_COMPLETED,
             )
-            if progress_callback is not None:
-                _print_progress_detail(
-                    completed,
-                    len(spots),
-                    len(in_flight),
-                    "curated export",
-                )
+            progress_state["active"] = len(in_flight)
             for job in done:
                 entry, sample = job.result()
                 signature = tuple(np.round(sample.features[:32], 3).tolist())
@@ -894,13 +904,9 @@ def _export_curated_solver_labels(
                 entries.append(entry)
                 samples.append(sample)
                 completed += 1
-                if progress_callback is not None:
-                    _print_progress_detail(
-                        completed,
-                        len(spots),
-                        len(in_flight),
-                        "curated export",
-                    )
+    heartbeat_stop.set()
+    if heartbeat is not None:
+        heartbeat.join()
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
     _write_packed_samples(args.output_dir, entries, samples)
@@ -915,47 +921,27 @@ def _solve_and_export_label(
     feature_spec: ValueFeatureSpec,
     split_rule: DatasetSplitRule,
 ) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
-    from .runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
-
-    result = None
-    resolve_spec = None
-    for attempt in range(16):
-        spec = _real_postflop_spec(Random(9000 + index * 97 + attempt))
-        candidate = PostflopResolveSpec(
-            state=spec.state,
-            range_p0=spec.range_p0,
-            range_p1=spec.range_p1,
-            time_budget_sec=args.solve_time_sec,
-            max_depth=args.max_depth,
-            max_nodes=args.max_nodes,
-            min_reach_prob=spec.min_reach_prob,
-            cache_state=spec.cache_state,
-        )
-        try:
-            result = resolve_postflop_hu(candidate)
-            resolve_spec = candidate
-            break
-        except ValueError:
-            continue
-    if result is None or resolve_spec is None:
-        raise ValueError("unable to generate a valid solver label")
+    spec = _real_equity_sample_spec(Random(9000 + index * 97))
     label = build_postflop_equity_label(
-        resolve_spec.state,
-        PlayerRangeVectors.from_values((resolve_spec.range_p0, resolve_spec.range_p1)),
-        config=EquityEvalConfig(max_range_combos=args.max_nodes),
+        spec.state,
+        PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
+        config=EquityEvalConfig(
+            max_range_combos=args.max_nodes,
+            sampled_pairs=args.sampled_pairs,
+            sampled_runouts=args.sampled_runouts,
+            random_seed=index,
+        ),
     )
     sample = export_value_sample(
         sample_id=f"solver-{index:05d}",
-        state=resolve_spec.state,
-        ranges=PlayerRangeVectors.from_values((resolve_spec.range_p0, resolve_spec.range_p1)),
+        state=spec.state,
+        ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
         label=label,
         feature_spec=feature_spec,
         metadata={
-            "solver": "postflop_hu",
-            "iterations": result.iterations,
-            "elapsed_seconds": result.elapsed_seconds,
-            "root_infoset_id": result.root_infoset_id,
-            "root_actions": result.root_actions,
+            "evaluator": "treys_exact_equity",
+            "sampled_pairs": args.sampled_pairs,
+            "sampled_runouts": args.sampled_runouts,
         },
     )
     split = split_rule.split_for_metadata(sample.sample_id, sample.metadata)
@@ -980,30 +966,21 @@ def _solve_curated_spot(
     feature_spec: ValueFeatureSpec,
     split_rule: DatasetSplitRule,
 ) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
-    from .runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
     spot_t = cast(Any, spot)
-    spec = PostflopResolveSpec(
-        state=spot_t.state,
-        range_p0=RangeVector.uniform(),
-        range_p1=RangeVector.uniform(),
-        time_budget_sec=0.25,
-        max_depth=3,
-        max_nodes=128,
-    )
-    result = resolve_postflop_hu(spec)
+    ranges = PlayerRangeVectors.from_values((RangeVector.uniform(), RangeVector.uniform()))
     label = build_postflop_equity_label(
         spot_t.state,
-        PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
-        config=EquityEvalConfig(max_range_combos=128),
+        ranges,
+        config=EquityEvalConfig(max_range_combos=128, sampled_runouts=16),
     )
     sample = export_value_sample(
         sample_id=f"curated-{spot_t.family}-{index:05d}",
         state=spot_t.state,
-        ranges=PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
+        ranges=ranges,
         label=label,
         feature_spec=feature_spec,
         metadata={
-            "solver": "postflop_hu",
+            "evaluator": "treys_exact_equity",
             "board_texture": spot_t.board_texture,
             "pot_bucket": spot_t.pot_bucket,
             "stack_bucket": spot_t.stack_bucket,
@@ -1026,7 +1003,7 @@ def _solve_curated_spot(
     return entry, sample
 
 
-def _real_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
+def _real_postflop_resolve_spec(rng: Random | None = None) -> PostflopResolveSpec:
     rng = rng or Random()
     deck = shuffled_deck(rng)
     hole0 = (deck.pop(), deck.pop())
@@ -1075,6 +1052,15 @@ def _real_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
         time_budget_sec=0.5,
         max_depth=max_depth,
         max_nodes=128,
+    )
+
+
+def _real_equity_sample_spec(rng: Random | None = None) -> _PostflopSampleSpec:
+    spec = _real_postflop_resolve_spec(rng)
+    return _PostflopSampleSpec(
+        state=spec.state,
+        range_p0=spec.range_p0,
+        range_p1=spec.range_p1,
     )
 
 
@@ -1215,6 +1201,23 @@ def _print_progress_detail(
         end="" if completed < total else "\n",
         flush=True,
     )
+
+
+def _start_progress_heartbeat(
+    render: Callable[[], None],
+    stop_event: Event,
+    interval_sec: float = 1.0,
+) -> Thread | None:
+    if interval_sec <= 0.0:
+        return None
+
+    def _run() -> None:
+        while not stop_event.wait(interval_sec):
+            render()
+
+    thread = Thread(target=_run, daemon=True)
+    thread.start()
+    return thread
 
 
 def _runtime_device_name() -> str:
