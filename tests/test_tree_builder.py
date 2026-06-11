@@ -204,3 +204,56 @@ def test_build_public_tree_records_action_abstraction_id() -> None:
     )
 
     assert built.action_abstraction_id == "compact:v2|preflop|late"
+    assert built.canonical_board_key == ""
+
+
+def test_build_public_tree_uses_canonical_board_key() -> None:
+    state_a = GameState(
+        board=Board.from_str("AhKhQd"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(150)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    state_b = GameState(
+        board=Board.from_str("AcKcQd"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(150)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    built_a = build_public_tree(state_a, 
+                                config=TreeBuildConfig(max_depth=1, max_nodes=8))
+    built_b = build_public_tree(state_b, 
+                                config=TreeBuildConfig(max_depth=1, max_nodes=8))
+
+    assert built_a.canonical_board_key == built_b.canonical_board_key

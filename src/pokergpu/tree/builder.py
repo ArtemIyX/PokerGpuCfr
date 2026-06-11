@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pokergpu.abstraction.actions import ActionAbstraction, BaselineActionAbstraction
 from pokergpu.core.actions import Action
 from pokergpu.core.betting import Chips
+from pokergpu.core.canonical import canonical_board_key
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.core.transitions import apply_action
@@ -19,6 +20,7 @@ class BuiltPublicTree:
     node_states: tuple[GameState, ...]
     actions_by_node: tuple[tuple[Action, ...], ...]
     action_abstraction_id: str
+    canonical_board_key: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -132,6 +134,7 @@ def build_public_tree(
         node_states=tuple(node_states),
         actions_by_node=tuple(actions_by_node),
         action_abstraction_id=abstraction_impl.abstraction_id(state),
+        canonical_board_key=canonical_board_key(state.board),
     )
 
 

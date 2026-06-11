@@ -50,10 +50,10 @@ How to use:
 
 ## 5. Add postflop bucketing and suit-isomorphic canonicalization
 
-- [ ] Define bucket features for hand strength and draw value
-- [ ] Add canonical board normalization
-- [ ] Share canonicalization across tree, ranges, and runtime
-- [ ] Add tests for isomorphic board equivalence
+- [x] Define bucket features for hand strength and draw value
+- [x] Add canonical board normalization
+- [x] Share canonicalization across tree, ranges, and runtime
+- [x] Add tests for isomorphic board equivalence
 
 ## 6. Build dense infoset/regret/strategy storage
 

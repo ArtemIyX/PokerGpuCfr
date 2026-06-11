@@ -6,9 +6,11 @@ from pokergpu.abstraction import (
     PrivateHand,
     RangeVector,
     StrengthTierBucketer,
+    board_bucket_signature,
     private_hand_index,
 )
 from pokergpu.core.board import board_from_str
+from pokergpu.core.canonical import canonical_board_key, canonicalize_board
 from pokergpu.core.cards import card_from_str
 
 
@@ -73,3 +75,20 @@ def test_bucketed_range_accumulates_live_combo_weights() -> None:
         rel_tol=0.0,
         abs_tol=1e-6,
     )
+
+
+def test_suit_isomorphic_boards_share_canonical_key() -> None:
+    board_a = board_from_str("AhKhQd")
+    board_b = board_from_str("AcKcQd")
+
+    assert canonical_board_key(board_a) == canonical_board_key(board_b)
+    assert board_bucket_signature(board_a) == board_bucket_signature(board_b)
+    assert (canonicalize_board(board_a).canonical_key
+            == canonicalize_board(board_b).canonical_key)
+
+
+def test_non_isomorphic_boards_do_not_share_canonical_key() -> None:
+    board_a = board_from_str("AhKhQh")
+    board_b = board_from_str("AhKhQd")
+
+    assert canonical_board_key(board_a) != canonical_board_key(board_b)

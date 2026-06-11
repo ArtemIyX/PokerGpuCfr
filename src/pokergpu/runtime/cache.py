@@ -61,6 +61,7 @@ class PublicStateKey:
     schema_version: str = "1"
 
     def digest(self) -> str:
+        board_key = self.canonical_board or self.board
         return stable_hash(
             self.schema_version,
             self.variant,
@@ -70,7 +71,7 @@ class PublicStateKey:
             self.stacks,
             self.blinds,
             self.antes,
-            self.board,
+            board_key,
             self.action_history,
             self.action_abstraction_id,
             self.range_abstraction_id,

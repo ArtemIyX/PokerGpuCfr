@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from pokergpu.abstraction.hands import PrivateHand, RangeVector, all_private_hands
 from pokergpu.core.board import Board
+from pokergpu.core.canonical import canonical_board_key
 from pokergpu.eval.treys_evaluator import TreysHandEvaluator
 
 BucketId = NewType("BucketId", int)
@@ -77,3 +78,7 @@ class StrengthTierBucketer:
                 continue
             result[bucket_index] += hand_range.values[hand_index]
         return result
+
+
+def board_bucket_signature(board: Board) -> str:
+    return canonical_board_key(board)

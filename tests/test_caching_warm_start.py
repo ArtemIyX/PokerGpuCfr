@@ -36,6 +36,51 @@ def test_public_state_key_is_deterministic() -> None:
     assert spot.digest() == spot.digest()
 
 
+def test_public_state_key_uses_canonical_board_identity() -> None:
+    spot_a = PublicStateFingerprint(
+        variant="nlhe",
+        street="flop",
+        acting_player=0,
+        pot=120,
+        stacks=(980, 980),
+        blinds=(5, 10),
+        antes=(0, 0),
+        board=("Ah", "Kh", "Qd"),
+        action_history=("b33", "c"),
+        action_abstraction_id="flop_ip_v1",
+        range_abstraction_id="bucket_v1",
+        subtree_depth_limit=4,
+        evaluator_id="cpu_stub_v1",
+        solver_version="1",
+        player_count=2,
+        active_players=(0, 1),
+        canonical_board="AcKcQd",
+        card_removal_version="1",
+    )
+    spot_b = PublicStateFingerprint(
+        variant="nlhe",
+        street="flop",
+        acting_player=0,
+        pot=120,
+        stacks=(980, 980),
+        blinds=(5, 10),
+        antes=(0, 0),
+        board=("Ac", "Kc", "Qd"),
+        action_history=("b33", "c"),
+        action_abstraction_id="flop_ip_v1",
+        range_abstraction_id="bucket_v1",
+        subtree_depth_limit=4,
+        evaluator_id="cpu_stub_v1",
+        solver_version="1",
+        player_count=2,
+        active_players=(0, 1),
+        canonical_board="AcKcQd",
+        card_removal_version="1",
+    )
+
+    assert spot_a.digest() == spot_b.digest()
+
+
 def test_cache_round_trip() -> None:
     cache = SolveCacheState()
     spot_key = "spot"
