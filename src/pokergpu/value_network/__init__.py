@@ -1,3 +1,4 @@
+from .checkpoint import ValueCheckpoint, load_checkpoint, save_checkpoint
 from .dataset import (
     DatasetManifestEntry,
     DatasetSplitRule,
@@ -14,6 +15,14 @@ from .dataset import (
     save_dataset_manifest,
     save_feature_normalizer,
     save_value_sample,
+)
+from .model import (
+    ValueMLP,
+    ValueNetworkConfig,
+    build_value_model,
+    build_value_network_config,
+    infer_value,
+    train_value_step,
 )
 from .target import (
     PokerValueLabel,
@@ -37,19 +46,28 @@ __all__ = [
     "DatasetSplitRule",
     "FeatureNormalizer",
     "ValueDatasetSample",
+    "ValueCheckpoint",
+    "ValueMLP",
+    "ValueNetworkConfig",
     "build_value_feature_batch",
     "build_dataset_manifest_entry",
+    "build_value_model",
+    "build_value_network_config",
     "build_value_label",
     "export_dataset_sample",
     "export_value_sample",
+    "infer_value",
     "fit_feature_normalizer",
     "feature_dimension",
     "load_dataset_manifest",
+    "load_checkpoint",
     "load_feature_normalizer",
     "load_value_sample",
     "normalize_feature_batch",
+    "save_checkpoint",
     "save_dataset_manifest",
     "save_feature_normalizer",
     "save_value_sample",
     "scalar_ev_target",
+    "train_value_step",
 ]

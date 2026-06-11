@@ -174,9 +174,9 @@ These help track:
 
 ### Goal 3: Build the first network
 
-- implement a compact MLP
-- add inference and training entry points
-- make checkpoint save/load work
+- [x] implement a compact MLP
+- [x] add inference and training entry points
+- [x] make checkpoint save/load work
 
 ### Goal 4: Train a baseline
 
