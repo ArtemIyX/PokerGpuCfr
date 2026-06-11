@@ -16,9 +16,11 @@ from pokergpu.cfr import (
     update_regrets_from_traversal,
 )
 from pokergpu.core.board import Street
+from pokergpu.core.actions import Action
 from pokergpu.core.cards import Card
 from pokergpu.core.state import GameState
 from pokergpu.eval import CpuStubLeafEvaluator, LeafEvaluator
+from pokergpu.tree import PublicTree
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
 
 
@@ -69,13 +71,8 @@ def resolve_postflop_hu(
     if root_infoset is None:
         raise ValueError("root node must be a player infoset")
     root_infoset_id = int(root_infoset)
-    root_actions = tuple(str(action) for action in tree.actions_by_node[0])
-    action_counts = tuple(
-        len(tree.actions_by_node[node_index]) if (tree.tree.infoset_ids[node_index] 
-                                                  is not None) else 1
-        for node_index in range(tree.tree.node_count)
-        if tree.tree.infoset_ids[node_index] is not None
-    )
+    root_actions = tuple(_format_action(action) for action in tree.actions_by_node[0])
+    action_counts = _build_infoset_action_counts(tree.tree, tree.actions_by_node)
     if not action_counts:
         raise ValueError("resolver requires at least one player infoset")
     store = InfosetStore.zeros(InfosetLayout.from_action_counts(action_counts))
@@ -140,3 +137,24 @@ def _apply_root_ranges(
     masked_p0 = range_p0.normalized_masked(dead_cards)
     masked_p1 = range_p1.normalized_masked(dead_cards)
     return masked_p0, masked_p1
+
+
+def _build_infoset_action_counts(
+    tree: PublicTree,
+    actions_by_node: tuple[tuple[Action, ...], ...],
+) -> tuple[int, ...]:
+    max_infoset = -1
+    counts: dict[int, int] = {}
+    for node_index, infoset_id in enumerate(tree.infoset_ids):
+        if infoset_id is None:
+            continue
+        infoset_index = int(infoset_id)
+        max_infoset = max(max_infoset, infoset_index)
+        counts.setdefault(infoset_index, len(actions_by_node[node_index]) or 1)
+    return tuple(counts.get(index, 1) for index in range(max_infoset + 1))
+
+
+def _format_action(action: Action) -> str:
+    if action.amount is None:
+        return action.action_type.value
+    return f"{action.action_type.value}({int(action.amount)})"

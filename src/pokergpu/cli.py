@@ -1,6 +1,9 @@
 import logging
 import sys
+from random import Random
 from pathlib import Path
+
+import numpy as np
 
 from .abstraction.hands import RangeVector
 from .app import create_app
@@ -28,12 +31,15 @@ from .core.betting import (
 )
 from .core.board import Board
 from .core.state import GameState, PlayerState
+from .eval import EvalDeviceConfig, make_leaf_evaluator
+from .eval import LeafEvaluator, LeafFeatureBatch, LeafValueBatch
 from .runtime import PostflopResolveSpec, resolve_postflop_hu
 
 
 def main() -> int:
     settings = create_app()
     logger = logging.getLogger(__name__)
+    print("pokergpu: cli start")
     if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
         result = run_benchmark("noop", lambda: None)
         print(
@@ -99,7 +105,16 @@ def main() -> int:
         print("root_bet_K=" f"{king_bet:.12f}")
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "postflop-resolve":
-        resolve_result = resolve_postflop_hu(_demo_postflop_spec())
+        print("pokergpu: postflop resolve")
+        demo_spec = _demo_postflop_spec(Random())
+        demo_evaluator = _DemoBiasedLeafEvaluator(
+            make_leaf_evaluator(EvalDeviceConfig(mode="cuda"))
+        )
+        resolve_result = resolve_postflop_hu(
+            demo_spec,
+            evaluator=demo_evaluator,
+        )
+        print(f"board={demo_spec.state.board}")
         print(f"root_infoset_id={resolve_result.root_infoset_id}")
         print(f"root_actions={','.join(resolve_result.root_actions)}")
         print(
@@ -117,16 +132,24 @@ def main() -> int:
     return 0
 
 
-def _demo_postflop_spec() -> PostflopResolveSpec:
+def _demo_postflop_spec(rng: Random | None = None) -> PostflopResolveSpec:
+    rng = rng or Random()
+    boards = ("AhKdTc", "QsJh9d", "Ac7c2d", "KhQh8s")
+    board = Board.from_str(boards[rng.randrange(len(boards))])
+    pot = chips(200 + 100 * rng.randrange(1, 4))
+    stack_p0 = chips(1500 + 100 * rng.randrange(0, 6))
+    stack_p1 = chips(1500 + 100 * rng.randrange(0, 6))
     state = GameState(
-        board=Board.from_str("AhKdTc"),
-        players=(PlayerState(player=PlayerIndex(0)), 
-                 PlayerState(player=PlayerIndex(1))),
+        board=board,
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
         betting_round=BettingRoundState(
-            pot=Pot(amount=chips(300)),
+            pot=Pot(amount=pot),
             stacks=(
-                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
-                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(0), stack=stack_p0),
+                PlayerStack(player=PlayerIndex(1), stack=stack_p1),
             ),
             bets=(
                 PlayerBet(player=PlayerIndex(0), committed=chips(0)),
@@ -141,10 +164,23 @@ def _demo_postflop_spec() -> PostflopResolveSpec:
         state=state,
         range_p0=RangeVector.uniform(),
         range_p1=RangeVector.uniform(),
-        time_budget_sec=0.01,
-        max_depth=2,
-        max_nodes=64,
+        time_budget_sec=0.5,
+        max_depth=3,
+        max_nodes=128,
     )
+
+
+class _DemoBiasedLeafEvaluator(LeafEvaluator):
+    def __init__(self, base: LeafEvaluator) -> None:
+        self._base = base
+
+    def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
+        values = self._base.evaluate(batch)
+        bias = np.asarray(batch.node_indices, dtype=np.float32) * np.float32(0.01)
+        return LeafValueBatch(
+            ev_player0=values.ev_player0 + bias,
+            ev_player1=values.ev_player1 - bias,
+        )
 
 
 def _parse_solver_args(
@@ -216,3 +252,7 @@ def _print_progress(current: int, total: int, label: str) -> None:
         end="" if current < total else "\n",
         flush=True,
     )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
