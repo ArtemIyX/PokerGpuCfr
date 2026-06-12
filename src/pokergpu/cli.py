@@ -1,8 +1,10 @@
 import logging
 import json
 import concurrent.futures as futures
+import multiprocessing as mp
 import sys
 import time
+from multiprocessing.queues import Queue as MPQueue
 from dataclasses import dataclass
 from pathlib import Path
 from random import Random
@@ -802,56 +804,65 @@ def _export_solver_labels(
     feature_spec = ValueFeatureSpec(player_count=args.player_count, max_history_length=8)
     if progress_callback is not None:
         progress_callback(0, args.sample_count, "export labels")
-    completed = 0
-    progress_state = {"active": 0}
-    heartbeat_stop = Event()
-    heartbeat = _start_progress_heartbeat(
-        lambda: _print_progress_detail(
-            completed,
-            args.sample_count,
-            progress_state["active"],
-            "export labels",
-        ),
-        heartbeat_stop,
-    )
-    with futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
-        in_flight: set[futures.Future[list[tuple[DatasetManifestEntry, ValueDatasetSample]]]] = set()
-        next_index = 0
-        max_in_flight = max(1, args.workers * 2)
-        while next_index < args.sample_count or in_flight:
-            while next_index < args.sample_count and len(in_flight) < max_in_flight:
-                start = next_index
-                stop = min(next_index + max(1, args.batch_size), args.sample_count)
-                in_flight.add(
-                    executor.submit(
-                        _solve_and_export_label_batch,
-                        start,
-                        stop,
-                        args,
-                        feature_spec,
-                        split_rule,
-                    )
+    worker_count = max(1, min(args.workers, args.sample_count))
+    ranges = _split_sample_ranges(args.sample_count, worker_count)
+    with mp.Manager() as manager:
+        progress_queue = cast(MPQueue[tuple[str, int, int, int]], manager.Queue())
+        with futures.ProcessPoolExecutor(max_workers=worker_count) as executor:
+            pending: set[futures.Future[tuple[int, list[DatasetManifestEntry], list[ValueDatasetSample]]]] = {
+                executor.submit(
+                    _export_solver_label_worker,
+                    worker_index,
+                    start,
+                    stop,
+                    args,
+                    feature_spec,
+                    split_rule,
+                    progress_queue,
                 )
-                next_index = stop
-            progress_state["active"] = len(in_flight)
-            done, in_flight = futures.wait(
-                in_flight,
-                timeout=0.25,
-                return_when=futures.FIRST_COMPLETED,
-            )
-            progress_state["active"] = len(in_flight)
-            for job in done:
-                for entry, sample in job.result():
-                    signature = tuple(np.round(sample.features[:32], 3).tolist())
-                    if signature in seen_signatures:
-                        continue
-                    seen_signatures.add(signature)
-                    entries.append(entry)
-                    samples.append(sample)
-                    completed += 1
-    heartbeat_stop.set()
-    if heartbeat is not None:
-        heartbeat.join()
+                for worker_index, (start, stop) in enumerate(ranges)
+            }
+            completed = 0
+            worker_outputs: dict[int, tuple[list[DatasetManifestEntry], list[ValueDatasetSample]]] = {}
+            worker_progress: dict[int, int] = {}
+            done_workers = 0
+            while pending or done_workers < len(ranges):
+                while True:
+                    try:
+                        kind, worker_index, current, total = progress_queue.get_nowait()
+                    except Exception:
+                        break
+                    if kind == "progress":
+                        print(f"worker={worker_index} progress={current}/{total}")
+                        worker_progress[worker_index] = current
+                        completed = sum(worker_progress.values())
+                        if progress_callback is not None:
+                            progress_callback(completed, args.sample_count, "export labels")
+                    elif kind == "done":
+                        print(f"worker={worker_index} samples={current} status=done")
+                        worker_progress[worker_index] = current
+                        done_workers += 1
+                        completed = sum(worker_progress.values())
+                        if progress_callback is not None:
+                            progress_callback(completed, args.sample_count, "export labels")
+                done, pending = futures.wait(
+                    pending,
+                    timeout=0.25,
+                    return_when=futures.FIRST_COMPLETED,
+                )
+                for job in done:
+                    worker_index, worker_entries, worker_samples = job.result()
+                    worker_outputs[worker_index] = (worker_entries, worker_samples)
+        for worker_index in range(len(ranges)):
+            worker_entries, worker_samples = worker_outputs.get(worker_index, ([], []))
+            for entry, sample in zip(worker_entries, worker_samples, strict=True):
+                signature = tuple(np.round(sample.features[:32], 3).tolist())
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
+                entries.append(entry)
+                samples.append(sample)
+                completed += 1
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
     _write_packed_samples(args.output_dir, entries, samples)
@@ -990,6 +1001,49 @@ def _solve_and_export_label_batch(
         _solve_and_export_label(index, args, feature_spec, split_rule)
         for index in range(start, stop)
     ]
+
+
+def _export_solver_label_worker(
+    worker_index: int,
+    start: int,
+    stop: int,
+    args: _SolverLabelArgs,
+    feature_spec: ValueFeatureSpec,
+    split_rule: DatasetSplitRule,
+    progress_queue: MPQueue[tuple[str, int, int, int]],
+) -> tuple[int, list[DatasetManifestEntry], list[ValueDatasetSample]]:
+    entries: list[DatasetManifestEntry] = []
+    samples: list[ValueDatasetSample] = []
+    completed = 0
+    batch_size = max(1, args.batch_size)
+    total = stop - start
+    for batch_start in range(start, stop, batch_size):
+        batch_stop = min(batch_start + batch_size, stop)
+        batch = _solve_and_export_label_batch(
+            batch_start, batch_stop, args, feature_spec, split_rule
+        )
+        for entry, sample in batch:
+            entries.append(entry)
+            samples.append(sample)
+            completed += 1
+        progress_queue.put(("progress", worker_index, completed, total))
+    progress_queue.put(("done", worker_index, completed, total))
+    return worker_index, entries, samples
+
+
+def _split_sample_ranges(total: int, parts: int) -> list[tuple[int, int]]:
+    if parts <= 0:
+        raise ValueError("parts must be positive")
+    base = total // parts
+    remainder = total % parts
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    for index in range(parts):
+        stop = start + base + (1 if index < remainder else 0)
+        if start != stop:
+            ranges.append((start, stop))
+        start = stop
+    return ranges
 
 
 def _solve_curated_spot(
