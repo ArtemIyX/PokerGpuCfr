@@ -74,7 +74,7 @@ Done when:
 - every legal node exposes a compact fixed action menu
 - illegal actions never reach the solver
 
-### 3. Build the public tree correctly
+### [x] 3. Build the public tree correctly
 
 Checklist:
 - build depth-limited public trees from the current game state

@@ -257,3 +257,48 @@ def test_build_public_tree_uses_canonical_board_key() -> None:
                                 config=TreeBuildConfig(max_depth=1, max_nodes=8))
 
     assert built_a.canonical_board_key == built_b.canonical_board_key
+
+
+def test_build_public_tree_handles_heads_up_postflop_state() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    built = build_public_tree(
+        state,
+        abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
+        config=TreeBuildConfig(max_depth=2, max_nodes=32),
+    )
+
+    assert built.tree.node_count > 0
+    assert built.tree.node_types[0].value in {"player0", "player1"}
+    assert built.tree.is_frontier[0] is False
+    assert built.tree.first_child[0] == 0 or built.tree.child_count[0] > 0
+    assert any(built.tree.is_frontier)
+    assert any(
+        node_state.current_street.value == "flop"
+        for node_state in built.node_states
+    )
+    assert all(
+        built.tree.child_count[index] == 0
+        for index, is_frontier in enumerate(built.tree.is_frontier)
+        if is_frontier
+    )
