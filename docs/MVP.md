@@ -52,7 +52,7 @@ Checklist:
 Done when:
 - the runtime API is stable enough for tests and benchmarks
 
-### 2. Define the restricted action set
+### [x] 2. Define the restricted action set
 
 Checklist:
 - support only these action families for MVP:

@@ -210,3 +210,164 @@ def test_all_in_bet_is_retained_when_legal() -> None:
         action.action_type.value == "bet" and int(action.amount or 0) == 90
         for action in actions
     )
+
+
+def test_street_specific_action_sets_differ() -> None:
+    from pokergpu.abstraction.actions import make_postflop_mvp_profile
+
+    abstraction = BaselineActionAbstraction(profile=make_postflop_mvp_profile())
+
+    preflop = abstraction.legal_actions(_make_preflop_state(to_act=1))
+    flop = abstraction.legal_actions(
+        GameState(
+            board=Board.from_str("AhKdTc"),
+            players=(
+                PlayerState(player=PlayerIndex(0)),
+                PlayerState(player=PlayerIndex(1)),
+            ),
+            betting_round=BettingRoundState(
+                pot=Pot(amount=chips(300)),
+                stacks=(
+                    PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                    PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+                ),
+                bets=(
+                    PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                    PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                ),
+                blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+                to_act=PlayerIndex(0),
+            ),
+            dealer=PlayerIndex(0),
+        )
+    )
+
+    assert preflop != flop
+    assert [action.action_type.value for action in flop] == ["check", "bet", "bet", "bet"]
+
+
+def test_legal_actions_are_deterministically_ordered() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(300)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(100)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(1),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    actions = BaselineActionAbstraction(profile=make_default_profile()).legal_actions(
+        state
+    )
+
+    assert [action.action_type.value for action in actions] == [
+        "fold",
+        "call",
+        "raise",
+        "raise",
+        "raise",
+    ]
+    assert actions == tuple(actions)
+    assert actions == tuple(
+        sorted(
+            actions,
+            key=lambda action: (
+                {"fold": 0, "check": 1, "call": 2, "bet": 3, "raise": 4}[
+                    action.action_type.value
+                ],
+                int(action.amount or 0),
+            ),
+        )
+    )
+
+
+def test_illegal_actions_are_filtered_out() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(300)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(100)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(1),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    actions = BaselineActionAbstraction(profile=make_default_profile()).legal_actions(
+        state
+    )
+
+    assert all(action.action_type.value != "check" for action in actions)
+    assert all(action.action_type.value != "bet" for action in actions)
+
+
+def test_all_in_is_not_forced_when_stack_is_not_binding() -> None:
+    state = _make_preflop_state(to_act=1, stacks=(1000, 1000, 1000, 1000, 1000, 1000))
+    actions = BaselineActionAbstraction(profile=make_default_profile()).legal_actions(
+        state
+    )
+
+    assert not any(
+        action.action_type.value == "bet" and int(action.amount or 0) == 1000
+        for action in actions
+    )
+
+
+def test_postflop_mvp_profile_is_compact() -> None:
+    from pokergpu.abstraction.actions import make_postflop_mvp_profile
+
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    actions = BaselineActionAbstraction(
+        profile=make_postflop_mvp_profile()
+    ).legal_actions(state)
+
+    assert [action.action_type.value for action in actions] == [
+        "check",
+        "bet",
+        "bet",
+        "bet",
+    ]

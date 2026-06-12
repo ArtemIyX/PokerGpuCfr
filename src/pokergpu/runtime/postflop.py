@@ -6,7 +6,10 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from pokergpu.abstraction.actions import BaselineActionAbstraction, make_runtime_profile
+from pokergpu.abstraction.actions import (
+    BaselineActionAbstraction,
+    make_postflop_mvp_profile,
+)
 from pokergpu.abstraction.hands import RangeVector
 from pokergpu.cfr import (
     InfosetLayout,
@@ -98,7 +101,7 @@ def resolve_postflop_multi_mccfr(
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_runtime_profile()),
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
         config=TreeBuildConfig(
             max_depth=spec.max_depth,
             max_nodes=spec.max_nodes,
@@ -162,7 +165,7 @@ def resolve_postflop_hu(
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_runtime_profile()),
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
         config=TreeBuildConfig(
             max_depth=spec.max_depth,
             max_nodes=spec.max_nodes,
@@ -304,7 +307,7 @@ def resolve_postflop_multi(
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_runtime_profile()),
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
         config=TreeBuildConfig(
             max_depth=spec.max_depth,
             max_nodes=spec.max_nodes,

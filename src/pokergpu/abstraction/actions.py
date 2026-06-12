@@ -177,6 +177,31 @@ def make_runtime_profile() -> AbstractionProfile:
     )
 
 
+def make_postflop_mvp_profile() -> AbstractionProfile:
+    return AbstractionProfile(
+        name="postflop_mvp",
+        version="v1",
+        street_templates={
+            Street.FLOP: StreetActionTemplate(
+                bet_sizes=(0.33, 0.75, 1.25),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
+            Street.TURN: StreetActionTemplate(
+                bet_sizes=(0.5, 0.75, 1.25),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
+            Street.RIVER: StreetActionTemplate(
+                bet_sizes=(0.5, 0.75, 1.25),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
+            Street.PREFLOP: StreetActionTemplate(
+                bet_sizes=(2.0, 2.5, 3.0),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
+        },
+    )
+
+
 @dataclass(slots=True, frozen=True)
 class BaselineActionAbstraction:
     profile: AbstractionProfile = make_runtime_profile()
