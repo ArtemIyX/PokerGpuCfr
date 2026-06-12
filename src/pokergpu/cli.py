@@ -303,19 +303,23 @@ def main() -> int:
             feature_normalizer=train_args.feature_normalizer,
             label_normalizer=train_args.label_normalizer,
             progress_callback=None,
+            verbose=train_args.verbose,
         )
-        print(f"train_loss={training_result.train_loss:.9e}")
-        print(f"val_loss={training_result.val_loss:.9e}")
-        print(f"checkpoint={train_args.output_dir / 'best_checkpoint.pt'}")
-        if training_result.predictions.size > 0:
-            print(
-                "preview="
-                + ",".join(
-                    f"{float(value):.6f}"
-                    for value in training_result.predictions[0]
+        if train_args.verbose:
+            print(f"train_loss={training_result.train_loss:.9e}")
+            print(f"val_loss={training_result.val_loss:.9e}")
+            print(f"checkpoint={train_args.output_dir / 'best_checkpoint.pt'}")
+            if training_result.predictions.size > 0:
+                print(
+                    "preview="
+                    + ",".join(
+                        f"{float(value):.6f}"
+                        for value in training_result.predictions[0]
+                    )
                 )
-            )
-        print(f"elapsed_seconds={time.monotonic() - started_at:.3f}")
+            print(f"elapsed_seconds={time.monotonic() - started_at:.3f}")
+        else:
+            print("done")
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "export-curated-solver-labels":
         curated_args = _parse_curated_solver_label_args(sys.argv[2:])
@@ -354,6 +358,7 @@ class _ValueDataArgs:
     validation_modulo: int
     validation_remainder: int
     teacher_checkpoint: Path | None
+    verbose: bool
 
     @property
     def feature_spec(self) -> ValueFeatureSpec:
@@ -372,6 +377,7 @@ class _ValueTrainArgs:
     training_config: TrainingConfig
     feature_normalizer: FeatureNormalizer | None
     label_normalizer: LabelNormalizer | None
+    verbose: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +449,7 @@ def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
     validation_modulo = 10
     validation_remainder = 0
     teacher_checkpoint: Path | None = None
+    verbose = False
     index = 0
     while index < len(args):
         option = args[index]
@@ -479,6 +486,10 @@ def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
             teacher_checkpoint = Path(args[index + 1]).resolve()
             index += 2
             continue
+        if option == "--verbose":
+            verbose = True
+            index += 1
+            continue
         raise ValueError(f"invalid generate-value-data arguments: {args!r}")
     return _ValueDataArgs(
         output_dir=output_dir,
@@ -489,6 +500,7 @@ def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
         validation_modulo=validation_modulo,
         validation_remainder=validation_remainder,
         teacher_checkpoint=teacher_checkpoint,
+        verbose=verbose,
     )
 
 
@@ -506,6 +518,7 @@ def _parse_value_train_args(args: list[str]) -> _ValueTrainArgs:
     dropout = 0.0
     feature_normalizer: FeatureNormalizer | None = None
     label_normalizer: LabelNormalizer | None = None
+    verbose = False
     index = 0
     while index < len(args):
         option = args[index]
@@ -571,6 +584,10 @@ def _parse_value_train_args(args: list[str]) -> _ValueTrainArgs:
             )
             index += 2
             continue
+        if option == "--verbose":
+            verbose = True
+            index += 1
+            continue
         raise ValueError(f"invalid train-value-network arguments: {args!r}")
     return _ValueTrainArgs(
         manifest_path=manifest_path,
@@ -590,6 +607,7 @@ def _parse_value_train_args(args: list[str]) -> _ValueTrainArgs:
         ),
         feature_normalizer=feature_normalizer,
         label_normalizer=label_normalizer,
+        verbose=verbose,
     )
 
 
@@ -961,7 +979,8 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
         1 + 1 + 5 + args.player_count + (args.player_count * 1326) + args.player_count + args.feature_history,
         dtype=np.float32,
     )
-    for index in tqdm(range(args.sample_count), total=args.sample_count, desc="generate-value-data"):
+    iterator = tqdm(range(args.sample_count), total=args.sample_count, desc="generate-value-data") if args.verbose else range(args.sample_count)
+    for index in iterator:
         state, ranges = _sample_value_generation_spot(rng, args.player_count)
         features = export_value_sample(
             sample_id=f"spot-{index:05d}",
@@ -1112,6 +1131,8 @@ def _export_solver_labels(
     save_dataset_manifest(existing_entries + new_pack_entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
+    if not args.verbose:
+        print("done")
 
 
 def _sample_value_generation_spot(rng: Random, player_count: int) -> tuple[GameState, PlayerRangeVectors]:

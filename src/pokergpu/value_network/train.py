@@ -54,6 +54,7 @@ class TrainingConfig:
     validation_modulo: int = 10
     validation_remainder: int = 0
     amp: bool = False
+    verbose: bool = False
 
     def __post_init__(self) -> None:
         if self.epochs <= 0:
@@ -177,10 +178,12 @@ def train_baseline(
     feature_normalizer: FeatureNormalizer | None = None,
     label_normalizer: LabelNormalizer | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    verbose: bool = False,
 ) -> TrainingResult:
     if config is None:
         config = TrainingConfig()
-    print("train: load manifest")
+    if verbose:
+        print("train: load manifest")
 
     entries = load_dataset_manifest(manifest_path)
     split_rule = DatasetSplitRule(
@@ -188,13 +191,14 @@ def train_baseline(
         validation_remainder=config.validation_remainder,
     )
     train_entries, val_entries = _split_entries(entries, split_rule)
-    print(
-        "train: dataset "
-        f"pack_files={len({entry.pack_path for entry in entries if entry.pack_path})} "
-        f"train_samples={sum(entry.sample_count for entry in train_entries)} "
-        f"val_samples={sum(entry.sample_count for entry in val_entries)}"
-    )
-    print(f"train: load samples train={len(train_entries)} val={len(val_entries)}")
+    if verbose:
+        print(
+            "train: dataset "
+            f"pack_files={len({entry.pack_path for entry in entries if entry.pack_path})} "
+            f"train_samples={sum(entry.sample_count for entry in train_entries)} "
+            f"val_samples={sum(entry.sample_count for entry in val_entries)}"
+        )
+        print(f"train: load samples train={len(train_entries)} val={len(val_entries)}")
     train_samples = _load_samples(
         train_entries,
         dataset_dir,
@@ -207,25 +211,29 @@ def train_baseline(
         progress_callback=progress_callback,
         label="load val samples",
     )
-    print(
-        "train: loaded "
-        f"train_samples={len(train_samples)} "
-        f"val_samples={len(val_samples)} "
-        f"total_samples={len(train_samples) + len(val_samples)}"
-    )
+    if verbose:
+        print(
+            "train: loaded "
+            f"train_samples={len(train_samples)} "
+            f"val_samples={len(val_samples)} "
+            f"total_samples={len(train_samples) + len(val_samples)}"
+        )
     if not train_samples:
         raise ValueError("training split is empty")
 
     if feature_normalizer is None:
-        print("train: fit feature normalizer")
+        if verbose:
+            print("train: fit feature normalizer")
         feature_normalizer = fit_feature_normalizer(train_samples)
     if label_normalizer is None:
-        print("train: fit label normalizer")
+        if verbose:
+            print("train: fit label normalizer")
         label_normalizer = fit_label_normalizer(train_samples)
     if progress_callback is not None:
         progress_callback(1, 1, "normalizers ready")
 
-    print("train: build model")
+    if verbose:
+        print("train: build model")
     model_config = build_value_network_config(
         feature_spec,
         target_kind,
@@ -234,10 +242,12 @@ def train_baseline(
         dropout=config.dropout,
     )
     device = default_value_device()
-    print(f"train: device={device}")
+    if verbose:
+        print(f"train: device={device}")
     model = build_value_model(model_config, device=device)
     import torch
-    print("train: build optimizer")
+    if verbose:
+        print("train: build optimizer")
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
     best_val = float("inf")
@@ -283,11 +293,12 @@ def train_baseline(
             config.batch_size,
         )
         epoch_elapsed = time.monotonic() - epoch_started_at
-        print(
-            f"train: epoch={epoch + 1}/{config.epochs} "
-            f"train_loss={train_loss:.9e} val_loss={val_loss:.9e} "
-            f"elapsed_seconds={epoch_elapsed:.3f}"
-        )
+        if verbose:
+            print(
+                f"train: epoch={epoch + 1}/{config.epochs} "
+                f"train_loss={train_loss:.9e} val_loss={val_loss:.9e} "
+                f"elapsed_seconds={epoch_elapsed:.3f}"
+            )
         if val_loss <= best_val:
             best_val = val_loss
             best_checkpoint = ValueCheckpoint(
@@ -303,7 +314,8 @@ def train_baseline(
                             model, 
                             optimizer, 
                             best_checkpoint)
-            print("train: saved best checkpoint")
+            if verbose:
+                print("train: saved best checkpoint")
 
     if best_checkpoint is None:
         best_checkpoint = ValueCheckpoint(
@@ -320,7 +332,8 @@ def train_baseline(
     preview_labels = np.zeros((0, model_config.output_dim), dtype=np.float32)
     preview_mae = 0.0
     if val_samples:
-        print("train: build preview")
+        if verbose:
+            print("train: build preview")
         features, targets = _batch_slice(val_samples, 
                                          0, 
                                          min(len(val_samples), 
@@ -334,7 +347,8 @@ def train_baseline(
         )
         preview_labels = targets
         preview_mae = float(np.mean(np.abs(preview_predictions - preview_labels), dtype=np.float64))
-        print(f"train: preview_mae={preview_mae:.9e}")
+        if verbose:
+            print(f"train: preview_mae={preview_mae:.9e}")
 
     return TrainingResult(
         model=model,
