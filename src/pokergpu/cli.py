@@ -1222,18 +1222,25 @@ def _sample_harder_equity_spec(rng: Random, index: int) -> _PostflopSampleSpec:
         spec = _real_postflop_resolve_spec_weighted(rng)
         if index % 5 == 0:
             spec = _boost_one_sided_spot(spec, rng)
+        try:
+            _ = PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)).normalized()
+        except ValueError:
+            continue
         sample_pairs = 192 if index % 3 else 128
         sample_runouts = 24 if index % 4 else 16
-        label = build_postflop_equity_label(
-            spec.state,
-            PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
-            config=EquityEvalConfig(
-                max_range_combos=64,
-                sampled_pairs=sample_pairs,
-                sampled_runouts=sample_runouts,
-                random_seed=index,
-            ),
-        )
+        try:
+            label = build_postflop_equity_label(
+                spec.state,
+                PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
+                config=EquityEvalConfig(
+                    max_range_combos=64,
+                    sampled_pairs=sample_pairs,
+                    sampled_runouts=sample_runouts,
+                    random_seed=index,
+                ),
+            )
+        except ValueError:
+            continue
         if abs(float(label.values[0, 0])) >= 0.20:
             return spec
     return _real_equity_sample_spec(rng)
