@@ -168,7 +168,7 @@ Checklist:
 Done when:
 - repeated solves of the same spot get faster
 
-### 10. Validate the solver
+### [x] 10. Validate the solver
 
 Checklist:
 - test heads-up postflop on several boards
