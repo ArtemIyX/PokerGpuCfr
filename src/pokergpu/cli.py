@@ -186,6 +186,12 @@ def main() -> int:
         report_args = _parse_dataset_sanity_report_args(sys.argv[2:])
         _print_dataset_sanity_report(report_args)
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "repair-manifest":
+        repair_args = _parse_repair_manifest_args(sys.argv[2:])
+        _repair_manifest(repair_args)
+        print(f"manifest={repair_args.manifest_path}")
+        print(f"dataset_dir={repair_args.dataset_dir}")
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] == "export-solver-labels":
         solver_label_args = _parse_solver_label_args(sys.argv[2:])
         started_at = time.monotonic()
@@ -256,8 +262,8 @@ def main() -> int:
             label_normalizer=train_args.label_normalizer,
             progress_callback=_print_progress,
         )
-        print(f"train_loss={training_result.train_loss:.6f}")
-        print(f"val_loss={training_result.val_loss:.6f}")
+        print(f"train_loss={training_result.train_loss:.9e}")
+        print(f"val_loss={training_result.val_loss:.9e}")
         print(f"checkpoint={train_args.output_dir / 'best_checkpoint.pt'}")
         if training_result.predictions.size > 0:
             print(
@@ -359,6 +365,12 @@ class _DatasetSanityReportArgs:
     feature_normalizer_path: Path | None
     label_normalizer_path: Path | None
     split_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class _RepairManifestArgs:
+    manifest_path: Path
+    dataset_dir: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -702,6 +714,27 @@ def _parse_dataset_sanity_report_args(args: list[str]) -> _DatasetSanityReportAr
     )
 
 
+def _parse_repair_manifest_args(args: list[str]) -> _RepairManifestArgs:
+    manifest_path = Path("artifacts/solver_labels/manifest.json").resolve()
+    dataset_dir = Path("artifacts/solver_labels").resolve()
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option == "--manifest" and index + 1 < len(args):
+            manifest_path = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        if option == "--dataset-dir" and index + 1 < len(args):
+            dataset_dir = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        raise ValueError(f"invalid repair-manifest arguments: {args!r}")
+    return _RepairManifestArgs(
+        manifest_path=manifest_path,
+        dataset_dir=dataset_dir,
+    )
+
+
 def _print_dataset_sanity_report(args: _DatasetSanityReportArgs) -> None:
     entries = load_dataset_manifest(args.manifest_path)
     train_entries = [entry for entry in entries if entry.split == "train"]
@@ -760,6 +793,35 @@ def _print_dataset_sanity_report(args: _DatasetSanityReportArgs) -> None:
         print(f"feature_normalizer_count={feature_normalizer.feature_count}")
     if label_normalizer is not None:
         print(f"label_normalizer_count={label_normalizer.label_count}")
+
+
+def _repair_manifest(args: _RepairManifestArgs) -> None:
+    entries = load_dataset_manifest(args.manifest_path)
+    pack_paths = sorted(
+        {args.dataset_dir / entry.pack_path for entry in entries if entry.pack_path}
+    )
+    repaired_entries: list[DatasetManifestEntry] = []
+    for pack_path in pack_paths:
+        with np.load(pack_path, allow_pickle=False) as data:
+            sample_count = int(np.asarray(data["sample_ids"]).shape[0])
+            feature_count = int(np.asarray(data["features"]).shape[-1])
+            label_shape_arr = np.asarray(data["labels"]).shape
+            label_shape = (
+                int(label_shape_arr[1]) if len(label_shape_arr) > 1 else 0,
+                int(label_shape_arr[2]) if len(label_shape_arr) > 2 else 0,
+            )
+        split = "val" if "_val.pack.npz" in pack_path.name else "train"
+        repaired_entries.append(
+            DatasetManifestEntry(
+                pack_path=pack_path.name,
+                split=split,
+                sample_count=sample_count,
+                feature_count=feature_count,
+                label_shape=label_shape,
+                pack_index=0,
+            )
+        )
+    save_dataset_manifest(repaired_entries, args.manifest_path)
 
 
 def _generate_value_data(args: _ValueDataArgs) -> None:

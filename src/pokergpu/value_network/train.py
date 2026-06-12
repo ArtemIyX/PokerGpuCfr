@@ -80,25 +80,14 @@ def _load_samples(
     progress_callback: Callable[[int, int, str], None] | None = None,
     label: str = "load samples",
 ) -> list[ValueDatasetSample]:
-    pack_path = dataset_dir / "samples.pack.npz"
-    if pack_path.exists():
-        packed_samples = load_value_sample_pack(pack_path)
-        if progress_callback is not None:
-            progress_callback(len(packed_samples), len(packed_samples), label)
-        return packed_samples
-    shard_paths = sorted(dataset_dir.glob("*.pack.npz"))
-    if shard_paths:
-        shard_samples: list[ValueDatasetSample] = []
-        for shard_index, shard_path in enumerate(shard_paths, start=1):
-            shard_samples.extend(load_value_sample_pack(shard_path))
-            if progress_callback is not None:
-                progress_callback(shard_index, len(shard_paths), label)
-        return shard_samples
     samples: list[ValueDatasetSample] = []
-    for index, entry in enumerate(entries, start=1):
-        samples.extend(load_value_sample_pack(dataset_dir / entry.pack_path))
+    unique_pack_paths = [dataset_dir / entry.pack_path for entry in entries if entry.pack_path]
+    seen: set[Path] = set()
+    pack_paths = [path for path in unique_pack_paths if not (path in seen or seen.add(path))]
+    for index, pack_path in enumerate(pack_paths, start=1):
+        samples.extend(load_value_sample_pack(pack_path))
         if progress_callback is not None:
-            progress_callback(index, len(entries), label)
+            progress_callback(index, len(pack_paths), label)
     return samples
 
 
@@ -171,6 +160,12 @@ def train_baseline(
         validation_remainder=config.validation_remainder,
     )
     train_entries, val_entries = _split_entries(entries, split_rule)
+    print(
+        "train: dataset "
+        f"pack_files={len({entry.pack_path for entry in entries if entry.pack_path})} "
+        f"train_samples={sum(entry.sample_count for entry in train_entries)} "
+        f"val_samples={sum(entry.sample_count for entry in val_entries)}"
+    )
     print(f"train: load samples train={len(train_entries)} val={len(val_entries)}")
     train_samples = _load_samples(
         train_entries,
@@ -183,6 +178,12 @@ def train_baseline(
         dataset_dir,
         progress_callback=progress_callback,
         label="load val samples",
+    )
+    print(
+        "train: loaded "
+        f"train_samples={len(train_samples)} "
+        f"val_samples={len(val_samples)} "
+        f"total_samples={len(train_samples) + len(val_samples)}"
     )
     if not train_samples:
         raise ValueError("training split is empty")
@@ -252,7 +253,7 @@ def train_baseline(
         epoch_elapsed = time.monotonic() - epoch_started_at
         print(
             f"train: epoch={epoch + 1}/{config.epochs} "
-            f"train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
+            f"train_loss={train_loss:.9e} val_loss={val_loss:.9e} "
             f"elapsed_seconds={epoch_elapsed:.3f}"
         )
         if val_loss <= best_val:
@@ -285,6 +286,7 @@ def train_baseline(
 
     preview_predictions = np.zeros((0, model_config.output_dim), dtype=np.float32)
     preview_labels = np.zeros((0, model_config.output_dim), dtype=np.float32)
+    preview_mae = 0.0
     if val_samples:
         print("train: build preview")
         features, targets = _batch_slice(val_samples, 
@@ -299,6 +301,8 @@ def train_baseline(
             infer_value(model, normalized)
         )
         preview_labels = targets
+        preview_mae = float(np.mean(np.abs(preview_predictions - preview_labels), dtype=np.float64))
+        print(f"train: preview_mae={preview_mae:.9e}")
 
     return TrainingResult(
         model=model,

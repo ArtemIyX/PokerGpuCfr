@@ -403,7 +403,27 @@ def load_value_sample_pack(path: Path) -> list[ValueDatasetSample]:
 
 def save_dataset_manifest(entries: list[DatasetPackManifestEntry], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = [entry.to_dict() for entry in entries]
+    payload: list[dict[str, object]] = []
+    for entry in entries:
+        normalized = entry
+        pack_path = path.parent / entry.pack_path if entry.pack_path else None
+        if pack_path is not None and pack_path.exists():
+            with np.load(pack_path, allow_pickle=False) as data:
+                sample_count = int(np.asarray(data["sample_ids"]).shape[0])
+                feature_count = int(np.asarray(data["features"]).shape[-1])
+                label_shape = tuple(int(value) for value in np.asarray(data["labels"]).shape[1:3])
+            normalized = DatasetPackManifestEntry(
+                pack_path=entry.pack_path,
+                split=entry.split,
+                sample_count=sample_count,
+                feature_count=feature_count,
+                label_shape=(label_shape[0], label_shape[1]) if len(label_shape) == 2 else (0, 0),
+                sample_id=entry.sample_id,
+                path=entry.path,
+                metadata=entry.metadata,
+                pack_index=entry.pack_index,
+            )
+        payload.append(normalized.to_dict())
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
