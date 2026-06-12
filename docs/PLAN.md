@@ -43,10 +43,10 @@ Why this first:
 - [x] Evaluate frontier nodes through the leaf evaluator interface
 - [x] Warm-start regrets and strategy sums from cache
 - [x] Return root strategy and EV for a resolved spot
-- [ ] Wire the trained value network into `resolve_postflop_hu` as the default leaf evaluator
-- [ ] Add a runtime path that uses the value network for frontier EV instead of only the CPU stub
-- [ ] Add a deterministic fallback when the network is missing or mismatched
-- [ ] Add an end-to-end runtime test that solves one fixed postflop state
+- [x] Wire the trained value network into `resolve_postflop_hu` as the default leaf evaluator
+- [x] Add a runtime path that uses the value network for frontier EV instead of only the CPU stub
+- [x] Add a deterministic fallback when the network is missing or mismatched
+- [x] Add an end-to-end runtime test that solves one fixed postflop state
 
 ### 2.2 Value network integration
 

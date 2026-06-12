@@ -18,6 +18,15 @@ from .caching import normalize_sequence as normalize_sequence
 from .postflop import PostflopResolveResult as PostflopResolveResult
 from .postflop import PostflopResolveSpec as PostflopResolveSpec
 from .postflop import resolve_postflop_hu as resolve_postflop_hu
+from .value_network import (
+    PostflopRuntimeValueNetworkConfig as PostflopRuntimeValueNetworkConfig,
+)
+from .value_network import (
+    PostflopRuntimeValueNetworkEvaluator as PostflopRuntimeValueNetworkEvaluator,
+)
+from .value_network import (
+    default_postflop_leaf_evaluator as default_postflop_leaf_evaluator,
+)
 
 __all__ = [
     "CacheBundle",
@@ -27,6 +36,8 @@ __all__ = [
     "LruCache",
     "PostflopResolveResult",
     "PostflopResolveSpec",
+    "PostflopRuntimeValueNetworkConfig",
+    "PostflopRuntimeValueNetworkEvaluator",
     "PublicStateFingerprint",
     "PublicStateKey",
     "SolveBenchmark",
@@ -37,6 +48,7 @@ __all__ = [
     "entropy_from_probs",
     "make_leaf_key",
     "make_warm_start_state",
+    "default_postflop_leaf_evaluator",
     "normalize_sequence",
     "resolve_postflop_hu",
     "stable_hash",

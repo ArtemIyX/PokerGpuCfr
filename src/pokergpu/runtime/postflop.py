@@ -21,13 +21,14 @@ from pokergpu.core.board import Street
 from pokergpu.core.cards import Card
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
-from pokergpu.eval import CpuStubLeafEvaluator, LeafEvaluator
+from pokergpu.eval import LeafEvaluator
 from pokergpu.runtime.cache import WarmStartState
 from pokergpu.runtime.caching import (
     PublicStateFingerprint,
     SolveCacheState,
     make_warm_start_state,
 )
+from pokergpu.runtime.value_network import default_postflop_leaf_evaluator
 from pokergpu.tree import PublicTree
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
 
@@ -67,7 +68,7 @@ def resolve_postflop_hu(
     if spec.state.current_street is Street.PREFLOP:
         raise ValueError("postflop resolver requires a postflop state")
 
-    evaluator_impl = evaluator or CpuStubLeafEvaluator()
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
