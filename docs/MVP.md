@@ -129,7 +129,7 @@ Checklist:
 Done when:
 - the solver returns a coherent root strategy and EV summary
 
-### 7. Add CFR+ training loop
+### 7. [x] Add CFR+ training loop
 
 Checklist:
 - use CFR+ regret clamping

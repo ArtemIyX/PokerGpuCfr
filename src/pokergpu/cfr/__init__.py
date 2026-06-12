@@ -5,7 +5,15 @@ from .infosets import (
     build_infoset_layout,
     regret_matching,
 )
-from .iteration import CFRIterationResult, CFRVariant, DCFRConfig, run_cfr_iteration
+from .iteration import (
+    CFRIterationResult,
+    CFRTrainingConfig,
+    CFRTrainingResult,
+    CFRVariant,
+    DCFRConfig,
+    run_cfr_iteration,
+    run_cfr_training_loop,
+)
 from .mccfr import train_kuhn_mccfr, train_leduc_mccfr
 from .toy_mccfr import ToyMCCFRResult, new_toy_store, toy_expected_value, train_toy_mccfr
 from .kuhn import (
@@ -61,6 +69,8 @@ from .traversal import (
 __all__ = [
     "ComparisonRow",
     "CFRIterationResult",
+    "CFRTrainingConfig",
+    "CFRTrainingResult",
     "CFRVariant",
     "DCFRConfig",
     "BackwardPassResult",
@@ -97,6 +107,7 @@ __all__ = [
     "RegretUpdateResult",
     "run_toy_game_comparison",
     "run_cfr_iteration",
+    "run_cfr_training_loop",
     "TreeLevels",
     "build_leaf_feature_batch",
     "build_tree_levels",

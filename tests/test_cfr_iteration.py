@@ -5,9 +5,11 @@ import pytest
 
 from pokergpu.cfr import (
     CFRVariant,
+    CFRTrainingConfig,
     InfosetLayout,
     InfosetStore,
     run_cfr_iteration,
+    run_cfr_training_loop,
 )
 
 
@@ -126,3 +128,27 @@ def test_dcfr_discounts_regrets_and_strategy_sums() -> None:
     assert float(store.regrets[1]) > -6.0
     assert float(store.strategy_sums[0]) < 3.0
     assert float(store.strategy_sums[1]) < 7.0
+
+
+def test_cfr_plus_training_loop_is_deterministic_and_dense() -> None:
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([2]))
+    utilities = (
+        (np.array([1.0, -1.0], dtype=np.float32),),
+        (np.array([2.0, -2.0], dtype=np.float32),),
+        (np.array([3.0, -3.0], dtype=np.float32),),
+    )
+
+    result = run_cfr_training_loop(
+        store,
+        utilities,
+        CFRTrainingConfig(iterations=3),
+    )
+
+    assert result.iterations == 3
+    assert len(result.strategies) == 3
+    assert len(result.infoset_values) == 3
+    assert np.all(store.regrets >= 0.0)
+    assert np.isclose(float(store.strategy_sums.sum()), 3.0)
+    assert np.allclose(result.strategies[0][0], np.array([0.5, 0.5], dtype=np.float32))
+    assert np.allclose(result.strategies[1][0], np.array([1.0, 0.0], dtype=np.float32))
+    assert np.allclose(result.strategies[2][0], np.array([1.0, 0.0], dtype=np.float32))

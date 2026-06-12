@@ -29,6 +29,23 @@ class DCFRConfig:
     strategy_gamma: float = 2.0
 
 
+@dataclass(frozen=True, slots=True)
+class CFRTrainingConfig:
+    iterations: int
+    variant: CFRVariant = CFRVariant.CFR_PLUS
+    strategy_weight: float = 1.0
+    iteration_offset: int = 0
+    active_infosets: tuple[int, ...] | None = None
+    dcfr_config: DCFRConfig | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CFRTrainingResult:
+    iterations: int
+    strategies: tuple[tuple[NDArray[np.float32], ...], ...]
+    infoset_values: tuple[NDArray[np.float32], ...]
+
+
 def run_cfr_iteration(
     store: InfosetStore,
     action_utilities: Sequence[NDArray[np.float32] | Sequence[float]],
@@ -91,6 +108,39 @@ def run_cfr_iteration(
     return CFRIterationResult(
         strategies=tuple(strategies),
         infoset_values=infoset_values,
+    )
+
+
+def run_cfr_training_loop(
+    store: InfosetStore,
+    iteration_utilities: Sequence[
+        Sequence[NDArray[np.float32] | Sequence[float]]
+    ],
+    config: CFRTrainingConfig,
+) -> CFRTrainingResult:
+    if config.iterations < 0:
+        raise ValueError("iterations must be non-negative")
+    if len(iteration_utilities) < config.iterations:
+        raise ValueError("iteration utilities must cover all iterations")
+
+    strategies: list[tuple[NDArray[np.float32], ...]] = []
+    infoset_values: list[NDArray[np.float32]] = []
+    for iteration_index in range(config.iterations):
+        result = run_cfr_iteration(
+            store,
+            iteration_utilities[iteration_index],
+            strategy_weight=config.strategy_weight,
+            active_infosets=config.active_infosets,
+            variant=config.variant,
+            iteration=config.iteration_offset + iteration_index + 1,
+            dcfr_config=config.dcfr_config,
+        )
+        strategies.append(result.strategies)
+        infoset_values.append(result.infoset_values)
+    return CFRTrainingResult(
+        iterations=config.iterations,
+        strategies=tuple(strategies),
+        infoset_values=tuple(infoset_values),
     )
 
 
