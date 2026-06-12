@@ -1240,7 +1240,7 @@ def _sample_harder_equity_spec(rng: Random, index: int) -> _PostflopSampleSpec:
 
 
 def _real_postflop_resolve_spec_weighted(rng: Random) -> _PostflopSampleSpec:
-    street = rng.choices([0, 1, 2], weights=[1, 2, 8], k=1)[0]
+    street = rng.choices([0, 1, 2], weights=[1, 2, 9], k=1)[0]
     deck = shuffled_deck(rng)
     hole0 = (deck.pop(), deck.pop())
     hole1 = (deck.pop(), deck.pop())
@@ -1254,8 +1254,8 @@ def _real_postflop_resolve_spec_weighted(rng: Random) -> _PostflopSampleSpec:
         board_cards = tuple(deck.pop() for _ in range(5))
         max_depth = 4
     board = Board(cards=board_cards)
-    pot_amount = chips(rng.choice([100, 300, 800, 1600, 3200, 6400]))
-    stack_amount = chips(rng.choice([1500, 2000, 3000, 6000, 10000, 20000]))
+    pot_amount = chips(rng.choice([300, 800, 1600, 3200, 6400, 12800]))
+    stack_amount = chips(rng.choice([800, 1200, 1500, 2000, 3000, 6000, 10000]))
     state = GameState(
         board=board,
         players=(
@@ -1299,12 +1299,12 @@ def _polarized_range_vector(
     ]
     if not legal_indices:
         return RangeVector.uniform()
-    for _ in range(3):
-        values[rng.choice(legal_indices)] = np.float32(0.05 + 0.35 * rng.random())
     for _ in range(2):
-        values[rng.choice(legal_indices)] = np.float32(2.0 + 6.0 * rng.random())
-    if rng.random() < 0.35:
-        values[rng.choice(legal_indices)] = np.float32(10.0 + 10.0 * rng.random())
+        values[rng.choice(legal_indices)] = np.float32(0.01 + 0.15 * rng.random())
+    for _ in range(2):
+        values[rng.choice(legal_indices)] = np.float32(3.0 + 8.0 * rng.random())
+    if rng.random() < 0.5:
+        values[rng.choice(legal_indices)] = np.float32(12.0 + 20.0 * rng.random())
     total = float(values.sum())
     if total <= 0.0:
         values[rng.choice(legal_indices)] = np.float32(1.0)
@@ -1323,7 +1323,7 @@ def _boost_one_sided_spot(spec: _PostflopSampleSpec, rng: Random) -> _PostflopSa
             for card in player.hole_cards
         ]
     )
-    if rng.random() < 0.5:
+    if rng.random() < 0.7:
         range_p0 = _polarized_range_vector(rng, dead_cards=dead_cards)
         range_p1 = _polarized_range_vector(rng, dead_cards=dead_cards)
     else:
