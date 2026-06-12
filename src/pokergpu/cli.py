@@ -14,7 +14,12 @@ from typing import Any, Callable, cast
 
 import numpy as np
 
-from .abstraction.hands import PlayerRangeVectors, RangeVector, private_hand_count
+from .abstraction.hands import (
+    PlayerRangeVectors,
+    RangeVector,
+    all_private_hands,
+    private_hand_count,
+)
 from .app import create_app
 from .benchmarks import run_benchmark
 from .cfr import (
@@ -991,12 +996,13 @@ def _solve_and_export_label(
     split_rule: DatasetSplitRule,
     pack_prefix: str | None,
 ) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
-    spec = _real_equity_sample_spec(Random(9000 + index * 97))
+    spec = _sample_harder_equity_spec(Random(9000 + index * 97), index)
+    max_nodes = args.max_nodes if index % 2 else max(args.max_nodes, 256)
     label = build_postflop_equity_label(
         spec.state,
         PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
         config=EquityEvalConfig(
-            max_range_combos=args.max_nodes,
+            max_range_combos=max_nodes,
             sampled_pairs=args.sampled_pairs,
             sampled_runouts=args.sampled_runouts,
             random_seed=index,
@@ -1208,6 +1214,125 @@ def _real_equity_sample_spec(rng: Random | None = None) -> _PostflopSampleSpec:
         state=spec.state,
         range_p0=spec.range_p0,
         range_p1=spec.range_p1,
+    )
+
+
+def _sample_harder_equity_spec(rng: Random, index: int) -> _PostflopSampleSpec:
+    for _ in range(10):
+        spec = _real_postflop_resolve_spec_weighted(rng)
+        if index % 5 == 0:
+            spec = _boost_one_sided_spot(spec, rng)
+        sample_pairs = 192 if index % 3 else 128
+        sample_runouts = 24 if index % 4 else 16
+        label = build_postflop_equity_label(
+            spec.state,
+            PlayerRangeVectors.from_values((spec.range_p0, spec.range_p1)),
+            config=EquityEvalConfig(
+                max_range_combos=64,
+                sampled_pairs=sample_pairs,
+                sampled_runouts=sample_runouts,
+                random_seed=index,
+            ),
+        )
+        if abs(float(label.values[0, 0])) >= 0.20:
+            return spec
+    return _real_equity_sample_spec(rng)
+
+
+def _real_postflop_resolve_spec_weighted(rng: Random) -> _PostflopSampleSpec:
+    street = rng.choices([0, 1, 2], weights=[1, 2, 8], k=1)[0]
+    deck = shuffled_deck(rng)
+    hole0 = (deck.pop(), deck.pop())
+    hole1 = (deck.pop(), deck.pop())
+    if street == 0:
+        board_cards = tuple(deck.pop() for _ in range(3))
+        max_depth = 2
+    elif street == 1:
+        board_cards = tuple(deck.pop() for _ in range(4))
+        max_depth = 3
+    else:
+        board_cards = tuple(deck.pop() for _ in range(5))
+        max_depth = 4
+    board = Board(cards=board_cards)
+    pot_amount = chips(rng.choice([100, 300, 800, 1600, 3200, 6400]))
+    stack_amount = chips(rng.choice([1500, 2000, 3000, 6000, 10000, 20000]))
+    state = GameState(
+        board=board,
+        players=(
+            PlayerState(player=PlayerIndex(0), hole_cards=hole0),
+            PlayerState(player=PlayerIndex(1), hole_cards=hole1),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=pot_amount),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=stack_amount),
+                PlayerStack(player=PlayerIndex(1), stack=stack_amount),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(rng.randrange(2)),
+        ),
+        dealer=PlayerIndex(rng.randrange(2)),
+    )
+    range_p0 = _polarized_range_vector(rng, dead_cards=tuple(board_cards + hole1))
+    range_p1 = _polarized_range_vector(rng, dead_cards=tuple(board_cards + hole0))
+    return _PostflopSampleSpec(
+        state=state,
+        range_p0=range_p0.masked(tuple(board_cards + hole1)),
+        range_p1=range_p1.masked(tuple(board_cards + hole0)),
+    )
+
+
+def _polarized_range_vector(
+    rng: Random,
+    dead_cards: tuple[object, ...] | list[object] = (),
+) -> RangeVector:
+    values = np.zeros(private_hand_count(), dtype=np.float32)
+    dead_set = set(dead_cards)
+    legal_indices = [
+        index
+        for index, hand in enumerate(all_private_hands())
+        if hand.first not in dead_set and hand.second not in dead_set
+    ]
+    if not legal_indices:
+        return RangeVector.uniform()
+    for _ in range(3):
+        values[rng.choice(legal_indices)] = np.float32(0.05 + 0.35 * rng.random())
+    for _ in range(2):
+        values[rng.choice(legal_indices)] = np.float32(2.0 + 6.0 * rng.random())
+    if rng.random() < 0.35:
+        values[rng.choice(legal_indices)] = np.float32(10.0 + 10.0 * rng.random())
+    total = float(values.sum())
+    if total <= 0.0:
+        values[rng.choice(legal_indices)] = np.float32(1.0)
+        total = 1.0
+    values /= np.float32(total)
+    return RangeVector.from_values(values)
+
+
+def _boost_one_sided_spot(spec: _PostflopSampleSpec, rng: Random) -> _PostflopSampleSpec:
+    dead_cards = tuple(
+        list(spec.state.board.cards)
+        + [
+            card
+            for player in spec.state.players
+            if player.hole_cards is not None
+            for card in player.hole_cards
+        ]
+    )
+    if rng.random() < 0.5:
+        range_p0 = _polarized_range_vector(rng, dead_cards=dead_cards)
+        range_p1 = _polarized_range_vector(rng, dead_cards=dead_cards)
+    else:
+        range_p0 = _polarized_range_vector(rng, dead_cards=dead_cards)
+        range_p1 = RangeVector.uniform()
+    return _PostflopSampleSpec(
+        state=spec.state,
+        range_p0=range_p0.masked(dead_cards),
+        range_p1=range_p1.masked(dead_cards),
     )
 
 
