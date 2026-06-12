@@ -804,7 +804,7 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
         )
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
-    _write_packed_samples(args.output_dir, entries, samples)
+    entries = _write_packed_samples(args.output_dir, entries, samples)
     save_dataset_manifest(entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
@@ -898,13 +898,13 @@ def _export_solver_labels(
     all_samples = existing_samples + samples
     normalizer = fit_feature_normalizer(all_samples)
     label_normalizer = fit_label_normalizer(all_samples)
-    _write_packed_samples(
+    new_pack_entries = _write_packed_samples(
         args.output_dir,
         entries,
         samples,
         pack_prefix=pack_prefix,
     )
-    save_dataset_manifest(all_entries, args.manifest_path)
+    save_dataset_manifest(existing_entries + new_pack_entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
 
@@ -978,7 +978,7 @@ def _export_curated_solver_labels(
         heartbeat.join()
     normalizer = fit_feature_normalizer(samples)
     label_normalizer = fit_label_normalizer(samples)
-    _write_packed_samples(args.output_dir, entries, samples)
+    entries = _write_packed_samples(args.output_dir, entries, samples)
     save_dataset_manifest(entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
@@ -1243,13 +1243,28 @@ def _write_packed_samples(
     entries: list[DatasetManifestEntry],
     samples: list[ValueDatasetSample],
     pack_prefix: str | None = None,
-) -> None:
+) -> list[DatasetManifestEntry]:
     by_split: dict[str, list[ValueDatasetSample]] = {}
     for entry, sample in zip(entries, samples, strict=True):
         by_split.setdefault(entry.split, []).append(sample)
+    written: list[DatasetManifestEntry] = []
     for split, split_samples in by_split.items():
         file_name = f"{split}.pack.npz" if pack_prefix is None else f"{pack_prefix}_{split}.pack.npz"
         save_value_sample_pack(split_samples, output_dir / file_name)
+        written.append(
+            DatasetManifestEntry(
+                pack_path=file_name,
+                split=split,
+                sample_count=len(split_samples),
+                feature_count=int(split_samples[0].features.shape[0]) if split_samples else 0,
+                label_shape=(
+                    int(split_samples[0].label.shape[0]),
+                    int(split_samples[0].label.shape[1]),
+                ) if split_samples else (0, 0),
+                pack_index=0,
+            )
+        )
+    return written
 
 
 def _load_existing_pack_with_fallback(path: Path) -> list[ValueDatasetSample]:

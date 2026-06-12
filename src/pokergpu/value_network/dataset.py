@@ -66,14 +66,11 @@ class LabelNormalizerPayload(TypedDict):
 
 
 class DatasetPackManifestEntryPayload(TypedDict):
-    sample_id: str
     pack_path: str
     split: str
-    path: str
     sample_count: int
     feature_count: int
     label_shape: list[int]
-    metadata: dict[str, object]
     pack_index: int
 
 
@@ -256,14 +253,11 @@ class DatasetPackManifestEntry:
 
     def to_dict(self) -> DatasetPackManifestEntryPayload:
         return {
-            "sample_id": self.sample_id,
             "pack_path": self.pack_path,
             "split": self.split,
-            "path": self.path,
             "sample_count": self.sample_count,
             "feature_count": self.feature_count,
             "label_shape": [self.label_shape[0], self.label_shape[1]],
-            "metadata": dict(self.metadata or {}),
             "pack_index": self.pack_index,
         }
 
@@ -271,14 +265,11 @@ class DatasetPackManifestEntry:
     def from_dict(cls, payload: DatasetPackManifestEntryPayload) -> DatasetPackManifestEntry:
         shape = payload["label_shape"]
         return cls(
-            sample_id=str(payload.get("sample_id", "")),
             pack_path=payload["pack_path"],
             split=payload["split"],
-            path=str(payload.get("path", "")),
             sample_count=int(payload["sample_count"]),
             feature_count=int(payload["feature_count"]),
             label_shape=(int(shape[0]), int(shape[1])),
-            metadata=dict(payload.get("metadata", {})),
             pack_index=int(payload.get("pack_index", 0)),
         )
 
@@ -471,14 +462,11 @@ def build_dataset_manifest_entry(
 ) -> DatasetPackManifestEntry:
     pack_path = relative_path.split("/", 1)[0] if "/" in relative_path else relative_path
     return DatasetPackManifestEntry(
-        sample_id=sample.sample_id,
         pack_path=pack_path,
         split=split_rule.split_for_metadata(sample.sample_id, sample.metadata),
-        path=relative_path,
         sample_count=1,
         feature_count=int(sample.features.shape[0]),
         label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
-        metadata=dict(sample.metadata),
         pack_index=0,
     )
 
