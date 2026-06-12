@@ -130,7 +130,8 @@ def _compute_heads_up_ev(
     if total_weight <= 0.0:
         raise ValueError("range combinations produced no valid equity mass")
     expected_payout0 = total_payout0 / total_weight
-    return float(expected_payout0 * 2.0 - pot)
+    chip_ev = float(expected_payout0 * 2.0 - pot)
+    return float(chip_ev / pot) if pot > 0.0 else 0.0
 
 
 def _compute_heads_up_ev_sampled(
@@ -191,7 +192,8 @@ def _compute_heads_up_ev_sampled(
                 payoff0 = pot * 0.5
             total += pair_weight * payoff0
     expected_payout0 = total / float(max(pair_count, 1))
-    return float(expected_payout0 * 2.0 - pot)
+    chip_ev = float(expected_payout0 * 2.0 - pot)
+    return float(chip_ev / pot) if pot > 0.0 else 0.0
 
 
 def _weighted_private_hands(

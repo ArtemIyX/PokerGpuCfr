@@ -133,10 +133,9 @@ def _encode_board(board: Board) -> NDArray[np.float32]:
 
 
 def _player_mask(state: GameState) -> NDArray[np.float32]:
-    return np.asarray(
-        [1.0 if not player.folded else 0.0 for player in state.players],
-        dtype=np.float32,
-    )
+    mask = np.zeros(state.player_count, dtype=np.float32)
+    mask[int(state.betting_round.to_act)] = np.float32(1.0)
+    return mask
 
 
 def _stack_features(state: GameState) -> NDArray[np.float32]:
