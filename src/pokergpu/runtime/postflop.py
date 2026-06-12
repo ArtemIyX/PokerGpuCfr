@@ -267,22 +267,26 @@ def resolve_postflop_hu(
         )
 
     root_strategy = store.average_strategy(0)
-    pot_scale = float(total_pot(spec.state))
-    if pot_scale <= 0.0:
-        pot_scale = 1.0
     root_action_ev_player0 = np.asarray(
-        final_backward.infoset_action_values.get(root_infoset_id, np.zeros(0, dtype=np.float32)),
+        final_backward.infoset_action_values.get(
+            root_infoset_id, np.zeros(0, dtype=np.float32)
+        ),
         dtype=np.float32,
     )
     root_action_ev_player1 = -root_action_ev_player0
+    root_ev_player0 = _summarize_root_ev(root_strategy, root_action_ev_player0)
+    root_ev_player1 = -root_ev_player0
+    pot_scale = float(total_pot(spec.state))
+    if pot_scale <= 0.0:
+        pot_scale = 1.0
     return PostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
         root_strategy=root_strategy,
         root_action_ev_player0=root_action_ev_player0,
         root_action_ev_player1=root_action_ev_player1,
-        root_ev_player0=float(final_backward.node_values_player0[0] / pot_scale),
-        root_ev_player1=float(final_backward.node_values_player1[0] / pot_scale),
+        root_ev_player0=float(root_ev_player0 / pot_scale),
+        root_ev_player1=float(root_ev_player1 / pot_scale),
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         node_count=tree.tree.node_count,
@@ -614,6 +618,21 @@ def _terminal_value_player0(state: GameState) -> float:
     )
     other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
     return float(player0_payout - other_payouts)
+
+
+def _summarize_root_ev(
+    root_strategy: NDArray[np.float32],
+    root_action_ev_player0: NDArray[np.float32],
+) -> float:
+    limit = min(root_strategy.shape[0], root_action_ev_player0.shape[0])
+    if limit == 0:
+        return 0.0
+    return float(
+        np.sum(
+            root_strategy[:limit] * root_action_ev_player0[:limit],
+            dtype=np.float64,
+        )
+    )
 
 
 def _build_public_fingerprint(

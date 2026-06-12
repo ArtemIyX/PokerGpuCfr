@@ -116,7 +116,7 @@ Checklist:
 Done when:
 - solver never assigns weight to hands blocked by the board
 
-### 6. Compute EVs from the tree
+### 6. [x] Compute EVs from the tree
 
 Checklist:
 - compute action EV for every root action

@@ -64,6 +64,50 @@ def test_postflop_resolver_returns_root_strategy() -> None:
     assert result.leaf_count > 0
 
 
+def test_postflop_resolver_root_ev_matches_action_ev_weighting() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    expected = float(
+        np.sum(
+            result.root_strategy[: result.root_action_ev_player0.shape[0]]
+            * result.root_action_ev_player0,
+            dtype=np.float64,
+        )
+    )
+    assert np.isclose(result.root_ev_player0, expected / 300.0)
+    assert np.isclose(result.root_ev_player1, -result.root_ev_player0)
+
+
 def test_postflop_resolve_spec_has_stable_defaults() -> None:
     assert POSTFLOP_SOLVER_DEFAULT_SEED == 0
     assert POSTFLOP_SOLVER_VERSION == "mvp-postflop-v1"
