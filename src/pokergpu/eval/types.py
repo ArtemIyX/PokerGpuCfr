@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from pokergpu.core.state import GameState
+
 
 @dataclass(slots=True, frozen=True)
 class LeafFeature:
@@ -26,6 +28,8 @@ class LeafFeature:
 @dataclass(slots=True, frozen=True)
 class LeafFeatureBatch:
     node_indices: tuple[int, ...]
+    node_states: tuple[GameState, ...] | None
+    terminal_payoff: NDArray[np.float32]
     player_to_act: NDArray[np.int32]
     street: NDArray[np.int32]
     pot: NDArray[np.float32]

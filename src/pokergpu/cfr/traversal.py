@@ -87,6 +87,7 @@ def build_leaf_feature_batch(
     stack_p0 = np.zeros(size, dtype=np.float32)
     stack_p1 = np.zeros(size, dtype=np.float32)
     board_size = np.zeros(size, dtype=np.int32)
+    terminal_payoff = np.full(size, np.nan, dtype=np.float32)
     reach_p0_arr = np.zeros(size, dtype=np.float32)
     reach_p1_arr = np.zeros(size, dtype=np.float32)
     reach_p2_arr = np.zeros(size, dtype=np.float32)
@@ -112,6 +113,9 @@ def build_leaf_feature_batch(
             board_size[batch_index] = 0
         is_terminal[batch_index] = node_type is NodeType.TERMINAL
         is_frontier[batch_index] = tree.is_frontier[node_index]
+        payoff = tree.terminal_payoffs[node_index]
+        if payoff is not None:
+            terminal_payoff[batch_index] = np.float32(payoff)
         infoset = tree.infoset_ids[node_index]
         if infoset is not None:
             infoset_id[batch_index] = int(infoset)
@@ -124,6 +128,8 @@ def build_leaf_feature_batch(
 
     return LeafFeatureBatch(
         node_indices=node_indices,
+        node_states=node_states,
+        terminal_payoff=terminal_payoff,
         player_to_act=player_to_act_arr,
         street=street,
         pot=pot,

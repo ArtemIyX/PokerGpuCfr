@@ -67,3 +67,114 @@ def test_cpu_stub_leaf_evaluator_returns_batched_evs() -> None:
 
     assert values.ev_player0.shape == (2,)
     assert values.ev_player1.shape == (2,)
+
+
+def test_cpu_leaf_evaluator_uses_real_terminal_payouts() -> None:
+    from pokergpu.core.betting import (
+        BettingRoundState,
+        BlindStructure,
+        PlayerBet,
+        PlayerIndex,
+        PlayerStack,
+        Pot,
+        chips,
+    )
+    from pokergpu.core.board import Board
+    from pokergpu.core.cards import Card, Rank, Suit
+    from pokergpu.core.state import GameState, HandPhase, PlayerState
+
+    state = GameState(
+        board=Board.from_str("7c9hJsQdKh"),
+        players=(
+            PlayerState(
+                player=PlayerIndex(0),
+                hole_cards=(Card(Rank.ACE, Suit.SPADES), Card(Rank.ACE, Suit.HEARTS)),
+            ),
+            PlayerState(
+                player=PlayerIndex(1),
+                hole_cards=(Card(Rank.TWO, Suit.CLUBS), Card(Rank.THREE, Suit.CLUBS)),
+            ),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(900)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        phase=HandPhase.TERMINAL,
+    )
+    tree = PublicTree(
+        node_types=(NodeType.TERMINAL,),
+        is_frontier=(True,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(chips(300),),
+    )
+    batch = build_leaf_feature_batch(tree, (0,), node_states=(state,))
+
+    values = CpuStubLeafEvaluator().evaluate(batch)
+
+    assert values.ev_player0.shape == (1,)
+    assert values.ev_player1.shape == (1,)
+    assert values.ev_player0[0] == 300
+    assert values.ev_player1[0] == -300
+
+
+def test_cpu_leaf_evaluator_uses_terminal_fold_payouts() -> None:
+    from pokergpu.core.betting import (
+        BettingRoundState,
+        BlindStructure,
+        PlayerBet,
+        PlayerIndex,
+        PlayerStack,
+        Pot,
+        chips,
+    )
+    from pokergpu.core.board import Board
+    from pokergpu.core.state import GameState, HandPhase, PlayerState
+
+    state = GameState(
+        board=Board(cards=()),
+        players=(
+            PlayerState(player=PlayerIndex(0), folded=True),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(900)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(1),
+        ),
+        phase=HandPhase.TERMINAL,
+    )
+    tree = PublicTree(
+        node_types=(NodeType.TERMINAL,),
+        is_frontier=(True,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(chips(300),),
+    )
+    batch = build_leaf_feature_batch(tree, (0,), node_states=(state,))
+
+    values = CpuStubLeafEvaluator().evaluate(batch)
+
+    assert values.ev_player0[0] == 300
+    assert values.ev_player1[0] == -300

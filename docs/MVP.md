@@ -89,7 +89,7 @@ Checklist:
 Done when:
 - a heads-up postflop state produces a valid public tree every time
 
-### 4. Use the real evaluator
+### [x] 4. Use the real evaluator
 
 Checklist:
 - replace heuristic leaf values with exact evaluator-backed values

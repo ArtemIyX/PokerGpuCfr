@@ -2,33 +2,44 @@ from __future__ import annotations
 
 import numpy as np
 
+from pokergpu.core.state import HandPhase
 from .interface import LeafEvaluator
 from .types import LeafFeatureBatch, LeafValueBatch
 
 
 class CpuStubLeafEvaluator(LeafEvaluator):
     def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
+        from pokergpu.core.payouts import compute_payouts
+
         ev_p0 = np.zeros(batch.size, dtype=np.float32)
         ev_p1 = np.zeros(batch.size, dtype=np.float32)
 
         for index in range(batch.size):
-            pot = batch.pot[index]
-            board_size = np.float32(batch.board_size[index])
-            stack_gap = np.float32(batch.stack_p0[index] - batch.stack_p1[index])
-            street = np.float32(batch.street[index])
-            reach_delta = batch.reach_p0[index] - batch.reach_p1[index]
-            reach_delta += batch.reach_p2[index] * np.float32(0.0)
-            terminal_bias = np.float32(0.0 if batch.is_terminal[index] else 1.0)
-            value = (
-                np.float32(0.0001) * pot
-                + np.float32(0.01) * stack_gap
-                + np.float32(0.05) * board_size
-                + np.float32(0.02) * street
-                + np.float32(0.5) * reach_delta
-                + np.float32(0.1) * terminal_bias
+            node_state = None if batch.node_states is None else batch.node_states[index]
+            payoff = batch.terminal_payoff[index]
+            if not np.isnan(payoff):
+                ev_p0[index] = payoff
+                ev_p1[index] = -payoff
+                continue
+            if node_state is None:
+                ev_p0[index] = np.float32(0.0)
+                ev_p1[index] = np.float32(0.0)
+                continue
+            if node_state.phase not in {HandPhase.SHOWDOWN, HandPhase.TERMINAL}:
+                ev_p0[index] = np.float32(0.0)
+                ev_p1[index] = np.float32(0.0)
+                continue
+            payouts = compute_payouts(node_state)
+            payout_p0 = next(
+                (payout.amount for payout in payouts if payout.player == 0),
+                0,
             )
-            ev_p0[index] = value
-            ev_p1[index] = -value
+            payout_p1 = next(
+                (payout.amount for payout in payouts if payout.player == 1),
+                0,
+            )
+            ev_p0[index] = np.float32(payout_p0)
+            ev_p1[index] = np.float32(payout_p1)
 
         return LeafValueBatch(
             ev_player0=ev_p0,
