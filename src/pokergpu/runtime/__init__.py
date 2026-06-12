@@ -17,6 +17,8 @@ from .caching import make_warm_start_state as make_warm_start_state
 from .caching import normalize_sequence as normalize_sequence
 from .postflop import PostflopResolveResult as PostflopResolveResult
 from .postflop import PostflopResolveSpec as PostflopResolveSpec
+from .postflop import POSTFLOP_SOLVER_DEFAULT_SEED as POSTFLOP_SOLVER_DEFAULT_SEED
+from .postflop import POSTFLOP_SOLVER_VERSION as POSTFLOP_SOLVER_VERSION
 from .postflop import resolve_postflop_multi_mccfr as resolve_postflop_multi_mccfr
 from .postflop import resolve_postflop_hu as resolve_postflop_hu
 from .postflop import resolve_postflop_multi as resolve_postflop_multi
@@ -39,6 +41,8 @@ __all__ = [
     "LruCache",
     "PostflopResolveResult",
     "PostflopResolveSpec",
+    "POSTFLOP_SOLVER_DEFAULT_SEED",
+    "POSTFLOP_SOLVER_VERSION",
     "PostflopRuntimeValueNetworkConfig",
     "PostflopRuntimeValueNetworkEvaluator",
     "PublicStateFingerprint",

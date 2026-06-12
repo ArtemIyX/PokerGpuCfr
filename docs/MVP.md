@@ -33,7 +33,7 @@ Out of scope:
 
 ## Plan
 
-### 1. Lock the solver contract
+### [x] 1. Lock the solver contract
 
 Checklist:
 - define one public solve input type for a postflop heads-up spot
@@ -59,11 +59,13 @@ Checklist:
   - check
   - fold
   - call
-  - bet size 1
-  - bet size 2
-  - bet size 3
+  - bet size a (fraction of pot)
+  - bet size b (fraction of pot)
+  - bet size c (fraction of pot)
   - all-in
 - map each action family to concrete legal actions per node
+- different action set per streets
+- handel all-in correctly, not always it should be able (like do not all-in with low-equity or whatever)
 - enforce min-raise, stack, and pot constraints
 - reject illegal actions early
 - keep action ordering deterministic

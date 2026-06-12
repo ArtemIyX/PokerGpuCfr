@@ -13,6 +13,8 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board
 from pokergpu.core.state import GameState, PlayerState
 from pokergpu.runtime import (
+    POSTFLOP_SOLVER_DEFAULT_SEED,
+    POSTFLOP_SOLVER_VERSION,
     PostflopResolveSpec,
     PublicStateFingerprint,
     SolveCacheState,
@@ -54,7 +56,17 @@ def test_postflop_resolver_returns_root_strategy() -> None:
 
     assert result.root_infoset_id == 0
     assert np.isclose(float(result.root_strategy.sum()), 1.0)
+    assert result.root_action_ev_player0.shape == result.root_strategy.shape
+    assert result.root_action_ev_player1.shape == result.root_strategy.shape
     assert result.iterations == 1
+    assert result.elapsed_seconds >= 0.0
+    assert result.node_count > 0
+    assert result.leaf_count > 0
+
+
+def test_postflop_resolve_spec_has_stable_defaults() -> None:
+    assert POSTFLOP_SOLVER_DEFAULT_SEED == 0
+    assert POSTFLOP_SOLVER_VERSION == "mvp-postflop-v1"
 
 
 def test_postflop_resolver_uses_cached_warm_start() -> None:
@@ -114,13 +126,56 @@ def test_postflop_resolver_uses_cached_warm_start() -> None:
         PostflopResolveSpec(
             state=state,
             range_p0=RangeVector.uniform(),
-            range_p1=RangeVector.uniform(),
-            time_budget_sec=0.0,
-            max_depth=1,
-            max_nodes=16,
-            cache_state=cache,
-        )
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        solver_version=POSTFLOP_SOLVER_VERSION,
+        max_depth=1,
+        max_nodes=16,
+        cache_state=cache,
+    )
     )
 
     assert result.iterations == 1
     assert cache.bundle.warm_start.stats()["entries"] == 2
+
+
+def test_postflop_resolver_is_deterministic_for_same_seed() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        seed=123,
+        solver_version=POSTFLOP_SOLVER_VERSION,
+        max_depth=1,
+        max_nodes=16,
+    )
+
+    result_a = resolve_postflop_hu(spec)
+    result_b = resolve_postflop_hu(spec)
+
+    assert np.allclose(result_a.root_strategy, result_b.root_strategy)
+    assert np.allclose(result_a.root_action_ev_player0, result_b.root_action_ev_player0)
+    assert np.allclose(result_a.root_action_ev_player1, result_b.root_action_ev_player1)
+    assert result_a.root_infoset_id == result_b.root_infoset_id

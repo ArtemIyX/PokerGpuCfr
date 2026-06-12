@@ -35,6 +35,9 @@ from pokergpu.tree import NodeId, NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
 
+POSTFLOP_SOLVER_VERSION = "mvp-postflop-v1"
+POSTFLOP_SOLVER_DEFAULT_SEED = 0
+
 
 @dataclass(frozen=True, slots=True)
 class PostflopResolveSpec:
@@ -42,6 +45,8 @@ class PostflopResolveSpec:
     range_p0: RangeVector
     range_p1: RangeVector
     time_budget_sec: float
+    seed: int = POSTFLOP_SOLVER_DEFAULT_SEED
+    solver_version: str = POSTFLOP_SOLVER_VERSION
     max_depth: int = 2
     max_nodes: int = 256
     min_reach_prob: float = 0.0
@@ -53,6 +58,8 @@ class PostflopResolveResult:
     root_infoset_id: int
     root_actions: tuple[str, ...]
     root_strategy: NDArray[np.float32]
+    root_action_ev_player0: NDArray[np.float32]
+    root_action_ev_player1: NDArray[np.float32]
     root_ev_player0: float
     root_ev_player1: float
     iterations: int
@@ -151,6 +158,7 @@ def resolve_postflop_hu(
         raise ValueError("postflop resolver requires a postflop state")
 
     evaluator_impl = evaluator or default_postflop_leaf_evaluator()
+    _ = np.random.default_rng(spec.seed)
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
@@ -259,10 +267,17 @@ def resolve_postflop_hu(
     pot_scale = float(total_pot(spec.state))
     if pot_scale <= 0.0:
         pot_scale = 1.0
+    root_action_ev_player0 = np.asarray(
+        final_backward.infoset_action_values.get(root_infoset_id, np.zeros(0, dtype=np.float32)),
+        dtype=np.float32,
+    )
+    root_action_ev_player1 = -root_action_ev_player0
     return PostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
         root_strategy=root_strategy,
+        root_action_ev_player0=root_action_ev_player0,
+        root_action_ev_player1=root_action_ev_player1,
         root_ev_player0=float(final_backward.node_values_player0[0] / pot_scale),
         root_ev_player1=float(final_backward.node_values_player1[0] / pot_scale),
         iterations=iterations,
@@ -619,7 +634,7 @@ def _build_public_fingerprint(
         range_abstraction_id="private_hand_v1",
         subtree_depth_limit=spec.max_depth,
         evaluator_id=evaluator.__class__.__name__,
-        solver_version="1",
+        solver_version=spec.solver_version,
         player_count=spec.state.player_count,
         active_players=tuple(
             int(player.player) for player in spec.state.active_players
