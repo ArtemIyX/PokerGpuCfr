@@ -3,6 +3,7 @@ import pytest
 from pokergpu.core.cards import cards_from_str
 from pokergpu.eval.treys_evaluator import (
     TreysHandEvaluator,
+    evaluate_best_hand,
     evaluate_five_card_hand,
     evaluate_five_card_hands,
     evaluate_seven_card_hand,
@@ -83,6 +84,12 @@ def test_evaluator_rejects_wrong_card_count() -> None:
 
     with pytest.raises(ValueError):
         evaluator.evaluate_seven_card_hand(cards_from_str("AhKhQhJhTh9d"))
+
+
+def test_best_hand_evaluator_supports_partial_board() -> None:
+    result = evaluate_best_hand(cards_from_str("AhKhQhJhTh2d"))
+
+    assert result.class_name == "Royal Flush"
 
 
 def test_evaluator_rejects_duplicate_cards() -> None:

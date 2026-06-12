@@ -105,6 +105,42 @@ def test_compute_payouts_for_showdown_winner() -> None:
     assert payouts[1].amount == 0
 
 
+def test_compute_payouts_for_showdown_with_partial_board() -> None:
+    state = GameState(
+        board=Board.from_str("KhQhJh"),
+        players=(
+            PlayerState(
+                player=PlayerIndex(0),
+                hole_cards=(Card.from_str("Ah"), Card.from_str("Th")),
+            ),
+            PlayerState(
+                player=PlayerIndex(1),
+                hole_cards=(Card.from_str("Ad"), Card.from_str("As")),
+            ),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(150)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(100)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(100)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        phase=HandPhase.SHOWDOWN,
+        dealer=PlayerIndex(0),
+    )
+
+    payouts = compute_payouts(state)
+
+    assert payouts[0].amount == 350
+    assert payouts[1].amount == 0
+
+
 def test_compute_payouts_handles_side_pots() -> None:
     state = GameState(
         board=Board.from_str("KhQhJh2c3d"),

@@ -57,7 +57,7 @@ def compute_payouts(
         hole_cards = player.hole_cards
         if hole_cards is None:
             raise ValueError("showdown contender must have hole cards")
-        scores[player.player] = evaluator_instance.evaluate_seven_card_hand(
+        scores[player.player] = evaluator_instance.evaluate_best_hand(
             hole_cards + state.board.cards
         ).score
 

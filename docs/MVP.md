@@ -156,19 +156,7 @@ Checklist:
 Done when:
 - GPU accelerates real leaf work, not placeholder math
 
-### 9. Add cache and warm start
-
-Checklist:
-- key cache entries by public state fingerprint
-- store warm-start regrets and strategy sums
-- reload warm starts before solving
-- blend cached state deterministically
-- invalidate cache on solver version changes
-
-Done when:
-- repeated solves of the same spot get faster
-
-### [x] 10. Validate the solver
+### [x] 9. Validate the solver
 
 Checklist:
 - test heads-up postflop on several boards
@@ -186,16 +174,16 @@ Done when:
 ## MVP Acceptance Criteria
 
 The MVP is done when all of these are true:
-- heads-up postflop spots solve end to end
-- action menu is limited and legal
-- real evaluator is used
-- dead cards are handled correctly
-- depth limit works
-- CFR+ runs
-- root strategy is returned
-- root EV is returned
-- action EVs are returned
-- results are deterministic for the same seed and state
++ heads-up postflop spots solve end to end
++ action menu is limited and legal
++ real evaluator is used
++ dead cards are handled correctly
++ depth limit works
++ CFR+ runs
++ root strategy is returned
++ root EV is returned
++ action EVs are returned
++ results are deterministic for the same seed and state
 
 ## Next Phase After MVP
 
