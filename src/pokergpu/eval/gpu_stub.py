@@ -26,6 +26,8 @@ class GpuStubLeafEvaluator(LeafEvaluator):
             stack_gap = tensors["stack_p0"] - tensors["stack_p1"]
             street = tensors["street"].to(dtype=torch.float32)
             reach_delta = tensors["reach_p0"] - tensors["reach_p1"]
+            if "reach_p2" in tensors:
+                reach_delta = reach_delta + tensors["reach_p2"] * 0.0
             terminal_bias = (~tensors["is_terminal"]).to(dtype=torch.float32) * 0.1
             ev_p0 = (
                 0.0001 * pot
@@ -39,6 +41,7 @@ class GpuStubLeafEvaluator(LeafEvaluator):
             return LeafValueBatch(
                 ev_player0=ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
                 ev_player1=ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
+                ev_player2=(-(ev_p0 + ev_p1)).detach().to("cpu", dtype=torch.float32).numpy(),
             )
         except Exception:
             return self._cpu_fallback.evaluate(batch)

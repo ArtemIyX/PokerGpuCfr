@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from dataclasses import field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,17 +15,46 @@ from pokergpu.tree import NodeId, NodeType, PublicTree
 from .infosets import InfosetStore
 
 
+def _is_player_node(node_type: NodeType) -> bool:
+    return node_type in {NodeType.PLAYER0, NodeType.PLAYER1, NodeType.PLAYER2}
+
+
+def _player_index_for_node_type(node_type: NodeType) -> int | None:
+    if node_type is NodeType.PLAYER0:
+        return 0
+    if node_type is NodeType.PLAYER1:
+        return 1
+    if node_type is NodeType.PLAYER2:
+        return 2
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class ForwardPassResult:
     player0_reach: NDArray[np.float32]
     player1_reach: NDArray[np.float32]
+    player2_reach: NDArray[np.float32] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class BackwardPassResult:
     node_values_player0: NDArray[np.float32]
     node_values_player1: NDArray[np.float32]
-    infoset_action_values: dict[int, NDArray[np.float32]]
+    node_values_player2: NDArray[np.float32] | None = None
+    infoset_action_values: dict[int, NDArray[np.float32]] = field(default_factory=dict)
+
+    @property
+    def node_values(self) -> NDArray[np.float32]:
+        return np.stack(
+            (
+                self.node_values_player0,
+                self.node_values_player1,
+                self.node_values_player2
+                if self.node_values_player2 is not None
+                else np.zeros_like(self.node_values_player0),
+            ),
+            axis=0,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +77,7 @@ def build_leaf_feature_batch(
     player_to_act: int | None = None,
     reach_p0: NDArray[np.float32] | None = None,
     reach_p1: NDArray[np.float32] | None = None,
+    reach_p2: NDArray[np.float32] | None = None,
 ) -> LeafFeatureBatch:
     node_indices = tuple(node_indices)
     size = len(node_indices)
@@ -58,6 +89,7 @@ def build_leaf_feature_batch(
     board_size = np.zeros(size, dtype=np.int32)
     reach_p0_arr = np.zeros(size, dtype=np.float32)
     reach_p1_arr = np.zeros(size, dtype=np.float32)
+    reach_p2_arr = np.zeros(size, dtype=np.float32)
     is_terminal = np.zeros(size, dtype=np.bool_)
     is_frontier = np.zeros(size, dtype=np.bool_)
     infoset_id = np.full(size, -1, dtype=np.int32)
@@ -87,6 +119,8 @@ def build_leaf_feature_batch(
             reach_p0_arr[batch_index] = np.float32(reach_p0[node_index])
         if reach_p1 is not None:
             reach_p1_arr[batch_index] = np.float32(reach_p1[node_index])
+        if reach_p2 is not None:
+            reach_p2_arr[batch_index] = np.float32(reach_p2[node_index])
 
     return LeafFeatureBatch(
         node_indices=node_indices,
@@ -98,6 +132,7 @@ def build_leaf_feature_batch(
         board_size=board_size,
         reach_p0=reach_p0_arr,
         reach_p1=reach_p1_arr,
+        reach_p2=reach_p2_arr,
         is_terminal=is_terminal,
         is_frontier=is_frontier,
         infoset_id=infoset_id,
@@ -109,10 +144,18 @@ def scatter_leaf_values(
     values: LeafValueBatch,
     node_values_player0: NDArray[np.float32],
     node_values_player1: NDArray[np.float32],
+    node_values_player2: NDArray[np.float32] | None = None,
 ) -> None:
     for batch_index, node_index in enumerate(node_indices):
         node_values_player0[node_index] = values.ev_player0[batch_index]
         node_values_player1[node_index] = values.ev_player1[batch_index]
+        if node_values_player2 is not None:
+            if values.ev_player2 is not None:
+                node_values_player2[node_index] = values.ev_player2[batch_index]
+            else:
+                node_values_player2[node_index] = -(
+                    values.ev_player0[batch_index] + values.ev_player1[batch_index]
+                )
 
 
 def evaluate_frontier_nodes(
@@ -145,12 +188,15 @@ def compute_reach_probabilities(
     *,
     root_player0_reach: float = 1.0,
     root_player1_reach: float = 1.0,
+    root_player2_reach: float = 1.0,
     min_reach_prob: float = 0.0,
 ) -> ForwardPassResult:
     player0_reach = np.zeros(tree.node_count, dtype=np.float32)
     player1_reach = np.zeros(tree.node_count, dtype=np.float32)
+    player2_reach = np.zeros(tree.node_count, dtype=np.float32)
     player0_reach[0] = np.float32(root_player0_reach)
     player1_reach[0] = np.float32(root_player1_reach)
+    player2_reach[0] = np.float32(root_player2_reach)
 
     for node_index in range(tree.node_count):
         node_type = tree.node_types[node_index]
@@ -170,6 +216,7 @@ def compute_reach_probabilities(
                 chance_prob = np.float32(link.chance_prob)
                 player0_reach[child_index] += player0_reach[node_index] * chance_prob
                 player1_reach[child_index] += player1_reach[node_index] * chance_prob
+                player2_reach[child_index] += player2_reach[node_index] * chance_prob
             continue
 
         infoset_id = tree.infoset_ids[node_index]
@@ -183,13 +230,24 @@ def compute_reach_probabilities(
             if node_type is NodeType.PLAYER0:
                 player0_reach[child_index] += player0_reach[node_index] * action_prob
                 player1_reach[child_index] += player1_reach[node_index]
-            else:
+                player2_reach[child_index] += player2_reach[node_index]
+            elif node_type is NodeType.PLAYER1:
                 player0_reach[child_index] += player0_reach[node_index]
                 player1_reach[child_index] += player1_reach[node_index] * action_prob
+                player2_reach[child_index] += player2_reach[node_index]
+            elif node_type is NodeType.PLAYER2:
+                player0_reach[child_index] += player0_reach[node_index]
+                player1_reach[child_index] += player1_reach[node_index]
+                player2_reach[child_index] += player2_reach[node_index] * action_prob
+            else:
+                player0_reach[child_index] += player0_reach[node_index]
+                player1_reach[child_index] += player1_reach[node_index]
+                player2_reach[child_index] += player2_reach[node_index]
 
     return ForwardPassResult(
         player0_reach=player0_reach,
         player1_reach=player1_reach,
+        player2_reach=player2_reach,
     )
 
 
@@ -199,6 +257,7 @@ def compute_reach_probabilities_parallel(
     *,
     root_player0_reach: float = 1.0,
     root_player1_reach: float = 1.0,
+    root_player2_reach: float = 1.0,
     min_reach_prob: float = 0.0,
     max_workers: int = 1,
 ) -> ForwardPassResult:
@@ -210,6 +269,7 @@ def compute_reach_probabilities_parallel(
             store,
             root_player0_reach=root_player0_reach,
             root_player1_reach=root_player1_reach,
+            root_player2_reach=root_player2_reach,
             min_reach_prob=min_reach_prob,
         )
 
@@ -263,6 +323,7 @@ def compute_counterfactual_values(
 ) -> BackwardPassResult:
     node_values_player0 = np.zeros(tree.node_count, dtype=np.float32)
     node_values_player1 = np.zeros(tree.node_count, dtype=np.float32)
+    node_values_player2 = np.zeros(tree.node_count, dtype=np.float32)
     infoset_action_values: dict[int, NDArray[np.float32]] = {}
 
     terminal_p0 = (
@@ -272,10 +333,12 @@ def compute_counterfactual_values(
     )
     leaf_p0 = np.zeros(tree.node_count, dtype=np.float32)
     leaf_p1 = np.zeros(tree.node_count, dtype=np.float32)
+    leaf_p2 = np.zeros(tree.node_count, dtype=np.float32)
     if leaf_values_player0 is not None:
         leaf_p0[:] = np.asarray(leaf_values_player0, dtype=np.float32)
     if leaf_values_player1 is not None:
         leaf_p1[:] = np.asarray(leaf_values_player1, dtype=np.float32)
+    leaf_p2[:] = -(leaf_p0 + leaf_p1)
     if leaf_values_player1 is None:
         leaf_p1[:] = -leaf_p0
 
@@ -293,6 +356,7 @@ def compute_counterfactual_values(
                 leaf_values,
                 leaf_p0,
                 leaf_p1,
+                node_values_player2,
             )
 
     for node_index in range(tree.node_count - 1, -1, -1):
@@ -300,10 +364,12 @@ def compute_counterfactual_values(
         if node_type is NodeType.TERMINAL:
             node_values_player0[node_index] = terminal_p0[node_index]
             node_values_player1[node_index] = -terminal_p0[node_index]
+            node_values_player2[node_index] = 0.0
             continue
         if node_type is NodeType.LEAF or tree.is_frontier[node_index]:
             node_values_player0[node_index] = leaf_p0[node_index]
             node_values_player1[node_index] = leaf_p1[node_index]
+            node_values_player2[node_index] = leaf_p2[node_index]
             continue
 
         links = tree.child_links(NodeId(node_index))
@@ -313,6 +379,10 @@ def compute_counterfactual_values(
         )
         child_values_p1 = np.array(
             [node_values_player1[int(link.child)] for link in links],
+            dtype=np.float32,
+        )
+        child_values_p2 = np.array(
+            [node_values_player2[int(link.child)] for link in links],
             dtype=np.float32,
         )
 
@@ -331,6 +401,9 @@ def compute_counterfactual_values(
             node_values_player1[node_index] = np.float32(
                 np.sum(probs * child_values_p1, dtype=np.float64)
             )
+            node_values_player2[node_index] = np.float32(
+                np.sum(probs * child_values_p2, dtype=np.float64)
+            )
             continue
 
         infoset_id = tree.infoset_ids[node_index]
@@ -346,7 +419,10 @@ def compute_counterfactual_values(
             node_values_player1[node_index] = np.float32(
                 np.sum(strategy * child_values_p1[: strategy.shape[0]], dtype=np.float64)
             )
-        else:
+            node_values_player2[node_index] = np.float32(
+                np.sum(strategy * child_values_p2[: strategy.shape[0]], dtype=np.float64)
+            )
+        elif node_type is NodeType.PLAYER1:
             infoset_action_values[int(infoset_id)] = child_values_p1[: strategy.shape[0]]
             node_values_player0[node_index] = np.float32(
                 np.sum(strategy * child_values_p0[: strategy.shape[0]], dtype=np.float64)
@@ -354,10 +430,25 @@ def compute_counterfactual_values(
             node_values_player1[node_index] = np.float32(
                 np.sum(strategy * child_values_p1[: strategy.shape[0]], dtype=np.float64)
             )
+            node_values_player2[node_index] = np.float32(
+                np.sum(strategy * child_values_p2[: strategy.shape[0]], dtype=np.float64)
+            )
+        else:
+            infoset_action_values[int(infoset_id)] = child_values_p2[: strategy.shape[0]]
+            node_values_player0[node_index] = np.float32(
+                np.sum(strategy * child_values_p0[: strategy.shape[0]], dtype=np.float64)
+            )
+            node_values_player1[node_index] = np.float32(
+                np.sum(strategy * child_values_p1[: strategy.shape[0]], dtype=np.float64)
+            )
+            node_values_player2[node_index] = np.float32(
+                np.sum(strategy * child_values_p2[: strategy.shape[0]], dtype=np.float64)
+            )
 
     return BackwardPassResult(
         node_values_player0=node_values_player0,
         node_values_player1=node_values_player1,
+        node_values_player2=node_values_player2,
         infoset_action_values=infoset_action_values,
     )
 
@@ -393,6 +484,7 @@ def compute_counterfactual_values_parallel(
     levels = build_tree_levels(tree)
     node_values_player0 = np.zeros(tree.node_count, dtype=np.float32)
     node_values_player1 = np.zeros(tree.node_count, dtype=np.float32)
+    node_values_player2 = np.zeros(tree.node_count, dtype=np.float32)
     infoset_action_values: dict[int, NDArray[np.float32]] = {}
 
     terminal_p0 = (
@@ -423,6 +515,7 @@ def compute_counterfactual_values_parallel(
                 leaf_values,
                 leaf_p0,
                 leaf_p1,
+                node_values_player2,
             )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -435,6 +528,7 @@ def compute_counterfactual_values_parallel(
                         node_index,
                         node_values_player0,
                         node_values_player1,
+                        node_values_player2,
                         terminal_p0,
                         leaf_p0,
                         leaf_p1,
@@ -452,6 +546,7 @@ def compute_counterfactual_values_parallel(
     return BackwardPassResult(
         node_values_player0=node_values_player0,
         node_values_player1=node_values_player1,
+        node_values_player2=node_values_player2,
         infoset_action_values=infoset_action_values,
     )
 
@@ -464,8 +559,8 @@ def update_regrets_from_traversal(
     active_player: int,
     strategy_weight: float = 1.0,
 ) -> RegretUpdateResult:
-    if active_player not in {0, 1}:
-        raise ValueError("active_player must be 0 or 1")
+    if active_player not in {0, 1, 2}:
+        raise ValueError("active_player must be 0, 1, or 2")
 
     infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
     updated_infosets: list[int] = []
@@ -474,20 +569,21 @@ def update_regrets_from_traversal(
             continue
         infoset_index = int(infoset_id)
         node_type = tree.node_types[node_index]
-        if active_player == 0 and node_type is not NodeType.PLAYER0:
-            continue
-        if active_player == 1 and node_type is not NodeType.PLAYER1:
+        if _player_index_for_node_type(node_type) != active_player:
             continue
 
         action_values = backward_pass.infoset_action_values[infoset_index]
         if action_values.size == 0:
             continue
         strategy = store.current_strategy(infoset_index)
-        if strategy.shape[0] != action_values.shape[0]:
-            action_values = action_values[: strategy.shape[0]]
+        limit = min(strategy.shape[0], action_values.shape[0])
+        if limit == 0:
+            continue
+        strategy = strategy[:limit]
+        action_values = action_values[:limit]
         infoset_value = np.float32(np.sum(strategy * action_values, dtype=np.float64))
-        store.regrets_for_infoset(infoset_index)[:] += action_values - infoset_value
-        store.strategy_sums_for_infoset(infoset_index)[:] += strategy * np.float32(
+        store.regrets_for_infoset(infoset_index)[:limit] += action_values - infoset_value
+        store.strategy_sums_for_infoset(infoset_index)[:limit] += strategy * np.float32(
             strategy_weight
         )
         infoset_values[infoset_index] = infoset_value
@@ -585,6 +681,8 @@ def _active_infoset_indices(tree: PublicTree, active_player: int) -> tuple[int, 
             continue
         if active_player == 1 and node_type is not NodeType.PLAYER1:
             continue
+        if active_player == 2 and node_type is not NodeType.PLAYER2:
+            continue
         infoset_indices.append(int(infoset_id))
     return tuple(infoset_indices)
 
@@ -607,6 +705,11 @@ def _compute_chunk_updates(
     for infoset_index in infoset_indices:
         action_values = backward_pass.infoset_action_values[infoset_index]
         strategy = store.current_strategy(infoset_index)
+        limit = min(strategy.shape[0], action_values.shape[0])
+        if limit == 0:
+            continue
+        strategy = strategy[:limit]
+        action_values = action_values[:limit]
         infoset_value = np.float32(np.sum(strategy * action_values, dtype=np.float64))
         regret_updates[infoset_index] = action_values - infoset_value
         strategy_updates[infoset_index] = strategy * np.float32(strategy_weight)
@@ -760,6 +863,7 @@ def _backward_node_update(
     node_index: int,
     node_values_player0: NDArray[np.float32],
     node_values_player1: NDArray[np.float32],
+    node_values_player2: NDArray[np.float32],
     terminal_p0: NDArray[np.float32],
     leaf_p0: NDArray[np.float32],
     leaf_p1: NDArray[np.float32],

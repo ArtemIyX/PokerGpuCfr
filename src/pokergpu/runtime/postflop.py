@@ -21,6 +21,7 @@ from pokergpu.core.betting import Chips
 from pokergpu.core.board import Street
 from pokergpu.core.cards import Card
 from pokergpu.core.payouts import compute_payouts
+from pokergpu.core.payouts import total_pot
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import LeafEvaluator
 from pokergpu.runtime.cache import WarmStartState
@@ -107,7 +108,7 @@ def resolve_postflop_hu(
         if warm_start is not None:
             _apply_warm_start(store, warm_start)
 
-    root_range_p0, root_range_p1, _, _ = _apply_root_ranges(
+    root_range_p0, root_range_p1, root_range_p2, _ = _apply_root_ranges(
         spec.state,
         spec.range_p0,
         spec.range_p1,
@@ -154,6 +155,13 @@ def resolve_postflop_hu(
             active_player=1,
             strategy_weight=root_range_p1.total_weight(),
         )
+        update_regrets_from_traversal(
+            tree.tree,
+            store,
+            backward,
+            active_player=2,
+            strategy_weight=root_range_p2.total_weight(),
+        )
         iterations += 1
         if spec.time_budget_sec <= 0.0:
             break
@@ -180,12 +188,15 @@ def resolve_postflop_hu(
         )
 
     root_strategy = store.average_strategy(0)
+    pot_scale = float(total_pot(spec.state))
+    if pot_scale <= 0.0:
+        pot_scale = 1.0
     return PostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
         root_strategy=root_strategy,
-        root_ev_player0=float(final_backward.node_values_player0[0]),
-        root_ev_player1=float(final_backward.node_values_player1[0]),
+        root_ev_player0=float(final_backward.node_values_player0[0] / pot_scale),
+        root_ev_player1=float(final_backward.node_values_player1[0] / pot_scale),
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         node_count=tree.tree.node_count,
@@ -206,6 +217,7 @@ def resolve_postflop_multi(
     if spec.state.current_street is Street.PREFLOP:
         raise ValueError("multiway resolver requires a postflop state")
 
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
@@ -221,6 +233,10 @@ def resolve_postflop_multi(
         raise ValueError("root node must be a player infoset")
     root_infoset_id = int(root_infoset)
     root_actions = tuple(_format_action(action) for action in tree.actions_by_node[0])
+    action_counts = _build_infoset_action_counts(tree.tree, tree.actions_by_node)
+    if not action_counts:
+        raise ValueError("multiway resolver requires at least one player infoset")
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts(action_counts))
     leaf_count = int(np.count_nonzero(tree.tree.is_frontier))
     if leaf_count == 0:
         raise ValueError("multiway resolver requires frontier nodes")
@@ -239,12 +255,90 @@ def resolve_postflop_multi(
             leaf_count=hu.leaf_count,
         )
 
-    root_ev = _coalition_root_ev(spec, tree, evaluator)
+    root_range_p0, root_range_p1, root_range_p2, _ = _apply_root_ranges(
+        spec.state,
+        spec.range_p0,
+        spec.range_p1,
+    )
+    terminal_values_player0 = np.array(
+        [
+            np.float32(_terminal_value_player0(node_state))
+            for node_state in tree.node_states
+        ],
+        dtype=np.float32,
+    )
+
+    deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
+    iterations = 0
+    while time.monotonic() < deadline or iterations == 0:
+        forward = compute_reach_probabilities(
+            tree.tree,
+            store,
+            root_player0_reach=root_range_p0.total_weight(),
+            root_player1_reach=root_range_p1.total_weight(),
+            min_reach_prob=spec.min_reach_prob,
+        )
+        backward = compute_counterfactual_values(
+            tree.tree,
+            store,
+            node_states=tree.node_states,
+            reach_p0=forward.player0_reach,
+            reach_p1=forward.player1_reach,
+            terminal_values_player0=terminal_values_player0,
+            evaluator=evaluator_impl,
+        )
+        update_regrets_from_traversal(
+            tree.tree,
+            store,
+            backward,
+            active_player=0,
+            strategy_weight=root_range_p0.total_weight(),
+        )
+        update_regrets_from_traversal(
+            tree.tree,
+            store,
+            backward,
+            active_player=1,
+            strategy_weight=root_range_p1.total_weight(),
+        )
+        update_regrets_from_traversal(
+            tree.tree,
+            store,
+            backward,
+            active_player=2,
+            strategy_weight=root_range_p2.total_weight(),
+        )
+        iterations += 1
+        if spec.time_budget_sec <= 0.0:
+            break
+
+    final_backward = compute_counterfactual_values(
+        tree.tree,
+        store,
+        node_states=tree.node_states,
+        reach_p0=forward.player0_reach,
+        reach_p1=forward.player1_reach,
+        terminal_values_player0=terminal_values_player0,
+        evaluator=evaluator_impl,
+    )
+    root_ev = np.zeros(spec.state.player_count, dtype=np.float32)
+    pot_scale = float(total_pot(spec.state))
+    if pot_scale <= 0.0:
+        pot_scale = 1.0
+    root_ev[0] = float(final_backward.node_values_player0[0] / pot_scale)
+    if spec.state.player_count > 1:
+        root_ev[1] = float(final_backward.node_values_player1[0] / pot_scale)
+    if spec.state.player_count > 2:
+        node_values_player2 = final_backward.node_values_player2
+        root_ev[2] = float(
+            (node_values_player2[0] if node_values_player2 is not None else 0.0)
+            / pot_scale
+        )
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
         root_ev=root_ev,
-        iterations=1,
+        iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         node_count=tree.tree.node_count,
         leaf_count=leaf_count,
@@ -255,7 +349,8 @@ def _apply_root_ranges(
     state: GameState,
     range_p0: RangeVector,
     range_p1: RangeVector,
-) -> tuple[RangeVector, RangeVector, float, float]:
+    range_p2: RangeVector | None = None,
+) -> tuple[RangeVector, RangeVector, RangeVector, float]:
     dead_cards: list[Card] = list(state.board.cards)
     for player in state.players:
         if player.hole_cards is not None:
@@ -270,7 +365,8 @@ def _apply_root_ranges(
         )
     masked_p0 = raw_masked_p0.normalized()
     masked_p1 = raw_masked_p1.normalized()
-    return masked_p0, masked_p1, weight_p0, weight_p1
+    masked_p2 = range_p2.masked(dead_cards).normalized() if range_p2 is not None else masked_p0
+    return masked_p0, masked_p1, masked_p2, weight_p0
 
 
 def _build_infoset_action_counts(
@@ -377,4 +473,7 @@ def _coalition_root_ev(
     if active_count > 2:
         remainder = -float(np.sum(root_ev[:2], dtype=np.float64))
         root_ev[2:] = np.float32(remainder / float(active_count - 2))
-    return root_ev
+    pot_scale = float(total_pot(spec.state))
+    if pot_scale <= 0.0:
+        return root_ev
+    return np.asarray(root_ev / np.float32(pot_scale), dtype=np.float32)

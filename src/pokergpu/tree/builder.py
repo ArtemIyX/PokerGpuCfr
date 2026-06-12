@@ -143,7 +143,7 @@ def _node_type_for_state(state: GameState, *, depth: int, max_depth: int) -> Nod
         return NodeType.TERMINAL
     if depth >= max_depth or state.phase is HandPhase.SHOWDOWN:
         return NodeType.LEAF
-    return NodeType.PLAYER0 if state.betting_round.to_act == 0 else NodeType.PLAYER1
+    return _node_type_for_player(int(state.betting_round.to_act))
 
 
 def _is_frontier_node(state: GameState, *, depth: int, max_depth: int) -> bool:
@@ -160,7 +160,7 @@ def _infoset_id_for_state(
     node_type: NodeType,
 ) -> InfosetId | None:
     if (
-        node_type in {NodeType.PLAYER0, NodeType.PLAYER1}
+        node_type in {NodeType.PLAYER0, NodeType.PLAYER1, NodeType.PLAYER2}
         and state.phase is HandPhase.IN_PROGRESS
     ):
         return InfosetId(node_index)
@@ -179,3 +179,13 @@ def _terminal_payoff_for_state(state: GameState) -> Chips | None:
         )
         return Chips(player0_payout - other_payouts)
     return None
+
+
+def _node_type_for_player(player: int) -> NodeType:
+    if player == 0:
+        return NodeType.PLAYER0
+    if player == 1:
+        return NodeType.PLAYER1
+    if player == 2:
+        return NodeType.PLAYER2
+    raise ValueError("unsupported player seat")

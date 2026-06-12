@@ -17,6 +17,7 @@ class LeafFeature:
     board_size: int
     reach_p0: float
     reach_p1: float
+    reach_p2: float
     is_terminal: bool
     is_frontier: bool
     infoset_id: int | None
@@ -33,6 +34,7 @@ class LeafFeatureBatch:
     board_size: NDArray[np.int32]
     reach_p0: NDArray[np.float32]
     reach_p1: NDArray[np.float32]
+    reach_p2: NDArray[np.float32]
     is_terminal: NDArray[np.bool_]
     is_frontier: NDArray[np.bool_]
     infoset_id: NDArray[np.int32]
@@ -46,7 +48,10 @@ class LeafFeatureBatch:
 class LeafValueBatch:
     ev_player0: NDArray[np.float32]
     ev_player1: NDArray[np.float32]
+    ev_player2: NDArray[np.float32] | None = None
 
     def __post_init__(self) -> None:
         if self.ev_player0.shape != self.ev_player1.shape:
+            raise ValueError("leaf EV arrays must have matching shapes")
+        if self.ev_player2 is not None and self.ev_player2.shape != self.ev_player0.shape:
             raise ValueError("leaf EV arrays must have matching shapes")

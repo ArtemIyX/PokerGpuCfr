@@ -55,7 +55,7 @@ def is_legal_action(
             return False
         minimum_bet = state.blinds.big_blind
         maximum_bet = player_stack(state, state.to_act)
-        return minimum_bet <= action.amount <= maximum_bet
+        return action.amount == maximum_bet or minimum_bet <= action.amount <= maximum_bet
     if action.action_type is ActionType.RAISE:
         if action.amount is None or not can_raise(state):
             return False

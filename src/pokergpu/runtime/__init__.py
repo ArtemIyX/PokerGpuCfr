@@ -19,6 +19,7 @@ from .postflop import PostflopResolveResult as PostflopResolveResult
 from .postflop import PostflopResolveSpec as PostflopResolveSpec
 from .postflop import resolve_postflop_hu as resolve_postflop_hu
 from .postflop import resolve_postflop_multi as resolve_postflop_multi
+from .gpu_postflop import resolve_postflop_gpu as resolve_postflop_gpu
 from .value_network import (
     PostflopRuntimeValueNetworkConfig as PostflopRuntimeValueNetworkConfig,
 )
@@ -53,5 +54,6 @@ __all__ = [
     "normalize_sequence",
     "resolve_postflop_hu",
     "resolve_postflop_multi",
+    "resolve_postflop_gpu",
     "stable_hash",
 ]

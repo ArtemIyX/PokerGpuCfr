@@ -25,7 +25,9 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board, Street
 from pokergpu.core.cards import make_deck
 from pokergpu.core.state import GameState, PlayerState
-from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_hu, resolve_postflop_multi
+from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_multi
+from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
+from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +66,7 @@ def main() -> int:
     started = time.perf_counter()
     if args.players == 2:
         _print_phase("gpu-cfr", 3, 4, started, args.device)
-        result = resolve_postflop_hu(spec)
+        result = resolve_postflop_gpu(spec)
         row = SolveRow(
             label="solve",
             elapsed_s=time.perf_counter() - started,
@@ -165,7 +167,7 @@ def print_summary(args: argparse.Namespace, state: GameState, row: SolveRow) -> 
         ("nodes", str(row.nodes)),
         ("leaves", str(row.leaves)),
         ("depth", str(row.depth)),
-        ("root_ev", row.root_ev),
+        ("root_ev_pot", row.root_ev),
         ("root_actions", row.root_actions),
     ]
     width = max(len(key) for key, _value in rows)
