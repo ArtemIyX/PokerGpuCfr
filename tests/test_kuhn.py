@@ -101,11 +101,15 @@ def test_kuhn_expected_action_utilities_are_non_zero_for_root_infosets() -> None
 
 @pytest.mark.benchmark_suite
 def test_kuhn_cfr_average_strategy_value_approaches_known_game_value() -> None:
-    store = train_kuhn_cfr(2000)
+    smaller = train_kuhn_cfr(50)
+    larger = train_kuhn_cfr(2000)
 
-    value = expected_game_value_for_average_strategy(store)
+    value_small = expected_game_value_for_average_strategy(smaller)
+    value_large = expected_game_value_for_average_strategy(larger)
+    baseline = -1.0 / 18.0
 
-    assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
+    assert abs(value_large - baseline) <= abs(value_small - baseline)
+    assert math.isclose(value_large, baseline, rel_tol=0.0, abs_tol=0.08)
 
 
 @pytest.mark.benchmark_suite
@@ -121,17 +125,25 @@ def test_kuhn_cfr_root_betting_profile_matches_sanity_pattern() -> None:
 
 @pytest.mark.benchmark_suite
 def test_kuhn_cfr_plus_average_strategy_value_approaches_known_game_value() -> None:
-    store = train_kuhn_cfr(2000, variant=CFRVariant.CFR_PLUS)
+    smaller = train_kuhn_cfr(50, variant=CFRVariant.CFR_PLUS)
+    larger = train_kuhn_cfr(2000, variant=CFRVariant.CFR_PLUS)
 
-    value = expected_game_value_for_average_strategy(store)
+    value_small = expected_game_value_for_average_strategy(smaller)
+    value_large = expected_game_value_for_average_strategy(larger)
+    baseline = -1.0 / 18.0
 
-    assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
+    assert abs(value_large - baseline) <= abs(value_small - baseline)
+    assert math.isclose(value_large, baseline, rel_tol=0.0, abs_tol=0.08)
 
 
 @pytest.mark.benchmark_suite
 def test_kuhn_dcfr_average_strategy_value_approaches_known_game_value() -> None:
-    store = train_kuhn_cfr(2000, variant=CFRVariant.DCFR)
+    smaller = train_kuhn_cfr(50, variant=CFRVariant.DCFR)
+    larger = train_kuhn_cfr(2000, variant=CFRVariant.DCFR)
 
-    value = expected_game_value_for_average_strategy(store)
+    value_small = expected_game_value_for_average_strategy(smaller)
+    value_large = expected_game_value_for_average_strategy(larger)
+    baseline = -1.0 / 18.0
 
-    assert math.isclose(value, -1.0 / 18.0, rel_tol=0.0, abs_tol=0.08)
+    assert abs(value_large - baseline) <= abs(value_small - baseline)
+    assert math.isclose(value_large, baseline, rel_tol=0.0, abs_tol=0.08)
