@@ -51,6 +51,7 @@ from .eval import (
 from .runtime import PostflopResolveSpec, resolve_postflop_hu
 from .value_network import (
     DatasetManifestEntry,
+    DatasetPackManifestEntry,
     DatasetSplitRule,
     EquityEvalConfig,
     FeatureNormalizer,
@@ -705,8 +706,6 @@ def _print_dataset_sanity_report(args: _DatasetSanityReportArgs) -> None:
         samples: list[ValueDatasetSample] = []
         for pack_path in pack_paths:
             samples.extend(load_value_sample_pack(pack_path))
-    else:
-        samples = [load_value_sample(args.dataset_dir / entry.path) for entry in entries]
     feature_counts = sorted({int(entry.feature_count) for entry in entries})
     label_shapes = sorted({tuple(entry.label_shape) for entry in entries})
     feature_normalizer = (
@@ -1243,7 +1242,7 @@ def _write_packed_samples(
     output_dir: Path,
     entries: list[DatasetManifestEntry],
     samples: list[ValueDatasetSample],
-    pack_prefix: str = "",
+    pack_prefix: str | None = None,
 ) -> None:
     by_split: dict[str, list[ValueDatasetSample]] = {}
     for entry, sample in zip(entries, samples, strict=True):

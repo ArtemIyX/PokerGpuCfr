@@ -23,8 +23,8 @@ from .target import (
 
 __all__ = [
     "DATASET_VERSION",
-    "DatasetManifestEntry",
-    "DatasetManifestEntryPayload",
+    "DatasetPackManifestEntry",
+    "DatasetPackManifestEntryPayload",
     "DatasetSplitRule",
     "FeatureNormalizer",
     "FeatureNormalizerPayload",
@@ -34,7 +34,7 @@ __all__ = [
     "ValueFeatureBatch",
     "curated_solver_spots",
     "CuratedSpot",
-    "build_dataset_manifest_entry",
+    "build_dataset_pack_entry",
     "export_dataset_sample",
     "export_value_sample",
     "fit_feature_normalizer",
@@ -65,14 +65,15 @@ class LabelNormalizerPayload(TypedDict):
     std: list[float]
 
 
-class DatasetManifestEntryPayload(TypedDict):
+class DatasetPackManifestEntryPayload(TypedDict):
     sample_id: str
+    pack_path: str
     split: str
     path: str
+    sample_count: int
     feature_count: int
     label_shape: list[int]
     metadata: dict[str, object]
-    pack_path: str
     pack_index: int
 
 
@@ -242,43 +243,47 @@ class LabelNormalizer:
 
 
 @dataclass(frozen=True, slots=True)
-class DatasetManifestEntry:
-    sample_id: str
-    split: str
-    path: str
-    feature_count: int
-    label_shape: tuple[int, int]
-    metadata: dict[str, object] | None = None
+class DatasetPackManifestEntry:
     pack_path: str = ""
+    split: str = ""
+    sample_count: int = 0
+    feature_count: int = 0
+    label_shape: tuple[int, int] = (0, 0)
+    sample_id: str = ""
+    path: str = ""
+    metadata: dict[str, object] | None = None
     pack_index: int = 0
 
-    def to_dict(self) -> DatasetManifestEntryPayload:
+    def to_dict(self) -> DatasetPackManifestEntryPayload:
         return {
             "sample_id": self.sample_id,
+            "pack_path": self.pack_path,
             "split": self.split,
             "path": self.path,
+            "sample_count": self.sample_count,
             "feature_count": self.feature_count,
-            "label_shape": list(self.label_shape),
+            "label_shape": [self.label_shape[0], self.label_shape[1]],
             "metadata": dict(self.metadata or {}),
-            "pack_path": self.pack_path,
             "pack_index": self.pack_index,
         }
 
     @classmethod
-    def from_dict(cls, payload: DatasetManifestEntryPayload) -> DatasetManifestEntry:
+    def from_dict(cls, payload: DatasetPackManifestEntryPayload) -> DatasetPackManifestEntry:
         shape = payload["label_shape"]
-        if len(shape) != 2:
-            raise ValueError("label shape must contain two dimensions")
         return cls(
-            sample_id=payload["sample_id"],
+            sample_id=str(payload.get("sample_id", "")),
+            pack_path=payload["pack_path"],
             split=payload["split"],
-            path=payload["path"],
-            feature_count=payload["feature_count"],
-            label_shape=(shape[0], shape[1]),
+            path=str(payload.get("path", "")),
+            sample_count=int(payload["sample_count"]),
+            feature_count=int(payload["feature_count"]),
+            label_shape=(int(shape[0]), int(shape[1])),
             metadata=dict(payload.get("metadata", {})),
-            pack_path=str(payload.get("pack_path", "")),
             pack_index=int(payload.get("pack_index", 0)),
         )
+
+
+DatasetManifestEntry = DatasetPackManifestEntry
 
 
 def _sample_hash(sample_id: str) -> int:
@@ -368,9 +373,9 @@ def save_value_sample_pack(samples: list[ValueDatasetSample], path: Path) -> Non
     )
 
 
-def load_value_pack_manifest(path: Path) -> list[DatasetManifestEntry]:
-    payload = cast(list[DatasetManifestEntryPayload], json.loads(path.read_text(encoding="utf-8")))
-    return [DatasetManifestEntry.from_dict(item) for item in payload]
+def load_value_pack_manifest(path: Path) -> list[DatasetPackManifestEntry]:
+    payload = cast(list[DatasetPackManifestEntryPayload], json.loads(path.read_text(encoding="utf-8")))
+    return [DatasetPackManifestEntry.from_dict(item) for item in payload]
 
 
 def load_value_sample(path: Path) -> ValueDatasetSample:
@@ -405,16 +410,16 @@ def load_value_sample_pack(path: Path) -> list[ValueDatasetSample]:
         return samples
 
 
-def save_dataset_manifest(entries: list[DatasetManifestEntry], path: Path) -> None:
+def save_dataset_manifest(entries: list[DatasetPackManifestEntry], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = [entry.to_dict() for entry in entries]
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def load_dataset_manifest(path: Path) -> list[DatasetManifestEntry]:
-    payload = cast(list[DatasetManifestEntryPayload], 
+def load_dataset_manifest(path: Path) -> list[DatasetPackManifestEntry]:
+    payload = cast(list[DatasetPackManifestEntryPayload], 
                    json.loads(path.read_text(encoding="utf-8")))
-    return [DatasetManifestEntry.from_dict(item) for item in payload]
+    return [DatasetPackManifestEntry.from_dict(item) for item in payload]
 
 
 def save_feature_normalizer(normalizer: FeatureNormalizer, path: Path) -> None:
@@ -441,22 +446,40 @@ def load_label_normalizer(path: Path) -> LabelNormalizer:
     return LabelNormalizer.from_json(payload)
 
 
+def build_dataset_pack_entry(
+    split: str,
+    pack_path: str,
+    sample_count: int,
+    feature_count: int,
+    label_shape: tuple[int, int],
+    pack_index: int,
+) -> DatasetPackManifestEntry:
+    return DatasetPackManifestEntry(
+        pack_path=pack_path,
+        split=split,
+        sample_count=sample_count,
+        feature_count=feature_count,
+        label_shape=label_shape,
+        pack_index=pack_index,
+    )
+
+
 def build_dataset_manifest_entry(
     sample: ValueDatasetSample,
     split_rule: DatasetSplitRule,
     relative_path: str,
-) -> DatasetManifestEntry:
-    pack_index_value = sample.metadata.get("pack_index", 0)
-    pack_index = int(str(pack_index_value))
-    return DatasetManifestEntry(
+) -> DatasetPackManifestEntry:
+    pack_path = relative_path.split("/", 1)[0] if "/" in relative_path else relative_path
+    return DatasetPackManifestEntry(
         sample_id=sample.sample_id,
+        pack_path=pack_path,
         split=split_rule.split_for_metadata(sample.sample_id, sample.metadata),
         path=relative_path,
+        sample_count=1,
         feature_count=int(sample.features.shape[0]),
         label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
         metadata=dict(sample.metadata),
-        pack_path=str(sample.metadata.get("pack_path", "")),
-        pack_index=pack_index,
+        pack_index=0,
     )
 
 
@@ -469,7 +492,7 @@ def export_dataset_sample(
     output_dir: Path,
     split_rule: DatasetSplitRule,
     metadata: dict[str, object] | None = None,
-) -> DatasetManifestEntry:
+) -> DatasetPackManifestEntry:
     sample = export_value_sample(sample_id, 
                                  state, 
                                  ranges, 

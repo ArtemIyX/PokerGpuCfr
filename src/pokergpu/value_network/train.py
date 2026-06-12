@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from .checkpoint import ValueCheckpoint, save_checkpoint
 from .dataset import (
-    DatasetManifestEntry,
+    DatasetPackManifestEntry,
     DatasetSplitRule,
     FeatureNormalizer,
     LabelNormalizer,
@@ -75,7 +75,7 @@ class TrainingResult:
 
 
 def _load_samples(
-    entries: list[DatasetManifestEntry],
+    entries: list[DatasetPackManifestEntry],
     dataset_dir: Path,
     progress_callback: Callable[[int, int, str], None] | None = None,
     label: str = "load samples",
@@ -95,23 +95,21 @@ def _load_samples(
                 progress_callback(shard_index, len(shard_paths), label)
         return shard_samples
     samples: list[ValueDatasetSample] = []
-    total = len(entries)
     for index, entry in enumerate(entries, start=1):
-        samples.append(load_value_sample(dataset_dir / entry.path))
+        samples.extend(load_value_sample_pack(dataset_dir / entry.pack_path))
         if progress_callback is not None:
-            progress_callback(index, total, label)
+            progress_callback(index, len(entries), label)
     return samples
 
 
 def _split_entries(
-    entries: list[DatasetManifestEntry],
+    entries: list[DatasetPackManifestEntry],
     rule: DatasetSplitRule,
-) -> tuple[list[DatasetManifestEntry], list[DatasetManifestEntry]]:
-    train_entries: list[DatasetManifestEntry] = []
-    val_entries: list[DatasetManifestEntry] = []
+) -> tuple[list[DatasetPackManifestEntry], list[DatasetPackManifestEntry]]:
+    train_entries: list[DatasetPackManifestEntry] = []
+    val_entries: list[DatasetPackManifestEntry] = []
     for entry in entries:
-        metadata = entry.metadata or {}
-        if rule.split_for_metadata(entry.sample_id, metadata) == "val":
+        if entry.split == "val":
             val_entries.append(entry)
         else:
             train_entries.append(entry)

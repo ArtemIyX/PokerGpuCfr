@@ -2,6 +2,7 @@ from .checkpoint import ValueCheckpoint, load_checkpoint, save_checkpoint
 from .equity import EquityEvalConfig, build_postflop_equity_label
 from .dataset import (
     DatasetManifestEntry,
+    DatasetPackManifestEntry,
     DatasetSplitRule,
     FeatureNormalizer,
     LabelNormalizer,
@@ -51,6 +52,7 @@ __all__ = [
     "ValueFeatureSpec",
     "ValueTargetKind",
     "DatasetManifestEntry",
+    "DatasetPackManifestEntry",
     "DatasetSplitRule",
     "FeatureNormalizer",
     "LabelNormalizer",
