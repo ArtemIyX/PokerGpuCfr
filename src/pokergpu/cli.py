@@ -70,6 +70,7 @@ from .eval import (
 )
 from .eval.treys_evaluator import TreysHandEvaluator
 from .runtime import PostflopResolveSpec, resolve_postflop_hu
+from .runtime.postflop import resolve_postflop_multi
 from .tree import NodeType
 from .tree.builder import TreeBuildConfig, build_public_tree
 from .value_network import (
@@ -703,6 +704,7 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
         add=add,
         pause_every=pause_every,
         pause_seconds=pause_seconds,
+        verbose=False,
     )
 
 
@@ -973,7 +975,6 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
     rng = Random(1337)
     feature_spec = args.feature_spec
     target = scalar_ev_target(args.player_count)
-    teacher = _load_teacher_model(args.teacher_checkpoint)
     entries: list[DatasetManifestEntry] = []
     samples: list[ValueDatasetSample] = []
     normalizer_probe = np.zeros(
@@ -996,10 +997,9 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
         ).features
         features = np.asarray(features, dtype=np.float32)
         label_values = _build_teacher_label_values(
-            rng=rng,
+            state=state,
+            ranges=ranges,
             player_count=args.player_count,
-            features=features,
-            teacher=teacher,
         )
         sample = ValueDatasetSample(
             sample_id=f"spot-{index:05d}",
@@ -1173,30 +1173,41 @@ def _sample_value_generation_spot(rng: Random, player_count: int) -> tuple[GameS
     return state, PlayerRangeVectors.from_values(tuple(ranges))
 
 
-def _load_teacher_model(path: Path | None) -> ValueMLP | None:
-    if path is None or not path.exists():
-        return None
-    checkpoint, model_state, _optimizer_state = load_checkpoint(path)
-    model = build_value_model(checkpoint.model_config, device="cpu")
-    model.load_state_dict(model_state, strict=True)
-    return model
-
-
 def _build_teacher_label_values(
     *,
-    rng: Random,
+    state: GameState,
+    ranges: PlayerRangeVectors,
     player_count: int,
-    features: NDArray[np.float32],
-    teacher: ValueMLP | None,
 ) -> NDArray[np.float32]:
-    if teacher is not None:
-        prediction = infer_value(teacher, features.reshape(1, -1))[0]
-        if prediction.shape[0] >= player_count:
-            return np.asarray(prediction[:player_count], dtype=np.float32)
-    return np.asarray(
-        [rng.uniform(-1.0, 1.0) for _ in range(player_count)],
-        dtype=np.float32,
+    if player_count == 2:
+        resolve_result = resolve_postflop_hu(
+            PostflopResolveSpec(
+                state=state,
+                range_p0=ranges.values[0],
+                range_p1=ranges.values[1],
+                time_budget_sec=0.25,
+                max_depth=12,
+                max_nodes=8192,
+            )
+        )
+        return np.asarray(
+            [resolve_result.root_ev_player0, resolve_result.root_ev_player1],
+            dtype=np.float32,
+        )
+    multi_result = resolve_postflop_multi(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=ranges.values[0],
+            range_p1=ranges.values[1],
+            time_budget_sec=0.25,
+            max_depth=12,
+            max_nodes=8192,
+        ),
+        max_player_count=6,
     )
+    if multi_result.root_ev.shape[0] < player_count:
+        raise ValueError("multiway solver returned too few outputs")
+    return np.asarray(multi_result.root_ev[:player_count], dtype=np.float32)
 
 
 def _export_runtime_leaf_data(

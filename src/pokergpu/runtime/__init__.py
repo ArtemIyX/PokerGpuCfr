@@ -18,6 +18,7 @@ from .caching import normalize_sequence as normalize_sequence
 from .postflop import PostflopResolveResult as PostflopResolveResult
 from .postflop import PostflopResolveSpec as PostflopResolveSpec
 from .postflop import resolve_postflop_hu as resolve_postflop_hu
+from .postflop import resolve_postflop_multi as resolve_postflop_multi
 from .value_network import (
     PostflopRuntimeValueNetworkConfig as PostflopRuntimeValueNetworkConfig,
 )
@@ -51,5 +52,6 @@ __all__ = [
     "default_postflop_leaf_evaluator",
     "normalize_sequence",
     "resolve_postflop_hu",
+    "resolve_postflop_multi",
     "stable_hash",
 ]

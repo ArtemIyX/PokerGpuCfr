@@ -6,11 +6,12 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from pokergpu.abstraction.actions import BaselineActionAbstraction, make_compact_profile
+from pokergpu.abstraction.actions import BaselineActionAbstraction, make_runtime_profile
 from pokergpu.abstraction.hands import RangeVector
 from pokergpu.cfr import (
     InfosetLayout,
     InfosetStore,
+    build_leaf_feature_batch,
     compute_counterfactual_values,
     compute_reach_probabilities,
     update_regrets_from_traversal,
@@ -30,6 +31,7 @@ from pokergpu.runtime.caching import (
 )
 from pokergpu.runtime.value_network import default_postflop_leaf_evaluator
 from pokergpu.tree import PublicTree
+from pokergpu.tree.builder import BuiltPublicTree
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
 
 
@@ -58,6 +60,17 @@ class PostflopResolveResult:
     leaf_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class MultiwayPostflopResolveResult:
+    root_infoset_id: int
+    root_actions: tuple[str, ...]
+    root_ev: NDArray[np.float32]
+    iterations: int
+    elapsed_seconds: float
+    node_count: int
+    leaf_count: int
+
+
 def resolve_postflop_hu(
     spec: PostflopResolveSpec,
     *,
@@ -72,7 +85,7 @@ def resolve_postflop_hu(
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
+        abstraction=BaselineActionAbstraction(profile=make_runtime_profile()),
         config=TreeBuildConfig(
             max_depth=spec.max_depth,
             max_nodes=spec.max_nodes,
@@ -180,6 +193,64 @@ def resolve_postflop_hu(
     )
 
 
+def resolve_postflop_multi(
+    spec: PostflopResolveSpec,
+    *,
+    evaluator: LeafEvaluator | None = None,
+    max_player_count: int = 6,
+) -> MultiwayPostflopResolveResult:
+    if spec.state.player_count < 2:
+        raise ValueError("multiway resolver requires at least 2 players")
+    if spec.state.player_count > max_player_count:
+        raise ValueError("multiway resolver state is too large")
+    if spec.state.current_street is Street.PREFLOP:
+        raise ValueError("multiway resolver requires a postflop state")
+
+    started_at = time.monotonic()
+    tree = build_public_tree(
+        spec.state,
+        abstraction=BaselineActionAbstraction(profile=make_runtime_profile()),
+        config=TreeBuildConfig(
+            max_depth=spec.max_depth,
+            max_nodes=spec.max_nodes,
+            min_reach_prob=spec.min_reach_prob,
+        ),
+    )
+    root_infoset = tree.tree.infoset_ids[0]
+    if root_infoset is None:
+        raise ValueError("root node must be a player infoset")
+    root_infoset_id = int(root_infoset)
+    root_actions = tuple(_format_action(action) for action in tree.actions_by_node[0])
+    leaf_count = int(np.count_nonzero(tree.tree.is_frontier))
+    if leaf_count == 0:
+        raise ValueError("multiway resolver requires frontier nodes")
+
+    if spec.state.player_count == 2:
+        hu = resolve_postflop_hu(spec, evaluator=evaluator)
+        return MultiwayPostflopResolveResult(
+            root_infoset_id=root_infoset_id,
+            root_actions=root_actions,
+            root_ev=np.asarray(
+                [hu.root_ev_player0, hu.root_ev_player1], dtype=np.float32
+            ),
+            iterations=hu.iterations,
+            elapsed_seconds=time.monotonic() - started_at,
+            node_count=hu.node_count,
+            leaf_count=hu.leaf_count,
+        )
+
+    root_ev = _coalition_root_ev(spec, tree, evaluator)
+    return MultiwayPostflopResolveResult(
+        root_infoset_id=root_infoset_id,
+        root_actions=root_actions,
+        root_ev=root_ev,
+        iterations=1,
+        elapsed_seconds=time.monotonic() - started_at,
+        node_count=tree.tree.node_count,
+        leaf_count=leaf_count,
+    )
+
+
 def _apply_root_ranges(
     state: GameState,
     range_p0: RangeVector,
@@ -276,3 +347,34 @@ def _apply_warm_start(store: InfosetStore, warm_start: WarmStartState) -> None:
     if (warm_start.strategy_sum and 
         len(warm_start.strategy_sum) == store.layout.total_actions):
         store.strategy_sums[:] = np.asarray(warm_start.strategy_sum, dtype=np.float32)
+
+
+def _coalition_root_ev(
+    spec: PostflopResolveSpec,
+    tree: BuiltPublicTree,
+    evaluator: LeafEvaluator | None,
+) -> NDArray[np.float32]:
+    active_count = spec.state.player_count
+    root_ev = np.zeros(active_count, dtype=np.float32)
+    if evaluator is None:
+        return root_ev
+    frontier_nodes = tuple(
+        node_index
+        for node_index in range(tree.tree.node_count)
+        if tree.tree.is_frontier[node_index]
+    )
+    if not frontier_nodes:
+        return root_ev
+    batch = build_leaf_feature_batch(
+        tree.tree,
+        frontier_nodes,
+        node_states=tree.node_states,
+    )
+    values = evaluator.evaluate(batch)
+    root_ev[0] = float(np.mean(values.ev_player0, dtype=np.float64))
+    if active_count > 1:
+        root_ev[1] = float(np.mean(values.ev_player1, dtype=np.float64))
+    if active_count > 2:
+        remainder = -float(np.sum(root_ev[:2], dtype=np.float64))
+        root_ev[2:] = np.float32(remainder / float(active_count - 2))
+    return root_ev

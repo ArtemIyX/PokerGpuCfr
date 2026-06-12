@@ -6,7 +6,14 @@ from typing import Protocol
 from pokergpu.core.actions import Action, ActionType
 from pokergpu.core.betting import BettingRoundState, Chips, PlayerIndex
 from pokergpu.core.board import Street
-from pokergpu.core.legality import can_bet, can_call, can_check, can_fold, can_raise
+from pokergpu.core.legality import (
+    can_bet,
+    can_call,
+    can_check,
+    can_fold,
+    can_raise,
+    is_legal_action,
+)
 from pokergpu.core.rules import max_raise_to, min_raise_to, player_stack
 from pokergpu.core.state import GameState
 
@@ -119,9 +126,60 @@ def make_compact_profile() -> AbstractionProfile:
     )
 
 
+def make_runtime_profile() -> AbstractionProfile:
+    return AbstractionProfile(
+        name="runtime",
+        version="v1",
+        street_templates={
+            Street.PREFLOP: StreetActionTemplate(
+                bet_sizes=(2.0, 2.5, 3.0, 4.0, 6.0),
+                raise_to_multipliers=(1.0, 1.5, 2.0, 3.0, 4.0),
+            ),
+            Street.FLOP: StreetActionTemplate(
+                bet_sizes=(0.25, 0.33, 0.5, 0.75, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.25, 1.5, 2.0, 3.0),
+            ),
+            Street.TURN: StreetActionTemplate(
+                bet_sizes=(0.33, 0.5, 0.75, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.25, 1.5, 2.0, 3.0),
+            ),
+            Street.RIVER: StreetActionTemplate(
+                bet_sizes=(0.33, 0.5, 0.75, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.25, 1.5, 2.0, 3.0),
+            ),
+        },
+        position_overrides={
+            "early": {
+                Street.PREFLOP: StreetActionTemplate(
+                    bet_sizes=(2.0, 2.5, 3.0, 4.0),
+                    raise_to_multipliers=(1.0, 1.5, 2.0, 3.0),
+                )
+            },
+            "middle": {
+                Street.PREFLOP: StreetActionTemplate(
+                    bet_sizes=(2.0, 2.5, 3.0, 4.0, 5.0),
+                    raise_to_multipliers=(1.0, 1.5, 2.0, 3.0, 4.0),
+                )
+            },
+            "late": {
+                Street.PREFLOP: StreetActionTemplate(
+                    bet_sizes=(2.0, 2.5, 3.0, 4.0, 5.0, 6.0),
+                    raise_to_multipliers=(1.0, 1.5, 2.0, 3.0, 4.0, 5.0),
+                )
+            },
+            "blinds": {
+                Street.PREFLOP: StreetActionTemplate(
+                    bet_sizes=(2.5, 3.0, 4.0, 5.0),
+                    raise_to_multipliers=(1.0, 1.5, 2.5, 4.0, 6.0),
+                )
+            },
+        },
+    )
+
+
 @dataclass(slots=True, frozen=True)
 class BaselineActionAbstraction:
-    profile: AbstractionProfile = make_default_profile()
+    profile: AbstractionProfile = make_runtime_profile()
 
     def abstraction_id(self, state: GameState | None = None) -> str:
         if state is None:
@@ -183,7 +241,15 @@ class BaselineActionAbstraction:
                 self._build_raises(betting_state, template.raise_to_multipliers)
             )
 
-        return tuple(self._dedupe_sorted(actions))
+        return tuple(
+            self._dedupe_sorted(
+                [
+                    action
+                    for action in actions
+                    if is_legal_action(betting_state, action)
+                ]
+            )
+        )
 
     def _build_bets(
         self,
