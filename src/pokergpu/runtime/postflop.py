@@ -10,7 +10,7 @@ from pokergpu.abstraction.actions import (
     BaselineActionAbstraction,
     make_postflop_mvp_profile,
 )
-from pokergpu.abstraction.hands import RangeVector
+from pokergpu.abstraction.hands import RangeVector, apply_board_dead_cards
 from pokergpu.cfr import (
     InfosetLayout,
     InfosetStore,
@@ -437,12 +437,12 @@ def _apply_root_ranges(
     range_p1: RangeVector,
     range_p2: RangeVector | None = None,
 ) -> tuple[RangeVector, RangeVector, RangeVector, float]:
-    dead_cards: list[Card] = list(state.board.cards)
+    dead_cards: list[Card] = []
     for player in state.players:
         if player.hole_cards is not None:
             dead_cards.extend(player.hole_cards)
-    raw_masked_p0 = range_p0.masked(dead_cards)
-    raw_masked_p1 = range_p1.masked(dead_cards)
+    raw_masked_p0 = apply_board_dead_cards(range_p0, state.board).masked(dead_cards)
+    raw_masked_p1 = apply_board_dead_cards(range_p1, state.board).masked(dead_cards)
     weight_p0 = raw_masked_p0.total_weight()
     weight_p1 = raw_masked_p1.total_weight()
     if weight_p0 <= 0.0 or weight_p1 <= 0.0:
@@ -451,7 +451,11 @@ def _apply_root_ranges(
         )
     masked_p0 = raw_masked_p0.normalized()
     masked_p1 = raw_masked_p1.normalized()
-    masked_p2 = range_p2.masked(dead_cards).normalized() if range_p2 is not None else masked_p0
+    masked_p2 = (
+        apply_board_dead_cards(range_p2, state.board).masked(dead_cards).normalized()
+        if range_p2 is not None
+        else masked_p0
+    )
     return masked_p0, masked_p1, masked_p2, weight_p0
 
 

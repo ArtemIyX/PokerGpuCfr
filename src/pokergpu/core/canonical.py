@@ -19,9 +19,12 @@ def canonicalize_board(board: Board) -> BoardCanonicalization:
 
     suit_order = _canonical_suit_order(board.cards)
     canonical_suits = (Suit.CLUBS, Suit.DIAMONDS, Suit.HEARTS, Suit.SPADES)
+    ordered_suits = suit_order + tuple(
+        suit for suit in Suit if suit not in suit_order
+    )
     suit_map = {
         original: canonical_suits[index]
-        for index, original in enumerate(suit_order)
+        for index, original in enumerate(ordered_suits)
     }
     canonical_cards = tuple(
         Card(rank=card.rank, suit=suit_map[card.suit])
@@ -44,10 +47,25 @@ def canonicalize_cards(cards: tuple[Card, ...]) -> tuple[Card, ...]:
         return cards
     suit_order = _canonical_suit_order(cards)
     canonical_suits = (Suit.CLUBS, Suit.DIAMONDS, Suit.HEARTS, Suit.SPADES)
+    ordered_suits = suit_order + tuple(
+        suit for suit in Suit if suit not in suit_order
+    )
     suit_map = {
         original: canonical_suits[index]
-        for index, original in enumerate(suit_order)
+        for index, original in enumerate(ordered_suits)
     }
+    return tuple(Card(rank=card.rank, suit=suit_map[card.suit]) for card in cards)
+
+
+def canonicalize_cards_for_board(
+    cards: tuple[Card, ...],
+    board: Board,
+) -> tuple[Card, ...]:
+    if not cards:
+        return cards
+    suit_map = canonicalize_board(board).suit_map
+    if not suit_map:
+        return cards
     return tuple(Card(rank=card.rank, suit=suit_map[card.suit]) for card in cards)
 
 

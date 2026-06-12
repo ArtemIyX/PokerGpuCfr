@@ -7,7 +7,9 @@ from pokergpu.abstraction import (
     PrivateHand,
     RangeVector,
     all_private_hands,
+    apply_board_dead_cards,
     apply_dead_cards,
+    canonicalize_private_hand_for_board,
     masked_range_vector,
     normalize_range_vector,
     private_hand_count,
@@ -193,6 +195,30 @@ def test_board_masking_keeps_total_mass_valid_after_renormalization() -> None:
     assert math.isclose(normalized.total_weight(), 1.0, abs_tol=1e-6)
     assert math.isclose(float(normalized.values[blocked_index]), 0.0, abs_tol=1e-6)
     assert math.isclose(float(normalized.values[live_index]), 1.0, abs_tol=1e-6)
+
+
+def test_apply_board_dead_cards_normalizes_after_filtering() -> None:
+    board = Board.from_str("AhKdQc")
+    values = [0.0] * private_hand_count()
+    blocked_index = int(private_hand_index(card_from_str("Ah"), card_from_str("Js")))
+    live_index = int(private_hand_index(card_from_str("9c"), card_from_str("8d")))
+    values[blocked_index] = 2.0
+    values[live_index] = 6.0
+
+    filtered = apply_board_dead_cards(RangeVector.from_values(values), board)
+
+    assert math.isclose(filtered.total_weight(), 1.0, abs_tol=1e-6)
+    assert math.isclose(float(filtered.values[blocked_index]), 0.0, abs_tol=1e-6)
+    assert math.isclose(float(filtered.values[live_index]), 1.0, abs_tol=1e-6)
+
+
+def test_canonicalize_private_hand_for_board_uses_board_suit_map() -> None:
+    board = Board.from_str("AhKhQd")
+    hand = PrivateHand.from_cards(card_from_str("As"), card_from_str("2c"))
+
+    canonical = canonicalize_private_hand_for_board(hand, board)
+
+    assert {str(canonical.first)[1], str(canonical.second)[1]} == {"s", "h"}
 
 
 def test_all_private_hands_are_unique() -> None:

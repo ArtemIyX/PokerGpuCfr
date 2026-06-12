@@ -6,6 +6,8 @@ from typing import NewType
 import numpy as np
 from numpy.typing import NDArray
 
+from pokergpu.core.board import Board
+from pokergpu.core.canonical import canonicalize_cards_for_board
 from pokergpu.core.cards import Card, make_deck
 
 PrivateHandIndex = NewType("PrivateHandIndex", int)
@@ -179,6 +181,15 @@ def apply_dead_cards(
     dead_cards: tuple[Card, ...] | list[Card],
 ) -> tuple[RangeVector, ...]:
     return tuple(range_vector.masked(dead_cards) for range_vector in range_vectors)
+
+
+def apply_board_dead_cards(range_vector: RangeVector, board: Board) -> RangeVector:
+    return range_vector.normalized_masked(board.cards)
+
+
+def canonicalize_private_hand_for_board(hand: PrivateHand, board: Board) -> PrivateHand:
+    canonical_cards = canonicalize_cards_for_board((hand.first, hand.second), board)
+    return PrivateHand.from_cards(canonical_cards[0], canonical_cards[1])
 
 
 def normalize_range_vector(range_vector: RangeVector) -> RangeVector:

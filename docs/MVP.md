@@ -103,7 +103,7 @@ Checklist:
 Done when:
 - leaf values come from real poker logic, not fixed stubs or fake bias terms
 
-### 5. Implement dead-card and range handling
+### 5. [x] Implement dead-card and range handling
 
 Checklist:
 - remove impossible holdings after every board deal
