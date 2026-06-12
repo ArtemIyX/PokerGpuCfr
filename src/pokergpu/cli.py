@@ -20,16 +20,22 @@ from .abstraction.hands import (
     all_private_hands,
     private_hand_count,
 )
+from .abstraction.actions import BaselineActionAbstraction, make_compact_profile
 from .app import create_app
 from .benchmarks import run_benchmark
 from .cfr import (
     CFRVariant,
     KuhnCard,
     LeducRank,
+    InfosetLayout,
+    InfosetStore,
+    build_leaf_feature_batch,
     average_strategy_root_bet_probability,
     average_strategy_root_bet_probability_leduc,
     expected_game_value_for_average_strategy,
     expected_game_value_for_average_strategy_leduc,
+    compute_counterfactual_values,
+    compute_reach_probabilities,
     run_toy_game_comparison,
     train_kuhn_cfr,
     train_leduc_cfr,
@@ -45,15 +51,20 @@ from .core.betting import (
 )
 from .core.board import Board
 from .core.cards import Card, shuffled_deck
+from .core.payouts import compute_payouts
 from .core.state import GameState, PlayerState
 from .eval import (
+    CpuStubLeafEvaluator,
     EvalDeviceConfig,
     LeafEvaluator,
     LeafFeatureBatch,
     LeafValueBatch,
     make_leaf_evaluator,
 )
+from .eval.treys_evaluator import TreysHandEvaluator
 from .runtime import PostflopResolveSpec, resolve_postflop_hu
+from .tree import NodeType
+from .tree.builder import TreeBuildConfig, build_public_tree
 from .value_network import (
     DatasetManifestEntry,
     DatasetPackManifestEntry,
@@ -222,6 +233,17 @@ def main() -> int:
         print(f"dataset_dir={solver_label_args.output_dir}")
         print(f"elapsed_seconds={elapsed:.3f}")
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "export-runtime-leaf-data":
+        runtime_leaf_args = _parse_runtime_leaf_data_args(sys.argv[2:])
+        started_at = time.monotonic()
+        device_name = _runtime_device_name()
+        print("pokergpu: export-runtime-leaf-data start")
+        print(f"device={device_name}")
+        _export_runtime_leaf_data(runtime_leaf_args)
+        print(f"manifest={runtime_leaf_args.manifest_path}")
+        print(f"dataset_dir={runtime_leaf_args.output_dir}")
+        print(f"elapsed_seconds={time.monotonic() - started_at:.3f}")
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] == "train-value-network":
         train_args = _parse_value_train_args(sys.argv[2:])
         started_at = time.monotonic()
@@ -354,6 +376,17 @@ class _CuratedSolverLabelArgs:
     output_dir: Path
     manifest_path: Path
     limit: int
+    batch_size: int
+    workers: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeLeafDataArgs:
+    output_dir: Path
+    manifest_path: Path
+    sample_count: int
+    validation_modulo: int
+    validation_remainder: int
     batch_size: int
     workers: int
 
@@ -624,6 +657,58 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
         add=add,
         pause_every=pause_every,
         pause_seconds=pause_seconds,
+    )
+
+
+def _parse_runtime_leaf_data_args(args: list[str]) -> _RuntimeLeafDataArgs:
+    output_dir = Path("artifacts/runtime_leaf_data").resolve()
+    manifest_path = output_dir / "manifest.json"
+    sample_count = 128
+    validation_modulo = 10
+    validation_remainder = 0
+    batch_size = 8
+    workers = 1
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option == "--output-dir" and index + 1 < len(args):
+            output_dir = Path(args[index + 1]).resolve()
+            manifest_path = output_dir / "manifest.json"
+            index += 2
+            continue
+        if option == "--manifest" and index + 1 < len(args):
+            manifest_path = Path(args[index + 1]).resolve()
+            index += 2
+            continue
+        if option == "--samples" and index + 1 < len(args):
+            sample_count = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--validation-modulo" and index + 1 < len(args):
+            validation_modulo = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--validation-remainder" and index + 1 < len(args):
+            validation_remainder = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--batch-size" and index + 1 < len(args):
+            batch_size = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--workers" and index + 1 < len(args):
+            workers = int(args[index + 1])
+            index += 2
+            continue
+        raise ValueError(f"invalid export-runtime-leaf-data arguments: {args!r}")
+    return _RuntimeLeafDataArgs(
+        output_dir=output_dir,
+        manifest_path=manifest_path,
+        sample_count=sample_count,
+        validation_modulo=validation_modulo,
+        validation_remainder=validation_remainder,
+        batch_size=batch_size,
+        workers=workers,
     )
 
 
@@ -989,6 +1074,85 @@ def _export_solver_labels(
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
 
 
+def _export_runtime_leaf_data(
+    args: _RuntimeLeafDataArgs,
+) -> None:
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    split_rule = DatasetSplitRule(
+        validation_modulo=args.validation_modulo,
+        validation_remainder=args.validation_remainder,
+    )
+    feature_spec = ValueFeatureSpec(player_count=2, max_history_length=8)
+    samples: list[ValueDatasetSample] = []
+    entries: list[DatasetManifestEntry] = []
+    worker_count = max(1, min(args.workers, args.sample_count))
+    ranges = _split_sample_ranges(args.sample_count, worker_count)
+    completed = 0
+    progress_state = {"active": 0}
+    heartbeat_stop = Event()
+    heartbeat = _start_progress_heartbeat(
+        lambda: _print_progress_detail(
+            completed,
+            args.sample_count,
+            progress_state["active"],
+            "runtime leaf export",
+        ),
+        heartbeat_stop,
+    )
+    with futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        in_flight: set[futures.Future[tuple[DatasetManifestEntry, ValueDatasetSample]]] = set()
+        for start, stop in ranges:
+            for index in range(start, stop):
+                in_flight.add(
+                    executor.submit(
+                        _export_runtime_leaf_data_sample,
+                        index,
+                        feature_spec,
+                        split_rule,
+                    )
+                )
+        _print_progress_detail(
+            completed,
+            args.sample_count,
+            progress_state["active"],
+            "runtime leaf export",
+        )
+        while in_flight:
+            progress_state["active"] = len(in_flight)
+            _print_progress_detail(
+                completed,
+                args.sample_count,
+                progress_state["active"],
+                "runtime leaf export",
+            )
+            done, in_flight = futures.wait(
+                in_flight,
+                timeout=0.1,
+                return_when=futures.FIRST_COMPLETED,
+            )
+            progress_state["active"] = len(in_flight)
+            for job in done:
+                entry, sample = job.result()
+                completed += 1
+                _print_progress_detail(
+                    completed,
+                    args.sample_count,
+                    progress_state["active"],
+                    "runtime leaf export",
+                )
+                entries.append(entry)
+                samples.append(sample)
+    heartbeat_stop.set()
+    if heartbeat is not None:
+        heartbeat.join()
+    normalizer = fit_feature_normalizer(samples)
+    label_normalizer = fit_label_normalizer(samples)
+    entries = _write_packed_samples(args.output_dir, entries, samples)
+    save_dataset_manifest(entries, args.manifest_path)
+    save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
+    save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
+
+
 def _export_curated_solver_labels(
     args: _CuratedSolverLabelArgs,
     progress_callback: Callable[[int, int, str], None] | None = None,
@@ -1122,6 +1286,101 @@ def _solve_and_export_label_batch(
         _solve_and_export_label(index, args, feature_spec, split_rule, pack_prefix)
         for index in range(start, stop)
     ]
+
+
+def _export_runtime_leaf_data_sample(
+    index: int,
+    feature_spec: ValueFeatureSpec,
+    split_rule: DatasetSplitRule,
+) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
+    spec = _sample_harder_equity_spec(Random(19000 + index * 131), index)
+    tree = build_public_tree(
+        spec.state,
+        abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
+        config=TreeBuildConfig(max_depth=2, max_nodes=128, min_reach_prob=0.0),
+    )
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts(
+        _build_infoset_action_counts(tree.tree, tree.actions_by_node)
+    ))
+    forward = compute_reach_probabilities(
+        tree.tree,
+        store,
+        root_player0_reach=spec.range_p0.total_weight(),
+        root_player1_reach=spec.range_p1.total_weight(),
+    )
+    terminal_values_player0 = np.array(
+        [np.float32(_terminal_value_player0(node_state)) for node_state in tree.node_states],
+        dtype=np.float32,
+    )
+    backward = compute_counterfactual_values(
+        tree.tree,
+        store,
+        node_states=tree.node_states,
+        reach_p0=forward.player0_reach,
+        reach_p1=forward.player1_reach,
+        terminal_values_player0=terminal_values_player0,
+        evaluator=CpuStubLeafEvaluator(),
+    )
+    frontier_nodes = tuple(
+        node_index
+        for node_index in range(tree.tree.node_count)
+        if tree.tree.is_frontier[node_index] and tree.tree.node_types[node_index] is not NodeType.TERMINAL
+    )
+    batch = build_leaf_feature_batch(
+        tree.tree,
+        frontier_nodes,
+        node_states=tree.node_states,
+        reach_p0=forward.player0_reach,
+        reach_p1=forward.player1_reach,
+    )
+    if not frontier_nodes:
+        raise ValueError("runtime leaf export requires frontier nodes")
+    leaf_index = 0
+    feature_row = np.asarray(
+        [
+            1.0,
+            float(batch.pot[leaf_index]),
+            float(batch.stack_p0[leaf_index] - batch.stack_p1[leaf_index]),
+            float(batch.board_size[leaf_index]),
+            float(batch.street[leaf_index]),
+            float(batch.reach_p0[leaf_index] - batch.reach_p1[leaf_index]),
+            float(batch.player_to_act[leaf_index]),
+            float(batch.is_terminal[leaf_index]),
+            float(batch.is_frontier[leaf_index]),
+            float(batch.infoset_id[leaf_index]),
+        ],
+        dtype=np.float32,
+    )
+    label_values = np.asarray(
+        [
+            float(backward.node_values_player0[frontier_nodes[leaf_index]]),
+            float(backward.node_values_player1[frontier_nodes[leaf_index]]),
+        ],
+        dtype=np.float32,
+    )
+    sample = ValueDatasetSample(
+        sample_id=f"runtime-leaf-{index:05d}",
+        features=feature_row,
+        label=label_values.reshape(1, 2),
+        metadata={
+            "street": spec.state.current_street.value,
+            "board": str(spec.state.board),
+            "node_index": int(frontier_nodes[leaf_index]),
+        },
+    )
+    split = split_rule.split(sample.sample_id)
+    entry = DatasetManifestEntry(
+        sample_id=sample.sample_id,
+        split=split,
+        path=f"{split}/{sample.sample_id}.npz",
+        feature_count=int(sample.features.shape[0]),
+        label_shape=(1, 2),
+        metadata=dict(sample.metadata),
+        pack_path=f"{split}.pack.npz",
+        pack_index=index,
+    )
+    _validate_exported_sample(sample)
+    return entry, sample
 
 
 def _export_solver_label_worker(
@@ -1443,6 +1702,34 @@ def _validate_exported_sample(sample: ValueDatasetSample) -> None:
         raise ValueError("exported sample features must vary")
     if float(np.std(sample.label)) <= 0.0:
         raise ValueError("exported sample labels must vary")
+
+
+def _build_infoset_action_counts(
+    tree: object,
+    actions_by_node: tuple[tuple[object, ...], ...],
+) -> tuple[int, ...]:
+    max_infoset = -1
+    counts: dict[int, int] = {}
+    infoset_ids = getattr(tree, "infoset_ids")
+    for node_index, infoset_id in enumerate(infoset_ids):
+        if infoset_id is None:
+            continue
+        infoset_index = int(infoset_id)
+        max_infoset = max(max_infoset, infoset_index)
+        counts.setdefault(infoset_index, len(actions_by_node[node_index]) or 1)
+    return tuple(counts.get(index, 1) for index in range(max_infoset + 1))
+
+
+def _terminal_value_player0(state: GameState) -> float:
+    if state.phase.value != "terminal":
+        return 0.0
+    payouts = compute_payouts(state)
+    player0_payout = next(
+        (payout.amount for payout in payouts if payout.player == 0),
+        chips(0),
+    )
+    other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
+    return float(player0_payout - other_payouts)
 
 
 def _write_packed_samples(
