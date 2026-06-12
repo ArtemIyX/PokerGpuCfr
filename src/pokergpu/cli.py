@@ -2,6 +2,7 @@ import logging
 import json
 import concurrent.futures as futures
 import multiprocessing as mp
+import re
 import sys
 import time
 from multiprocessing.queues import Queue as MPQueue
@@ -331,6 +332,9 @@ class _SolverLabelArgs:
     sampled_runouts: int
     batch_size: int
     workers: int
+    add: bool
+    pause_every: int
+    pause_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,6 +527,9 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
     sampled_runouts = 8
     batch_size = 16
     workers = 1
+    add = False
+    pause_every = 0
+    pause_seconds = 0.0
     index = 0
     while index < len(args):
         option = args[index]
@@ -571,6 +578,18 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
             batch_size = int(args[index + 1])
             index += 2
             continue
+        if option == "--add":
+            add = True
+            index += 1
+            continue
+        if option == "--pause-every" and index + 1 < len(args):
+            pause_every = int(args[index + 1])
+            index += 2
+            continue
+        if option == "--pause-seconds" and index + 1 < len(args):
+            pause_seconds = float(args[index + 1])
+            index += 2
+            continue
         raise ValueError(f"invalid export-solver-labels arguments: {args!r}")
     return _SolverLabelArgs(
         output_dir=output_dir,
@@ -584,6 +603,9 @@ def _parse_solver_label_args(args: list[str]) -> _SolverLabelArgs:
         sampled_runouts=sampled_runouts,
         batch_size=batch_size,
         workers=workers,
+        add=add,
+        pause_every=pause_every,
+        pause_seconds=pause_seconds,
     )
 
 
@@ -804,6 +826,13 @@ def _export_solver_labels(
     feature_spec = ValueFeatureSpec(player_count=args.player_count, max_history_length=8)
     if progress_callback is not None:
         progress_callback(0, args.sample_count, "export labels")
+    existing_entries = load_dataset_manifest(args.manifest_path) if args.add and args.manifest_path.exists() else []
+    existing_samples: list[ValueDatasetSample] = []
+    if existing_entries:
+        for pack_path in sorted({args.output_dir / entry.pack_path for entry in existing_entries if entry.pack_path}):
+            existing_samples.extend(_load_existing_pack_with_fallback(pack_path))
+    append_run_id = _next_append_run_id(existing_entries) if args.add else None
+    pack_prefix = f"append_{append_run_id:06d}" if append_run_id is not None else None
     worker_count = max(1, min(args.workers, args.sample_count))
     ranges = _split_sample_ranges(args.sample_count, worker_count)
     with mp.Manager() as manager:
@@ -818,6 +847,7 @@ def _export_solver_labels(
                     args,
                     feature_spec,
                     split_rule,
+                    pack_prefix,
                     progress_queue,
                 )
                 for worker_index, (start, stop) in enumerate(ranges)
@@ -863,10 +893,19 @@ def _export_solver_labels(
                 entries.append(entry)
                 samples.append(sample)
                 completed += 1
-    normalizer = fit_feature_normalizer(samples)
-    label_normalizer = fit_label_normalizer(samples)
-    _write_packed_samples(args.output_dir, entries, samples)
-    save_dataset_manifest(entries, args.manifest_path)
+                if args.pause_every > 0 and args.pause_seconds > 0.0 and completed % args.pause_every == 0:
+                    time.sleep(args.pause_seconds)
+    all_entries = existing_entries + entries
+    all_samples = existing_samples + samples
+    normalizer = fit_feature_normalizer(all_samples)
+    label_normalizer = fit_label_normalizer(all_samples)
+    _write_packed_samples(
+        args.output_dir,
+        entries,
+        samples,
+        pack_prefix=pack_prefix,
+    )
+    save_dataset_manifest(all_entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
 
@@ -951,6 +990,7 @@ def _solve_and_export_label(
     args: _SolverLabelArgs,
     feature_spec: ValueFeatureSpec,
     split_rule: DatasetSplitRule,
+    pack_prefix: str | None,
 ) -> tuple[DatasetManifestEntry, ValueDatasetSample]:
     spec = _real_equity_sample_spec(Random(9000 + index * 97))
     label = build_postflop_equity_label(
@@ -979,11 +1019,11 @@ def _solve_and_export_label(
     entry = DatasetManifestEntry(
         sample_id=sample.sample_id,
         split=split,
-        path=f"{split}.pack.npz",
+        path=f"{split}.pack.npz" if pack_prefix is None else f"{pack_prefix}_{split}.pack.npz",
         feature_count=int(sample.features.shape[0]),
         label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
         metadata=dict(sample.metadata),
-        pack_path=f"{split}.pack.npz",
+        pack_path=f"{split}.pack.npz" if pack_prefix is None else f"{pack_prefix}_{split}.pack.npz",
         pack_index=index,
     )
     _validate_exported_sample(sample)
@@ -996,9 +1036,10 @@ def _solve_and_export_label_batch(
     args: _SolverLabelArgs,
     feature_spec: ValueFeatureSpec,
     split_rule: DatasetSplitRule,
+    pack_prefix: str | None,
 ) -> list[tuple[DatasetManifestEntry, ValueDatasetSample]]:
     return [
-        _solve_and_export_label(index, args, feature_spec, split_rule)
+        _solve_and_export_label(index, args, feature_spec, split_rule, pack_prefix)
         for index in range(start, stop)
     ]
 
@@ -1010,6 +1051,7 @@ def _export_solver_label_worker(
     args: _SolverLabelArgs,
     feature_spec: ValueFeatureSpec,
     split_rule: DatasetSplitRule,
+    pack_prefix: str | None,
     progress_queue: MPQueue[tuple[str, int, int, int]],
 ) -> tuple[int, list[DatasetManifestEntry], list[ValueDatasetSample]]:
     entries: list[DatasetManifestEntry] = []
@@ -1020,7 +1062,12 @@ def _export_solver_label_worker(
     for batch_start in range(start, stop, batch_size):
         batch_stop = min(batch_start + batch_size, stop)
         batch = _solve_and_export_label_batch(
-            batch_start, batch_stop, args, feature_spec, split_rule
+            batch_start,
+            batch_stop,
+            args,
+            feature_spec,
+            split_rule,
+            pack_prefix,
         )
         for entry, sample in batch:
             entries.append(entry)
@@ -1196,12 +1243,39 @@ def _write_packed_samples(
     output_dir: Path,
     entries: list[DatasetManifestEntry],
     samples: list[ValueDatasetSample],
+    pack_prefix: str = "",
 ) -> None:
     by_split: dict[str, list[ValueDatasetSample]] = {}
     for entry, sample in zip(entries, samples, strict=True):
         by_split.setdefault(entry.split, []).append(sample)
     for split, split_samples in by_split.items():
-        save_value_sample_pack(split_samples, output_dir / f"{split}.pack.npz")
+        file_name = f"{split}.pack.npz" if pack_prefix is None else f"{pack_prefix}_{split}.pack.npz"
+        save_value_sample_pack(split_samples, output_dir / file_name)
+
+
+def _load_existing_pack_with_fallback(path: Path) -> list[ValueDatasetSample]:
+    if path.exists():
+        return load_value_sample_pack(path)
+    name = path.name
+    if name.startswith("_") and name.count("_") >= 1:
+        fallback = path.with_name(name[1:])
+        if fallback.exists():
+            return load_value_sample_pack(fallback)
+    if name.startswith("append_") and "_" in name:
+        fallback = path.with_name(name.split("_", 2)[-1])
+        if fallback.exists():
+            return load_value_sample_pack(fallback)
+    raise FileNotFoundError(path)
+
+
+def _next_append_run_id(entries: list[DatasetManifestEntry]) -> int:
+    pattern = re.compile(r"^append_(\d{6})_")
+    highest = -1
+    for entry in entries:
+        match = pattern.match(entry.pack_path)
+        if match is not None:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
 
 
 class _DemoBiasedLeafEvaluator(LeafEvaluator):
