@@ -16,9 +16,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 try:
-    from tqdm import tqdm
+    from tqdm import tqdm  # type: ignore[import-untyped]
 except Exception:  # pragma: no cover
-    def tqdm(iterable, **_kwargs):  # type: ignore[no-redef]
+    def tqdm(iterable: Any, **_kwargs: Any) -> Any:
         return iterable
 
 from .abstraction.hands import (
@@ -302,7 +302,7 @@ def main() -> int:
             config=train_args.training_config,
             feature_normalizer=train_args.feature_normalizer,
             label_normalizer=train_args.label_normalizer,
-            progress_callback=_print_progress,
+            progress_callback=None,
         )
         print(f"train_loss={training_result.train_loss:.9e}")
         print(f"val_loss={training_result.val_loss:.9e}")
@@ -962,10 +962,19 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
         dtype=np.float32,
     )
     for index in tqdm(range(args.sample_count), total=args.sample_count, desc="generate-value-data"):
-        features = normalizer_probe.copy()
-        features[0] = np.float32(rng.randrange(4))
-        features[1] = np.float32(100.0 + 10.0 * rng.randrange(1, 8))
-        features[2:7] = np.asarray([1, 2, 3, 4, 5], dtype=np.float32)
+        state, ranges = _sample_value_generation_spot(rng, args.player_count)
+        features = export_value_sample(
+            sample_id=f"spot-{index:05d}",
+            state=state,
+            ranges=ranges,
+            label=build_value_label(
+                np.zeros((args.player_count,), dtype=np.float32),
+                target,
+            ),
+            feature_spec=feature_spec,
+            metadata={"street": state.current_street.value, "player_count": args.player_count},
+        ).features
+        features = np.asarray(features, dtype=np.float32)
         label_values = _build_teacher_label_values(
             rng=rng,
             player_count=args.player_count,
@@ -977,8 +986,9 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
             features=features,
             label=build_value_label(label_values, target).values,
             metadata={
-                "street": "synthetic",
+                "street": state.current_street.value,
                 "index": index,
+                "player_count": args.player_count,
             },
         )
         split_rule = DatasetSplitRule(
@@ -1102,6 +1112,43 @@ def _export_solver_labels(
     save_dataset_manifest(existing_entries + new_pack_entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
+
+
+def _sample_value_generation_spot(rng: Random, player_count: int) -> tuple[GameState, PlayerRangeVectors]:
+    street = rng.choice([0, 1, 2, 3])
+    board_count = {0: 0, 1: 3, 2: 4, 3: 5}[street]
+    deck = list(shuffled_deck(rng))
+    board_cards = tuple(deck.pop() for _ in range(board_count))
+    players: list[PlayerState] = []
+    ranges: list[RangeVector] = []
+    stacks: list[PlayerStack] = []
+    bets: list[PlayerBet] = []
+    dead_cards = set(board_cards)
+    for seat in range(player_count):
+        hole = (deck.pop(), deck.pop())
+        dead_cards.update(hole)
+        players.append(
+            PlayerState(
+                player=PlayerIndex(seat),
+                hole_cards=hole,
+            )
+        )
+        stacks.append(PlayerStack(player=PlayerIndex(seat), stack=chips(rng.choice([500, 1000, 1500, 2000, 3000, 5000, 8000]))))
+        bets.append(PlayerBet(player=PlayerIndex(seat), committed=chips(rng.choice([0, 50, 100, 200, 400]))))
+        ranges.append(_random_range_vector(rng).masked(tuple(dead_cards)))
+    state = GameState(
+        board=Board(cards=board_cards),
+        players=tuple(players),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(rng.choice([100, 200, 400, 800, 1600, 3200, 6400]))),
+            stacks=tuple(stacks),
+            bets=tuple(bets),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(rng.randrange(player_count)),
+        ),
+        dealer=PlayerIndex(rng.randrange(player_count)),
+    )
+    return state, PlayerRangeVectors.from_values(tuple(ranges))
 
 
 def _load_teacher_model(path: Path | None) -> ValueMLP | None:

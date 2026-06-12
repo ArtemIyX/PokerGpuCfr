@@ -8,6 +8,12 @@ import time
 import numpy as np
 from numpy.typing import NDArray
 
+try:
+    from tqdm import tqdm  # type: ignore[import-untyped]
+except Exception:  # pragma: no cover
+    def tqdm(iterable: object, **_kwargs: object) -> object:
+        return iterable
+
 from .checkpoint import ValueCheckpoint, save_checkpoint
 from .dataset import (
     DatasetPackManifestEntry,
@@ -244,7 +250,11 @@ def train_baseline(
         epoch_losses: list[float] = []
         batch_total = (len(train_samples) + config.batch_size - 1) // config.batch_size
         batch_index = 0
-        for start in range(0, len(train_samples), config.batch_size):
+        for start in tqdm(
+            range(0, len(train_samples), config.batch_size),
+            total=batch_total,
+            desc=f"train epoch {epoch + 1}",
+        ):
             stop = min(start + config.batch_size, len(train_samples))
             features, targets = _batch_slice(train_samples, start, stop)
             normalized = normalize_feature_batch(
