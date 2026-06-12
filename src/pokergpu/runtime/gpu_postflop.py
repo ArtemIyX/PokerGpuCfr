@@ -113,6 +113,8 @@ def resolve_postflop_gpu(
         root_infoset_id=int(root_infoset),
         root_actions=root_actions,
         root_strategy=root_strategy,
+        root_action_ev_player0=np.asarray(backward_p0.detach().cpu().numpy()[0: len(root_actions)], dtype=np.float32),
+        root_action_ev_player1=np.asarray(backward_p1.detach().cpu().numpy()[0: len(root_actions)], dtype=np.float32),
         root_ev_player0=root_ev_p0,
         root_ev_player1=root_ev_p1,
         iterations=iterations,
