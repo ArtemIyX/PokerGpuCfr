@@ -107,14 +107,24 @@ def resolve_postflop_gpu(
     pot_scale = float(total_pot(spec.state))
     if pot_scale <= 0.0:
         pot_scale = 1.0
-    root_ev_p0 = float(backward_p0[0].detach().cpu().item() / pot_scale)
-    root_ev_p1 = float(backward_p1[0].detach().cpu().item() / pot_scale)
+    root_strategy = store.average_strategy(int(root_infoset))
+    root_action_nodes = _root_child_nodes(tree.tree)
+    root_action_ev_p0 = np.asarray(
+        [float(backward_p0[index].detach().cpu().item()) for index in root_action_nodes],
+        dtype=np.float32,
+    )
+    root_action_ev_p1 = np.asarray(
+        [float(backward_p1[index].detach().cpu().item()) for index in root_action_nodes],
+        dtype=np.float32,
+    )
+    root_ev_p0 = float(np.sum(root_strategy[: root_action_ev_p0.shape[0]] * root_action_ev_p0, dtype=np.float64) / pot_scale)
+    root_ev_p1 = float(np.sum(root_strategy[: root_action_ev_p1.shape[0]] * root_action_ev_p1, dtype=np.float64) / pot_scale)
     return PostflopResolveResult(
         root_infoset_id=int(root_infoset),
         root_actions=root_actions,
         root_strategy=root_strategy,
-        root_action_ev_player0=np.asarray(backward_p0.detach().cpu().numpy()[0: len(root_actions)], dtype=np.float32),
-        root_action_ev_player1=np.asarray(backward_p1.detach().cpu().numpy()[0: len(root_actions)], dtype=np.float32),
+        root_action_ev_player0=root_action_ev_p0,
+        root_action_ev_player1=root_action_ev_p1,
         root_ev_player0=root_ev_p0,
         root_ev_player1=root_ev_p1,
         iterations=iterations,
@@ -279,3 +289,9 @@ def _format_action(action: object) -> str:
     if amount is None:
         return str(getattr(action_type, "value", action_type))
     return f"{getattr(action_type, 'value', action_type)}({int(amount)})"
+
+
+def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
+    start = tree.first_child[0]
+    count = tree.child_count[0]
+    return tuple(int(tree.children[start + index].child) for index in range(count))

@@ -143,7 +143,7 @@ Checklist:
 Done when:
 - the solver improves across iterations instead of drifting randomly
 
-### 8. Make it GPU-friendly without fake values
+### 8. [x] Make it GPU-friendly without fake values
 
 Checklist:
 - keep the evaluator real

@@ -43,7 +43,7 @@ def test_gpu_leaf_evaluator_returns_real_showdown_evs() -> None:
     from pokergpu.core.board import Board
     from pokergpu.core.cards import Card, Rank, Suit
     from pokergpu.core.state import GameState, PlayerState
-    from pokergpu.eval.gpu_stub import GpuStubLeafEvaluator
+    from pokergpu.eval.gpu_stub import GpuBatchLeafEvaluator
 
     state = GameState(
         board=Board.from_str("7c9hJsQdKh"),
@@ -83,7 +83,15 @@ def test_gpu_leaf_evaluator_returns_real_showdown_evs() -> None:
     batch = build_leaf_feature_batch(tree, (0,), node_states=(state,))
 
     cpu_values = CpuStubLeafEvaluator().evaluate(batch)
-    gpu_values = GpuStubLeafEvaluator(EvalDeviceConfig(mode="cpu")).evaluate(batch)
+    gpu_values = GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cpu")).evaluate(batch)
 
     assert gpu_values.ev_player0[0] == cpu_values.ev_player0[0]
     assert gpu_values.ev_player1[0] == cpu_values.ev_player1[0]
+
+
+def test_make_leaf_evaluator_cuda_mode_returns_gpu_batch_evaluator() -> None:
+    from pokergpu.eval.gpu_stub import GpuBatchLeafEvaluator
+
+    evaluator = make_leaf_evaluator(EvalDeviceConfig(mode="cuda"))
+
+    assert isinstance(evaluator, GpuBatchLeafEvaluator)

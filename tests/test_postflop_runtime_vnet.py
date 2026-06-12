@@ -103,6 +103,37 @@ def test_postflop_resolver_uses_default_value_network_checkpoint(
     assert result.leaf_count > 0
 
 
+def test_postflop_gpu_resolver_returns_coherent_root_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for this test")
+
+    from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
+
+    result = resolve_postflop_gpu(
+        PostflopResolveSpec(
+            state=_make_state(),
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert result.root_infoset_id == 0
+    assert np.isclose(float(result.root_strategy.sum()), 1.0)
+    assert result.root_action_ev_player0.shape == result.root_strategy.shape
+    assert result.root_action_ev_player1.shape == result.root_strategy.shape
+    assert np.isclose(
+        result.root_ev_player0,
+        float(np.sum(result.root_strategy * result.root_action_ev_player0) / 300.0),
+    )
+    assert np.isclose(result.root_ev_player1, -result.root_ev_player0)
+
+
 def test_postflop_resolver_falls_back_deterministically_when_checkpoint_is_bad(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
