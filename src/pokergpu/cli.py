@@ -13,6 +13,13 @@ from threading import Event, Thread
 from typing import Any, Callable, cast
 
 import numpy as np
+from numpy.typing import NDArray
+
+try:
+    from tqdm import tqdm
+except Exception:  # pragma: no cover
+    def tqdm(iterable, **_kwargs):  # type: ignore[no-redef]
+        return iterable
 
 from .abstraction.hands import (
     PlayerRangeVectors,
@@ -72,11 +79,14 @@ from .value_network import (
     EquityEvalConfig,
     FeatureNormalizer,
     LabelNormalizer,
+    load_checkpoint,
     ValueDatasetSample,
     ValueFeatureSpec,
     ValueTargetKind,
+    ValueMLP,
     build_postflop_equity_label,
     build_value_label,
+    build_value_model,
     export_dataset_sample,
     export_value_sample,
     fit_feature_normalizer,
@@ -91,6 +101,7 @@ from .value_network import (
     save_value_sample_pack,
     save_label_normalizer,
     save_value_sample,
+    infer_value,
     scalar_ev_target,
 )
 from .value_network.train import TrainingConfig, train_baseline
@@ -190,6 +201,15 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "generate-value-data":
         value_data_args = _parse_value_data_args(sys.argv[2:])
         _generate_value_data(value_data_args)
+        _print_dataset_sanity_report(
+            _DatasetSanityReportArgs(
+                manifest_path=value_data_args.manifest_path,
+                dataset_dir=value_data_args.output_dir,
+                feature_normalizer_path=value_data_args.output_dir / "normalizer.json",
+                label_normalizer_path=value_data_args.output_dir / "label_normalizer.json",
+                split_key="sample_id",
+            )
+        )
         print(f"manifest={value_data_args.manifest_path}")
         print(f"dataset_dir={value_data_args.output_dir}")
         return 0
@@ -333,6 +353,7 @@ class _ValueDataArgs:
     feature_history: int
     validation_modulo: int
     validation_remainder: int
+    teacher_checkpoint: Path | None
 
     @property
     def feature_spec(self) -> ValueFeatureSpec:
@@ -421,6 +442,7 @@ def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
     feature_history = 8
     validation_modulo = 10
     validation_remainder = 0
+    teacher_checkpoint: Path | None = None
     index = 0
     while index < len(args):
         option = args[index]
@@ -453,6 +475,10 @@ def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
             validation_remainder = int(args[index + 1])
             index += 2
             continue
+        if option == "--teacher-checkpoint" and index + 1 < len(args):
+            teacher_checkpoint = Path(args[index + 1]).resolve()
+            index += 2
+            continue
         raise ValueError(f"invalid generate-value-data arguments: {args!r}")
     return _ValueDataArgs(
         output_dir=output_dir,
@@ -462,6 +488,7 @@ def _parse_value_data_args(args: list[str]) -> _ValueDataArgs:
         feature_history=feature_history,
         validation_modulo=validation_modulo,
         validation_remainder=validation_remainder,
+        teacher_checkpoint=teacher_checkpoint,
     )
 
 
@@ -927,20 +954,23 @@ def _generate_value_data(args: _ValueDataArgs) -> None:
     rng = Random(1337)
     feature_spec = args.feature_spec
     target = scalar_ev_target(args.player_count)
+    teacher = _load_teacher_model(args.teacher_checkpoint)
     entries: list[DatasetManifestEntry] = []
     samples: list[ValueDatasetSample] = []
     normalizer_probe = np.zeros(
         1 + 1 + 5 + args.player_count + (args.player_count * 1326) + args.player_count + args.feature_history,
         dtype=np.float32,
     )
-    for index in range(args.sample_count):
+    for index in tqdm(range(args.sample_count), total=args.sample_count, desc="generate-value-data"):
         features = normalizer_probe.copy()
         features[0] = np.float32(rng.randrange(4))
         features[1] = np.float32(100.0 + 10.0 * rng.randrange(1, 8))
         features[2:7] = np.asarray([1, 2, 3, 4, 5], dtype=np.float32)
-        label_values = np.asarray(
-            [rng.uniform(-1.0, 1.0) for _ in range(args.player_count)],
-            dtype=np.float32,
+        label_values = _build_teacher_label_values(
+            rng=rng,
+            player_count=args.player_count,
+            features=features,
+            teacher=teacher,
         )
         sample = ValueDatasetSample(
             sample_id=f"spot-{index:05d}",
@@ -1072,6 +1102,32 @@ def _export_solver_labels(
     save_dataset_manifest(existing_entries + new_pack_entries, args.manifest_path)
     save_feature_normalizer(normalizer, args.output_dir / "normalizer.json")
     save_label_normalizer(label_normalizer, args.output_dir / "label_normalizer.json")
+
+
+def _load_teacher_model(path: Path | None) -> ValueMLP | None:
+    if path is None or not path.exists():
+        return None
+    checkpoint, model_state, _optimizer_state = load_checkpoint(path)
+    model = build_value_model(checkpoint.model_config, device="cpu")
+    model.load_state_dict(model_state, strict=True)
+    return model
+
+
+def _build_teacher_label_values(
+    *,
+    rng: Random,
+    player_count: int,
+    features: NDArray[np.float32],
+    teacher: ValueMLP | None,
+) -> NDArray[np.float32]:
+    if teacher is not None:
+        prediction = infer_value(teacher, features.reshape(1, -1))[0]
+        if prediction.shape[0] >= player_count:
+            return np.asarray(prediction[:player_count], dtype=np.float32)
+    return np.asarray(
+        [rng.uniform(-1.0, 1.0) for _ in range(player_count)],
+        dtype=np.float32,
+    )
 
 
 def _export_runtime_leaf_data(
