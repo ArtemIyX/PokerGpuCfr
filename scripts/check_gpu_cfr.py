@@ -11,70 +11,36 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from pokergpu.abstraction.hands import RangeVector
-from pokergpu.core.betting import (
-    BettingRoundState,
-    BlindStructure,
-    PlayerBet,
-    PlayerIndex,
-    PlayerStack,
-    Pot,
-    chips,
-)
-from pokergpu.core.board import Board
-from pokergpu.core.state import GameState, PlayerState
-from pokergpu.eval import EvalDeviceConfig
+from pokergpu.cfr import train_toy_mccfr, toy_expected_value
+from pokergpu.eval import EvalDeviceConfig, LeafFeatureBatch
 from pokergpu.eval.gpu_stub import GpuStubLeafEvaluator
-from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_gpu
-
-
-def make_state() -> GameState:
-    return GameState(
-        board=Board.from_str("KhQs5hJs"),
-        players=(
-            PlayerState(player=PlayerIndex(0)),
-            PlayerState(player=PlayerIndex(1)),
-        ),
-        betting_round=BettingRoundState(
-            pot=Pot(amount=chips(200)),
-            stacks=(
-                PlayerStack(player=PlayerIndex(0), stack=chips(2000)),
-                PlayerStack(player=PlayerIndex(1), stack=chips(2000)),
-            ),
-            bets=(
-                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
-                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
-            ),
-            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
-            to_act=PlayerIndex(0),
-        ),
-        dealer=PlayerIndex(0),
-    )
 
 
 def main() -> int:
-    if not torch.cuda.is_available():
-        print("CUDA is not available")
-        return 1
-
-    result = resolve_postflop_gpu(
-        PostflopResolveSpec(
-            state=make_state(),
-            range_p0=RangeVector.uniform(),
-            range_p1=RangeVector.uniform(),
-            time_budget_sec=0.0,
-            max_depth=6,
-            max_nodes=2048,
-        ),
-        evaluator=GpuStubLeafEvaluator(EvalDeviceConfig(mode="cuda")),
-    )
-
-    print(f"iterations={result.iterations}")
-    print(f"node_count={result.node_count}")
-    print(f"leaf_count={result.leaf_count}")
-    print(f"root_ev_p0={result.root_ev_player0:.6f}")
-    print(f"root_ev_p1={result.root_ev_player1:.6f}")
-    print(f"root_strategy={np.array2string(result.root_strategy, precision=4)}")
+    result = train_toy_mccfr(iterations=128, seed=7)
+    print(f"expected_ev={toy_expected_value():.6f}")
+    print(f"learned_ev={result.expected_value_p0:.6f}")
+    print(f"regrets={np.array2string(result.store.regrets, precision=4)}")
+    print(f"strategy_sums={np.array2string(result.store.strategy_sums, precision=4)}")
+    if torch.cuda.is_available():
+        evaluator = GpuStubLeafEvaluator(EvalDeviceConfig(mode="cuda"))
+        batch = LeafFeatureBatch(
+            node_indices=(0,),
+            player_to_act=np.array([0], dtype=np.int32),
+            street=np.array([3], dtype=np.int32),
+            pot=np.array([200.0], dtype=np.float32),
+            stack_p0=np.array([1000.0], dtype=np.float32),
+            stack_p1=np.array([1000.0], dtype=np.float32),
+            board_size=np.array([4], dtype=np.int32),
+            reach_p0=np.array([1.0], dtype=np.float32),
+            reach_p1=np.array([1.0], dtype=np.float32),
+            reach_p2=np.array([0.0], dtype=np.float32),
+            is_terminal=np.array([False], dtype=np.bool_),
+            is_frontier=np.array([True], dtype=np.bool_),
+            infoset_id=np.array([0], dtype=np.int32),
+        )
+        leaf = evaluator.evaluate(batch)
+        print(f"gpu_stub_ev={float(leaf.ev_player0[0]):.6f}")
     return 0
 
 

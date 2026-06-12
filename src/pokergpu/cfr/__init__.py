@@ -6,6 +6,8 @@ from .infosets import (
     regret_matching,
 )
 from .iteration import CFRIterationResult, CFRVariant, DCFRConfig, run_cfr_iteration
+from .mccfr import train_kuhn_mccfr, train_leduc_mccfr
+from .toy_mccfr import ToyMCCFRResult, new_toy_store, toy_expected_value, train_toy_mccfr
 from .kuhn import (
     KuhnAction,
     KuhnCard,
@@ -101,6 +103,12 @@ __all__ = [
     "evaluate_frontier_nodes",
     "train_leduc_cfr",
     "train_kuhn_cfr",
+    "train_leduc_mccfr",
+    "train_kuhn_mccfr",
+    "ToyMCCFRResult",
+    "new_toy_store",
+    "toy_expected_value",
+    "train_toy_mccfr",
     "compute_counterfactual_values",
     "compute_counterfactual_values_parallel",
     "compute_reach_probabilities",
