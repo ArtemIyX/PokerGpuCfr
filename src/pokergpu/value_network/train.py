@@ -81,13 +81,35 @@ def _load_samples(
     label: str = "load samples",
 ) -> list[ValueDatasetSample]:
     samples: list[ValueDatasetSample] = []
-    unique_pack_paths = [dataset_dir / entry.pack_path for entry in entries if entry.pack_path]
     seen: set[Path] = set()
-    pack_paths = [path for path in unique_pack_paths if not (path in seen or seen.add(path))]
+    pack_paths: list[Path] = []
+    sample_paths: list[Path] = []
+    for entry in entries:
+        candidate_pack = (
+            dataset_dir / entry.pack_path
+            if entry.pack_path
+            else dataset_dir / f"{entry.split}.pack.npz"
+        )
+        candidate_sample = dataset_dir / entry.path if entry.path else None
+        chosen = None
+        if candidate_pack.exists():
+            chosen = candidate_pack
+        elif candidate_sample is not None and candidate_sample.exists():
+            chosen = candidate_sample
+        if chosen is not None and chosen not in seen:
+            seen.add(chosen)
+            if chosen.name.endswith(".pack.npz"):
+                pack_paths.append(chosen)
+            else:
+                sample_paths.append(chosen)
     for index, pack_path in enumerate(pack_paths, start=1):
         samples.extend(load_value_sample_pack(pack_path))
         if progress_callback is not None:
             progress_callback(index, len(pack_paths), label)
+    for index, sample_path in enumerate(sample_paths, start=len(pack_paths) + 1):
+        samples.append(load_value_sample(sample_path))
+        if progress_callback is not None:
+            progress_callback(index, len(pack_paths) + len(sample_paths), label)
     return samples
 
 

@@ -71,6 +71,8 @@ class DatasetPackManifestEntryPayload(TypedDict):
     sample_count: int
     feature_count: int
     label_shape: list[int]
+    sample_id: str
+    path: str
     pack_index: int
 
 
@@ -258,6 +260,8 @@ class DatasetPackManifestEntry:
             "sample_count": self.sample_count,
             "feature_count": self.feature_count,
             "label_shape": [self.label_shape[0], self.label_shape[1]],
+            "sample_id": self.sample_id,
+            "path": self.path,
             "pack_index": self.pack_index,
         }
 
@@ -270,6 +274,8 @@ class DatasetPackManifestEntry:
             sample_count=int(payload["sample_count"]),
             feature_count=int(payload["feature_count"]),
             label_shape=(int(shape[0]), int(shape[1])),
+            sample_id=payload.get("sample_id", ""),
+            path=payload.get("path", ""),
             pack_index=int(payload.get("pack_index", 0)),
         )
 
@@ -423,7 +429,7 @@ def save_dataset_manifest(entries: list[DatasetPackManifestEntry], path: Path) -
                 metadata=entry.metadata,
                 pack_index=entry.pack_index,
             )
-        payload.append(normalized.to_dict())
+        payload.append(cast(dict[str, object], normalized.to_dict()))
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -487,6 +493,8 @@ def build_dataset_manifest_entry(
         sample_count=1,
         feature_count=int(sample.features.shape[0]),
         label_shape=(int(sample.label.shape[0]), int(sample.label.shape[1])),
+        sample_id=sample.sample_id,
+        path=relative_path,
         pack_index=0,
     )
 

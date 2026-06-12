@@ -739,11 +739,24 @@ def _print_dataset_sanity_report(args: _DatasetSanityReportArgs) -> None:
     entries = load_dataset_manifest(args.manifest_path)
     train_entries = [entry for entry in entries if entry.split == "train"]
     val_entries = [entry for entry in entries if entry.split == "val"]
-    pack_paths = sorted({args.dataset_dir / entry.pack_path for entry in entries if entry.pack_path})
-    if pack_paths:
-        samples: list[ValueDatasetSample] = []
-        for pack_path in pack_paths:
-            samples.extend(load_value_sample_pack(pack_path))
+    samples: list[ValueDatasetSample] = []
+    sample_paths: list[Path] = []
+    pack_paths: list[Path] = []
+    for entry in entries:
+        candidate_pack = (
+            args.dataset_dir / entry.pack_path
+            if entry.pack_path
+            else args.dataset_dir / f"{entry.split}.pack.npz"
+        )
+        candidate_sample = args.dataset_dir / entry.path if entry.path else None
+        if candidate_pack.exists():
+            pack_paths.append(candidate_pack)
+        elif candidate_sample is not None and candidate_sample.exists():
+            sample_paths.append(candidate_sample)
+    for pack_path in sorted(set(pack_paths)):
+        samples.extend(load_value_sample_pack(pack_path))
+    for sample_path in sorted(set(sample_paths)):
+        samples.append(load_value_sample(sample_path))
     feature_counts = sorted({int(entry.feature_count) for entry in entries})
     label_shapes = sorted({tuple(entry.label_shape) for entry in entries})
     feature_normalizer = (
