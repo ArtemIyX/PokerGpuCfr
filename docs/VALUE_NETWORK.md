@@ -157,38 +157,6 @@ These help track:
 - checkpoint timing
 - batch throughput
 
-## Roadmap
-
-### Goal 1: Define the target
-
-- [x] choose scalar EV or bucketed value output
-- [x] define the exact input features
-- [x] define label format from solver data
-
-### Goal 2: Build the dataset pipeline
-
-- [x] export training states from solver runs
-- [x] normalize features
-- [x] write train/validation split rules
-- [x] store samples on disk in a simple format
-
-### Goal 3: Build the first network
-
-- [x] implement a compact MLP
-- [x] add inference and training entry points
-- [x] make checkpoint save/load work
-
-### Goal 4: Train a baseline
-
-- [x] run a short supervised training session
-- [x] verify loss decreases
-- [x] compare predictions against solver labels
-
-### Goal 5: Integrate with CFR runtime
-
-- use the network only at leaf nodes
-- keep CFR as the decision engine
-- measure runtime speed and EV quality
 
 ## Rule of thumb
 
