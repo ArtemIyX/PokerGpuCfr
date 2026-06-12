@@ -26,7 +26,7 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board, Street
 from pokergpu.core.cards import Card, make_deck
 from pokergpu.core.state import GameState, PlayerState
-from pokergpu.eval.cpu_stub import CpuStubLeafEvaluator
+from pokergpu.eval import EvalDeviceConfig, make_leaf_evaluator
 from pokergpu.eval.interface import LeafEvaluator
 from pokergpu.eval.types import LeafFeatureBatch, LeafValueBatch
 from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_hu
@@ -86,15 +86,16 @@ def main() -> int:
     state = make_random_state(rng, args.players, args.street)
     range_p0, range_p1 = make_random_ranges(rng)
 
+    reference_eval = make_leaf_evaluator(EvalDeviceConfig(mode=args.reference_device))
     reference = run_case(
-        "cpu_stub",
+        "gpu_solver",
         state,
         range_p0,
         range_p1,
-        args.time_budget,
-        args.max_depth,
-        args.max_nodes,
-        CpuStubLeafEvaluator(),
+        args.reference_time_budget,
+        args.reference_max_depth,
+        args.reference_max_nodes,
+        reference_eval,
     )
 
     checkpoint_eval = CheckpointLeafEvaluator(args.checkpoint, args.device)
@@ -123,6 +124,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-depth", type=int, default=1)
     parser.add_argument("--max-nodes", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--reference-device", type=str, default="cuda")
+    parser.add_argument("--reference-time-budget", type=float, default=0.0)
+    parser.add_argument("--reference-max-depth", type=int, default=12)
+    parser.add_argument("--reference-max-nodes", type=int, default=8192)
     return parser.parse_args()
 
 
@@ -219,6 +224,10 @@ def print_case_summary(
         ("players", str(args.players)),
         ("street", str(args.street)),
         ("device", args.device),
+        ("reference_device", args.reference_device),
+        ("reference_time_budget", str(args.reference_time_budget)),
+        ("reference_max_depth", str(args.reference_max_depth)),
+        ("reference_max_nodes", str(args.reference_max_nodes)),
         ("board", str(state.board)),
         ("p0_hole", f"{state.players[0].hole_cards[0]}{state.players[0].hole_cards[1]}"),
         ("p1_hole", f"{state.players[1].hole_cards[0]}{state.players[1].hole_cards[1]}"),

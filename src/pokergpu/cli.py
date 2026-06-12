@@ -396,6 +396,7 @@ class _SolverLabelArgs:
     add: bool
     pause_every: int
     pause_seconds: float
+    verbose: bool
 
 
 @dataclass(frozen=True, slots=True)
