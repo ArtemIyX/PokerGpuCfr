@@ -3,6 +3,8 @@ from .public_tree import (
     InfosetId,
     NodeId,
     NodeType,
+    PublicTreeFlatView,
+    PublicTreeLevelSchedule,
     PublicTree,
     PublicTreeTemplate,
 )
@@ -12,6 +14,8 @@ __all__ = [
     "InfosetId",
     "NodeId",
     "NodeType",
+    "PublicTreeFlatView",
+    "PublicTreeLevelSchedule",
     "PublicTree",
     "PublicTreeTemplate",
 ]

@@ -54,6 +54,10 @@ def test_public_tree_template_contains_flat_arrays() -> None:
     assert template.terminal_payoffs == built.tree.terminal_payoffs
     assert len(template.depth) == built.tree.node_count
     assert len(template.street) == built.tree.node_count
+    assert template.level_schedule.forward_levels[0] == (0,)
+    assert template.level_schedule.backward_levels[-1] == (0,)
+    assert template.flat_view.first_child == built.tree.first_child
+    assert template.flat_view.child_count == built.tree.child_count
 
 
 def test_public_tree_template_is_deterministic() -> None:
@@ -72,6 +76,8 @@ def test_public_tree_template_is_deterministic() -> None:
     assert built_a.template.tree_key == built_b.template.tree_key
     assert built_a.template.canonical_board_key == built_b.template.canonical_board_key
     assert built_a.template.action_abstraction_id == built_b.template.action_abstraction_id
+    assert built_a.template.flat_view.edge_child == built_b.template.flat_view.edge_child
+    assert built_a.template.level_schedule == built_b.template.level_schedule
 
 
 def test_public_tree_template_canonical_board_key_matches_isomorphic_boards() -> None:

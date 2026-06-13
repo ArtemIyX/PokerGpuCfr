@@ -294,10 +294,10 @@ Cache values:
 
 ### Phase 1
 
-- [ ] Add a flat node/edge tensor view for one tree.
-- [ ] Add per-level node lists.
-- [ ] Verify deterministic tree shape for identical states.
-- [ ] Keep current solver working.
+- [x] Add a flat node/edge tensor view for one tree.
+- [x] Add per-level node lists.
+- [x] Verify deterministic tree shape for identical states.
+- [x] Keep current solver working.
 
 ### Phase 2
 

@@ -337,3 +337,36 @@ def test_build_public_tree_records_player_metadata() -> None:
 
     assert built.player_count == 3
     assert built.active_players == (0, 1, 2)
+
+
+def test_build_public_tree_exposes_flat_level_layout() -> None:
+    state = GameState(
+        board=Board(cards=()),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(150)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    built_a = build_public_tree(state, config=TreeBuildConfig(max_depth=2, max_nodes=16))
+    built_b = build_public_tree(state, config=TreeBuildConfig(max_depth=2, max_nodes=16))
+
+    assert built_a.flat_view.node_depth == built_a.template.depth
+    assert built_a.flat_view.first_child == built_a.tree.first_child
+    assert built_a.flat_view.child_count == built_a.tree.child_count
+    assert built_a.level_schedule == built_a.template.level_schedule
+    assert built_a.template.level_schedule == built_b.template.level_schedule

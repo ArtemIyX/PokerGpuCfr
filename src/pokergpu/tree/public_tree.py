@@ -29,6 +29,32 @@ class ChildLink:
 
 
 @dataclass(slots=True, frozen=True)
+class PublicTreeFlatView:
+    node_type: tuple[NodeType, ...]
+    node_depth: tuple[int, ...]
+    node_level: tuple[int, ...]
+    street: tuple[int, ...]
+    infoset_id: tuple[int, ...]
+    first_child: tuple[int, ...]
+    child_count: tuple[int, ...]
+    is_frontier: tuple[bool, ...]
+    terminal_payoff: tuple[float, ...]
+    edge_parent: tuple[int, ...]
+    edge_child: tuple[int, ...]
+    edge_action_slot: tuple[int, ...]
+    edge_chance_prob: tuple[float, ...]
+    edge_infoset_id: tuple[int, ...]
+    edge_player: tuple[int, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class PublicTreeLevelSchedule:
+    forward_levels: tuple[tuple[int, ...], ...]
+    backward_levels: tuple[tuple[int, ...], ...]
+    level_nodes: tuple[tuple[int, ...], ...]
+
+
+@dataclass(slots=True, frozen=True)
 class PublicTree:
     node_types: tuple[NodeType, ...]
     is_frontier: tuple[bool, ...]
@@ -135,6 +161,8 @@ class PublicTreeTemplate:
     terminal_payoffs: tuple[Chips | None, ...]
     depth: tuple[int, ...]
     street: tuple[str, ...]
+    level_schedule: PublicTreeLevelSchedule
+    flat_view: PublicTreeFlatView
     canonical_board_key: str
     action_abstraction_id: str
     tree_key: str

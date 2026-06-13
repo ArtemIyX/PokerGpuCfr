@@ -16,6 +16,8 @@ from .public_tree import (
     InfosetId,
     NodeId,
     NodeType,
+    PublicTreeFlatView,
+    PublicTreeLevelSchedule,
     PublicTree,
     PublicTreeTemplate,
 )
@@ -25,6 +27,8 @@ from .public_tree import (
 class BuiltPublicTree:
     tree: PublicTree
     template: PublicTreeTemplate
+    flat_view: PublicTreeFlatView
+    level_schedule: PublicTreeLevelSchedule
     node_states: tuple[GameState, ...]
     actions_by_node: tuple[tuple[Action, ...], ...]
     action_abstraction_id: str
@@ -141,6 +145,8 @@ def build_public_tree(
         infoset_ids=tuple(infoset_ids),
         terminal_payoffs=tuple(terminal_payoffs),
     )
+    flat_view = _build_flat_view(tree, node_states)
+    level_schedule = _build_level_schedule(flat_view.node_depth)
     template = PublicTreeTemplate(
         node_types=tuple(node_types),
         is_frontier=tuple(is_frontier),
@@ -150,6 +156,8 @@ def build_public_tree(
         terminal_payoffs=tuple(terminal_payoffs),
         depth=tuple(_node_depths(tree)),
         street=tuple(node_state.current_street.value for node_state in node_states),
+        level_schedule=level_schedule,
+        flat_view=flat_view,
         canonical_board_key=canonical_board_key(canonical_board),
         action_abstraction_id=abstraction_impl.abstraction_id(state),
         tree_key=_tree_cache_key(
@@ -161,6 +169,8 @@ def build_public_tree(
     return BuiltPublicTree(
         tree=tree,
         template=template,
+        flat_view=flat_view,
+        level_schedule=level_schedule,
         node_states=tuple(node_states),
         actions_by_node=tuple(actions_by_node),
         action_abstraction_id=abstraction_impl.abstraction_id(state),
@@ -246,6 +256,90 @@ def _node_depths(tree: PublicTree) -> tuple[int, ...]:
             child_index = int(tree.children[start + child_offset].child)
             depths[child_index] = depths[node_index] + 1
     return tuple(depths)
+
+
+def _build_flat_view(tree: PublicTree, node_states: tuple[GameState, ...]) -> PublicTreeFlatView:
+    node_depth = _node_depths(tree)
+    node_level = node_depth
+    edge_parent: list[int] = []
+    edge_child: list[int] = []
+    edge_action_slot: list[int] = []
+    edge_chance_prob: list[float] = []
+    edge_infoset_id: list[int] = []
+    edge_player: list[int] = []
+    for node_index in range(tree.node_count):
+        start = tree.first_child[node_index]
+        count = tree.child_count[node_index]
+        infoset_id = tree.infoset_ids[node_index]
+        node_type = tree.node_types[node_index]
+        player = _node_type_player_index(node_type)
+        for action_slot, child_link in enumerate(tree.children[start : start + count]):
+            edge_parent.append(node_index)
+            edge_child.append(int(child_link.child))
+            edge_action_slot.append(action_slot)
+            edge_chance_prob.append(float(child_link.chance_prob or 0.0))
+            edge_infoset_id.append(int(infoset_id) if infoset_id is not None else -1)
+            edge_player.append(player)
+    return PublicTreeFlatView(
+        node_type=tuple(tree.node_types),
+        node_depth=node_depth,
+        node_level=node_level,
+        street=tuple(_street_to_index(node_state.current_street) for node_state in node_states),
+        infoset_id=tuple(int(infoset_id) if infoset_id is not None else -1 for infoset_id in tree.infoset_ids),
+        first_child=tree.first_child,
+        child_count=tree.child_count,
+        is_frontier=tree.is_frontier,
+        terminal_payoff=tuple(
+            float(payoff.amount) if payoff is not None else 0.0 for payoff in tree.terminal_payoffs
+        ),
+        edge_parent=tuple(edge_parent),
+        edge_child=tuple(edge_child),
+        edge_action_slot=tuple(edge_action_slot),
+        edge_chance_prob=tuple(edge_chance_prob),
+        edge_infoset_id=tuple(edge_infoset_id),
+        edge_player=tuple(edge_player),
+    )
+
+
+def _build_level_schedule(node_depths: tuple[int, ...]) -> PublicTreeLevelSchedule:
+    if not node_depths:
+        return PublicTreeLevelSchedule(forward_levels=(), backward_levels=(), level_nodes=())
+    max_depth = max(node_depths)
+    level_nodes = tuple(
+        tuple(node_index for node_index, depth in enumerate(node_depths) if depth == level)
+        for level in range(max_depth + 1)
+    )
+    return PublicTreeLevelSchedule(
+        forward_levels=level_nodes,
+        backward_levels=tuple(reversed(level_nodes)),
+        level_nodes=level_nodes,
+    )
+
+
+def _node_type_player_index(node_type: NodeType) -> int:
+    if node_type is NodeType.PLAYER0:
+        return 0
+    if node_type is NodeType.PLAYER1:
+        return 1
+    if node_type is NodeType.PLAYER2:
+        return 2
+    if node_type is NodeType.PLAYER3:
+        return 3
+    if node_type is NodeType.PLAYER4:
+        return 4
+    if node_type is NodeType.PLAYER5:
+        return 5
+    return -1
+
+
+def _street_to_index(street: object) -> int:
+    value = getattr(street, "value", "")
+    return {
+        "preflop": 0,
+        "flop": 1,
+        "turn": 2,
+        "river": 3,
+    }.get(value, 0)
 
 
 def _tree_cache_key(
