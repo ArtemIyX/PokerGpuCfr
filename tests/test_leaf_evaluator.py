@@ -35,6 +35,13 @@ def test_scatter_leaf_values_matches_input_order() -> None:
     node_values_player0 = np.zeros(tree.node_count, dtype=np.float32)
     node_values_player1 = np.zeros(tree.node_count, dtype=np.float32)
     values = LeafValueBatch(
+        values=np.stack(
+            (
+                np.array([1.5, -2.0], dtype=np.float32),
+                np.array([-1.5, 2.0], dtype=np.float32),
+            ),
+            axis=1,
+        ),
         ev_player0=np.array([1.5, -2.0], dtype=np.float32),
         ev_player1=np.array([-1.5, 2.0], dtype=np.float32),
     )

@@ -43,6 +43,7 @@ class CpuStubLeafEvaluator(LeafEvaluator):
             ev_p1[index] = np.float32(payout_p1)
 
         return LeafValueBatch(
+            values=np.stack((ev_p0, ev_p1), axis=1),
             ev_player0=ev_p0,
             ev_player1=ev_p1,
             ev_player2=-(ev_p0 + ev_p1),

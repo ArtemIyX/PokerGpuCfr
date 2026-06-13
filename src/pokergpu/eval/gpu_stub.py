@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 from pokergpu.core.state import HandPhase
@@ -50,6 +51,13 @@ class GpuBatchLeafEvaluator(LeafEvaluator):
                     ev_p0[index] = float(payout_p0)
                     ev_p1[index] = float(payout_p1)
             return LeafValueBatch(
+                values=np.stack(
+                    (
+                        ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
+                        ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
+                    ),
+                    axis=1,
+                ),
                 ev_player0=ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
                 ev_player1=ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
                 ev_player2=(-(ev_p0 + ev_p1)).detach().to("cpu", dtype=torch.float32).numpy(),

@@ -149,6 +149,13 @@ def test_evaluator_populates_frontier_values_in_backward_pass() -> None:
         def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
             size = batch.size
             return LeafValueBatch(
+                values=np.stack(
+                    (
+                        np.full(size, 7.0, dtype=np.float32),
+                        np.full(size, -7.0, dtype=np.float32),
+                    ),
+                    axis=1,
+                ),
                 ev_player0=np.full(size, 7.0, dtype=np.float32),
                 ev_player1=np.full(size, -7.0, dtype=np.float32),
             )

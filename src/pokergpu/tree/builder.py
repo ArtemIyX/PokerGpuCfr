@@ -21,6 +21,8 @@ class BuiltPublicTree:
     actions_by_node: tuple[tuple[Action, ...], ...]
     action_abstraction_id: str
     canonical_board_key: str
+    player_count: int
+    active_players: tuple[int, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -135,6 +137,8 @@ def build_public_tree(
         actions_by_node=tuple(actions_by_node),
         action_abstraction_id=abstraction_impl.abstraction_id(state),
         canonical_board_key=canonical_board_key(state.board),
+        player_count=state.player_count,
+        active_players=tuple(int(player.player) for player in state.active_players),
     )
 
 

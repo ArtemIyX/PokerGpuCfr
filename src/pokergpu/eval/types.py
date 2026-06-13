@@ -50,12 +50,17 @@ class LeafFeatureBatch:
 
 @dataclass(slots=True, frozen=True)
 class LeafValueBatch:
+    values: NDArray[np.float32]
     ev_player0: NDArray[np.float32]
     ev_player1: NDArray[np.float32]
     ev_player2: NDArray[np.float32] | None = None
 
     def __post_init__(self) -> None:
+        if self.values.ndim != 2:
+            raise ValueError("leaf value matrix must be two-dimensional")
         if self.ev_player0.shape != self.ev_player1.shape:
             raise ValueError("leaf EV arrays must have matching shapes")
         if self.ev_player2 is not None and self.ev_player2.shape != self.ev_player0.shape:
             raise ValueError("leaf EV arrays must have matching shapes")
+        if self.values.shape[0] != self.ev_player0.shape[0]:
+            raise ValueError("leaf values must match batch size")

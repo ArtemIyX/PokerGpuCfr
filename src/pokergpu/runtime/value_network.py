@@ -39,11 +39,17 @@ class PostflopRuntimeValueNetworkEvaluator(LeafEvaluator):
         features = _build_runtime_leaf_features(batch, self._feature_spec, self._input_dim)
         normalized = normalize_feature_batch(ValueFeatureBatch(features), self._normalizer).values
         values = infer_value(self._model, normalized)
-        if values.shape != (batch.size, 2):
-            raise ValueError("runtime value network must return two outputs per leaf")
+        if values.ndim != 2 or values.shape[0] != batch.size:
+            raise ValueError("runtime value network must return one value row per leaf")
+        if values.shape[1] != self._feature_spec.player_count:
+            raise ValueError("runtime value network output dimension mismatch")
         return LeafValueBatch(
+            values=np.asarray(values, dtype=np.float32),
             ev_player0=np.asarray(values[:, 0], dtype=np.float32),
             ev_player1=np.asarray(values[:, 1], dtype=np.float32),
+            ev_player2=np.asarray(values[:, 2], dtype=np.float32)
+            if values.shape[1] > 2
+            else None,
         )
 
 
@@ -89,12 +95,10 @@ def _validate_runtime_checkpoint(
     target_kind: ValueTargetKind,
     feature_spec: object,
 ) -> None:
-    if output_dim != 2:
+    if output_dim != getattr(feature_spec, "player_count", output_dim):
         raise ValueError("runtime value network output dimension mismatch")
     if target_kind is not ValueTargetKind.SCALAR_EV:
         raise ValueError("runtime value network requires scalar EV targets")
-    if getattr(feature_spec, "player_count", None) != 2:
-        raise ValueError("runtime value network requires heads-up checkpoints")
 
 
 def _build_runtime_leaf_features(
