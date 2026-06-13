@@ -16,11 +16,13 @@ from pokergpu.abstraction.actions import (
     make_postflop_mvp_profile,
 )
 from pokergpu.cfr import InfosetLayout, InfosetStore, TreeLevels, build_tree_levels
+from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.cfr.traversal import compute_counterfactual_values
 from pokergpu.core.board import Street
 from pokergpu.core.payouts import compute_payouts, total_pot
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import EvalDeviceConfig, LeafEvaluator
+from pokergpu.eval.types import LeafFeatureBatch
 from pokergpu.eval.gpu_stub import GpuBatchLeafEvaluator
 from pokergpu.runtime.cache import LruCache
 from pokergpu.runtime.cache import PackedGpuSolveState
@@ -55,7 +57,7 @@ class BatchedGpuPlan:
     node_infoset: torch.Tensor
     node_type: torch.Tensor
     frontier_nodes: torch.Tensor
-    frontier_leaf_batch: object
+    frontier_leaf_batch: LeafFeatureBatch
     root_child_nodes: torch.Tensor
     root_child_parent_infoset: int
     action_counts: torch.Tensor
@@ -125,7 +127,7 @@ def _build_batched_gpu_plan(
     levels: TreeLevels,
     layout: InfosetLayout,
     *,
-    frontier_leaf_batch: object | None = None,
+    frontier_leaf_batch: LeafFeatureBatch,
     device: torch.device,
 ) -> BatchedGpuPlan:
     forward_levels: list[dict[str, torch.Tensor]] = []
@@ -747,29 +749,42 @@ def _backward_pass_gpu_batched(
             out_p0[node_index] = float(leaf_values.ev_player0[row])
             out_p1[node_index] = float(leaf_values.ev_player1[row])
 
-    for level in plan.backward_levels:
-        parents = level["parents"]
-        children = level["children"]
-        node_types = level["node_types"]
-        infosets = level["infosets"]
-        action_slots = level["action_slots"]
-        chance_probs = level["chance_probs"]
-        if parents.numel() == 0:
-            continue
-        child_p0 = out_p0[children]
-        child_p1 = out_p1[children]
-        parent_values_p0 = torch.zeros_like(child_p0)
-        parent_values_p1 = torch.zeros_like(child_p1)
-        chance_mask = node_types == 0
-        parent_values_p0[chance_mask] = child_p0[chance_mask] * chance_probs[chance_mask]
-        parent_values_p1[chance_mask] = child_p1[chance_mask] * chance_probs[chance_mask]
-        player_mask = ~chance_mask
-        if torch.any(player_mask):
-            strat = strategy_table[infosets.clamp_min(0), action_slots]
-            parent_values_p0[player_mask] = child_p0[player_mask] * strat[player_mask]
-            parent_values_p1[player_mask] = child_p1[player_mask] * strat[player_mask]
-        out_p0.scatter_add_(0, parents, parent_values_p0)
-        out_p1.scatter_add_(0, parents, parent_values_p1)
+    edge_parent = plan.edge_parent
+    edge_child = plan.edge_child
+    edge_node_type = plan.edge_node_type
+    edge_infoset = plan.edge_infoset
+    edge_action_slot = plan.edge_action_slot
+    edge_chance_prob = plan.edge_chance_prob
+    if edge_parent.numel() == 0:
+        return
+    child_p0 = out_p0[edge_child]
+    child_p1 = out_p1[edge_child]
+    contrib_p0 = torch.zeros_like(child_p0)
+    contrib_p1 = torch.zeros_like(child_p1)
+    chance_mask = edge_node_type == 0
+    if torch.any(chance_mask):
+        contrib_p0[chance_mask] = child_p0[chance_mask] * edge_chance_prob[chance_mask]
+        contrib_p1[chance_mask] = child_p1[chance_mask] * edge_chance_prob[chance_mask]
+    player0_mask = edge_node_type == 1
+    if torch.any(player0_mask):
+        contrib_p0[player0_mask] = child_p0[player0_mask] * strategy_table[
+            edge_infoset[player0_mask].clamp_min(0),
+            edge_action_slot[player0_mask],
+        ]
+        contrib_p1[player0_mask] = child_p1[player0_mask]
+    player1_mask = edge_node_type == 2
+    if torch.any(player1_mask):
+        contrib_p0[player1_mask] = child_p0[player1_mask]
+        contrib_p1[player1_mask] = child_p1[player1_mask] * strategy_table[
+            edge_infoset[player1_mask].clamp_min(0),
+            edge_action_slot[player1_mask],
+        ]
+    other_mask = ~(chance_mask | player0_mask | player1_mask)
+    if torch.any(other_mask):
+        contrib_p0[other_mask] = child_p0[other_mask]
+        contrib_p1[other_mask] = child_p1[other_mask]
+    out_p0.scatter_add_(0, edge_parent, contrib_p0)
+    out_p1.scatter_add_(0, edge_parent, contrib_p1)
 
 
 def _backward_pass_gpu_legacy(
