@@ -18,13 +18,14 @@ from pokergpu.cfr import InfosetLayout, InfosetStore, TreeLevels, build_tree_lev
 from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.cfr.traversal import compute_counterfactual_values
 from pokergpu.core.board import Street
-from pokergpu.core.payouts import total_pot
+from pokergpu.core.payouts import compute_payouts, total_pot
 from pokergpu.core.state import GameState, HandPhase
-from pokergpu.eval import EvalDeviceConfig, LeafEvaluator, make_leaf_evaluator
+from pokergpu.eval import LeafEvaluator
 from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
 from .postflop import PostflopResolveResult, PostflopResolveSpec
+from .value_network import default_postflop_leaf_evaluator
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,7 @@ def resolve_postflop_gpu(
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
-    evaluator_impl = evaluator or make_leaf_evaluator(EvalDeviceConfig(mode="cuda"))
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
@@ -76,6 +77,13 @@ def resolve_postflop_gpu(
         if tree.tree.is_frontier[index] and tree.tree.node_types[index] is not NodeType.TERMINAL
     )
     leaf_count = len(leaf_nodes)
+    terminal_values_player0 = np.asarray(
+        [
+            np.float32(_terminal_value_player0(node_state))
+            for node_state in tree.node_states
+        ],
+        dtype=np.float32,
+    )
 
     root_strategy = np.full(len(root_actions), 1.0 / max(1, len(root_actions)), dtype=np.float32)
     forward_reach_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
@@ -128,12 +136,14 @@ def resolve_postflop_gpu(
         node_states=tree.node_states,
         reach_p0=forward_reach_p0.detach().cpu().numpy(),
         reach_p1=forward_reach_p1.detach().cpu().numpy(),
+        terminal_values_player0=terminal_values_player0,
         evaluator=evaluator_impl,
     )
-    root_action_values_p0 = cpu_backward.infoset_action_values.get(
-        int(root_infoset), np.zeros(0, dtype=np.float32)
+    root_action_nodes = _root_child_nodes(tree.tree)
+    root_action_ev_p0 = np.asarray(
+        [float(cpu_backward.node_values_player0[index]) for index in root_action_nodes],
+        dtype=np.float32,
     )
-    root_action_ev_p0 = np.asarray(root_action_values_p0, dtype=np.float32)
     root_action_ev_p1 = -root_action_ev_p0
     root_ev_p0 = float(
         np.sum(
@@ -156,6 +166,12 @@ def resolve_postflop_gpu(
         node_count=node_count,
         leaf_count=leaf_count,
     )
+
+
+def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
+    start = tree.first_child[0]
+    count = tree.child_count[0]
+    return tuple(int(tree.children[start + index].child) for index in range(count))
 
 
 def _forward_pass_gpu(
@@ -328,3 +344,14 @@ def _format_action(action: object) -> str:
         return str(getattr(action_type, "value", action_type))
     return f"{getattr(action_type, 'value', action_type)}({int(amount)})"
 
+
+def _terminal_value_player0(state: GameState) -> float:
+    if state.phase is not HandPhase.TERMINAL:
+        return 0.0
+    payouts = compute_payouts(state)
+    player0_payout = next(
+        (payout.amount for payout in payouts if payout.player == 0),
+        0,
+    )
+    other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
+    return float(player0_payout - other_payouts)

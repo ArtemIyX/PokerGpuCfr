@@ -23,9 +23,11 @@ from pokergpu.runtime.gpu_postflop import (
     _backward_pass_gpu,
     _build_infoset_action_counts,
     _forward_pass_gpu,
+    _root_child_nodes,
     resolve_postflop_gpu,
 )
 from pokergpu.runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
+from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
 from pokergpu.cfr.traversal import build_tree_levels
 from pokergpu.tree import NodeType
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
@@ -177,20 +179,14 @@ def test_cuda_backward_matches_cpu_on_same_tree() -> None:
         evaluator=evaluator,
     )
 
-    frontier = tuple(
-        index
-        for index in range(tree.tree.node_count)
-        if tree.tree.is_frontier[index] and tree.tree.node_types[index] is not NodeType.TERMINAL
-    )
-    assert frontier
-    first = frontier[0]
+    root_child = _root_child_nodes(tree.tree)[0]
     assert np.isclose(
-        float(backward_p0[first].detach().cpu().item()),
-        float(cpu_backward.node_values_player0[first]),
+        float(backward_p0[root_child].detach().cpu().item()),
+        float(cpu_backward.node_values_player0[root_child]),
     )
     assert np.isclose(
-        float(backward_p1[first].detach().cpu().item()),
-        float(cpu_backward.node_values_player1[first]),
+        float(backward_p1[root_child].detach().cpu().item()),
+        float(cpu_backward.node_values_player1[root_child]),
     )
 
 
@@ -209,3 +205,43 @@ def test_cuda_root_summary_is_zero_sum_not_uniform_only() -> None:
     assert np.isclose(float(result.root_strategy.sum()), 1.0)
     assert np.isclose(result.root_ev_player0 + result.root_ev_player1, 0.0, atol=1e-6)
     assert np.allclose(result.root_action_ev_player1, -result.root_action_ev_player0)
+
+
+def test_cuda_matches_cpu_root_shape_and_values_without_checkpoint() -> None:
+    state = _make_state()
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=2,
+        max_nodes=64,
+    )
+
+    cpu = resolve_postflop_hu(spec)
+    cuda = resolve_postflop_gpu(spec)
+
+    assert cuda.root_actions == cpu.root_actions
+    assert np.allclose(cuda.root_strategy, cpu.root_strategy)
+    assert np.allclose(cuda.root_action_ev_player0, cpu.root_action_ev_player0)
+    assert np.allclose(cuda.root_action_ev_player1, cpu.root_action_ev_player1)
+    assert np.isclose(cuda.root_ev_player0, cpu.root_ev_player0)
+    assert np.isclose(cuda.root_ev_player1, cpu.root_ev_player1)
+
+
+def test_cuda_fold_ev_matches_cpu_fold_ev() -> None:
+    state = _make_state()
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=3,
+        max_nodes=128,
+    )
+
+    cpu = resolve_postflop_hu(spec)
+    cuda = resolve_postflop_gpu(spec)
+
+    assert np.isclose(cuda.root_action_ev_player0[0], cpu.root_action_ev_player0[0])
+    assert np.isclose(cuda.root_action_ev_player1[0], cpu.root_action_ev_player1[0])
