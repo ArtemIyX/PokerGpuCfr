@@ -579,41 +579,30 @@ def _update_regrets_gpu_batched(
     edge_infoset = plan.edge_infoset
     edge_action_slot = plan.edge_action_slot
     edge_node_type = plan.edge_node_type
+    edge_offsets = plan.action_offsets
     valid_mask = edge_infoset >= 0
     if not torch.any(valid_mask):
         return
     valid_infoset = edge_infoset[valid_mask]
-    unique_infosets = torch.unique(valid_infoset, sorted=True)
-    for infoset_tensor in unique_infosets:
-        infoset_index = int(infoset_tensor.item())
-        edge_mask = valid_mask & (edge_infoset == infoset_index)
-        slots = edge_action_slot[edge_mask]
-        children = edge_child[edge_mask]
-        if children.numel() == 0:
-            continue
-        row = strategy_table[infoset_index]
-        action_count = int((slots.max().item() + 1) if slots.numel() else 0)
-        if action_count <= 0:
-            continue
-        values = torch.where(
-            edge_node_type[edge_mask] == 1,
-            node_values_p0[children],
-            node_values_p1[children],
-        )
-        ordered = torch.argsort(slots)
-        slots = slots[ordered]
-        values = values[ordered]
-        limit = min(int(row.shape[0]), int(slots.numel()))
-        if limit <= 0:
-            continue
-        use_slots = slots[:limit]
-        use_values = values[:limit]
-        infoset_value = torch.sum(row[use_slots] * use_values)
-        action_regrets = use_values - infoset_value
-        base = int(plan.action_offsets[infoset_index].item())
-        regrets[base + use_slots] += action_regrets
-        regrets[base + use_slots].clamp_(min=0.0)
-        strategy_sums[base + use_slots] += row[use_slots]
+    valid_slots = edge_action_slot[valid_mask]
+    valid_children = edge_child[valid_mask]
+    valid_node_type = edge_node_type[valid_mask]
+    valid_offsets = edge_offsets[valid_infoset]
+    flat_indices = valid_offsets + valid_slots
+    child_values = torch.where(
+        valid_node_type == 1,
+        node_values_p0[valid_children],
+        node_values_p1[valid_children],
+    )
+    infoset_values = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+    infoset_values.scatter_add_(0, valid_infoset, child_values)
+    counts = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+    counts.scatter_add_(0, valid_infoset, torch.ones_like(child_values))
+    per_infoset_value = infoset_values[valid_infoset] / torch.clamp(counts[valid_infoset], min=1.0)
+    action_regrets = child_values - per_infoset_value
+    regrets.index_add_(0, flat_indices, action_regrets)
+    regrets.clamp_(min=0.0)
+    strategy_sums.index_add_(0, flat_indices, strategy_table[valid_infoset, valid_slots])
 
 
 def _forward_pass_gpu(*args: Any) -> None:
