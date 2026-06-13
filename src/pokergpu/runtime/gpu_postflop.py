@@ -629,34 +629,42 @@ def _forward_pass_gpu_batched(
     reach_p0: torch.Tensor,
     reach_p1: torch.Tensor,
 ) -> None:
-    for level in plan.forward_levels:
-        parents = level["parents"]
-        children = level["children"]
-        node_types = level["node_types"]
-        infosets = level["infosets"]
-        action_slots = level["action_slots"]
-        chance_probs = level["chance_probs"]
-        if parents.numel() == 0:
-            continue
-        parent_r0 = reach_p0[parents]
-        parent_r1 = reach_p1[parents]
-        chance_mask = node_types == 0
-        p0 = torch.where(
-            chance_mask,
-            parent_r0 * chance_probs,
-            torch.where(node_types == 1, parent_r0, parent_r0),
-        )
-        p1 = torch.where(
-            chance_mask,
-            parent_r1 * chance_probs,
-            torch.where(node_types == 2, parent_r1, parent_r1),
-        )
-        if torch.any(~chance_mask):
-            strat = strategy_table[infosets.clamp_min(0), action_slots]
-            p0 = torch.where(node_types == 1, parent_r0 * strat, p0)
-            p1 = torch.where(node_types == 2, parent_r1 * strat, p1)
-        reach_p0.scatter_add_(0, children, p0)
-        reach_p1.scatter_add_(0, children, p1)
+    edge_parent = plan.edge_parent
+    edge_child = plan.edge_child
+    edge_node_type = plan.edge_node_type
+    edge_infoset = plan.edge_infoset
+    edge_action_slot = plan.edge_action_slot
+    edge_chance_prob = plan.edge_chance_prob
+    if edge_parent.numel() == 0:
+        return
+    parent_r0 = reach_p0[edge_parent]
+    parent_r1 = reach_p1[edge_parent]
+    chance_mask = edge_node_type == 0
+    player0_mask = edge_node_type == 1
+    player1_mask = edge_node_type == 2
+    reach0 = torch.zeros_like(parent_r0)
+    reach1 = torch.zeros_like(parent_r1)
+    if torch.any(chance_mask):
+        reach0[chance_mask] = parent_r0[chance_mask] * edge_chance_prob[chance_mask]
+        reach1[chance_mask] = parent_r1[chance_mask] * edge_chance_prob[chance_mask]
+    if torch.any(player0_mask):
+        reach0[player0_mask] = parent_r0[player0_mask] * strategy_table[
+            edge_infoset[player0_mask].clamp_min(0),
+            edge_action_slot[player0_mask],
+        ]
+        reach1[player0_mask] = parent_r1[player0_mask]
+    if torch.any(player1_mask):
+        reach0[player1_mask] = parent_r0[player1_mask]
+        reach1[player1_mask] = parent_r1[player1_mask] * strategy_table[
+            edge_infoset[player1_mask].clamp_min(0),
+            edge_action_slot[player1_mask],
+        ]
+    other_mask = ~(chance_mask | player0_mask | player1_mask)
+    if torch.any(other_mask):
+        reach0[other_mask] = parent_r0[other_mask]
+        reach1[other_mask] = parent_r1[other_mask]
+    reach_p0.scatter_add_(0, edge_child, reach0)
+    reach_p1.scatter_add_(0, edge_child, reach1)
 
 
 def _forward_pass_gpu_legacy(
