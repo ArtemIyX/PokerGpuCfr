@@ -50,6 +50,12 @@ def _tree_player_count(tree: PublicTree) -> int:
     return max_player + 1 if max_player >= 0 else 0
 
 
+def _valid_player_count(player_count: int) -> int:
+    if player_count < 0:
+        raise ValueError("player_count must be non-negative")
+    return player_count
+
+
 @dataclass(frozen=True, slots=True)
 class ForwardPassResult:
     reach_by_player: NDArray[np.float32]
@@ -211,7 +217,7 @@ def compute_reach_probabilities(
     root_player2_reach: float = 1.0,
     min_reach_prob: float = 0.0,
 ) -> ForwardPassResult:
-    player_count = _tree_player_count(tree)
+    player_count = _valid_player_count(max(_tree_player_count(tree), 3))
     player0_reach = np.zeros(tree.node_count, dtype=np.float32)
     player1_reach = np.zeros(tree.node_count, dtype=np.float32)
     player2_reach = np.zeros(tree.node_count, dtype=np.float32)
@@ -225,7 +231,11 @@ def compute_reach_probabilities(
             or tree.is_frontier[node_index]):
             continue
         if min_reach_prob > 0.0:
-            reach_sum = float(player0_reach[node_index] + player1_reach[node_index])
+            reach_sum = float(
+                player0_reach[node_index]
+                + player1_reach[node_index]
+                + player2_reach[node_index]
+            )
             if reach_sum < min_reach_prob:
                 continue
 
@@ -605,7 +615,7 @@ def update_regrets_from_traversal(
     active_player: int,
     strategy_weight: float = 1.0,
 ) -> RegretUpdateResult:
-    if active_player not in {0, 1, 2}:
+    if active_player not in {0, 1, 2, 3, 4, 5}:
         raise ValueError("active_player must be between 0 and 5")
 
     infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
@@ -715,7 +725,7 @@ def update_regrets_from_traversal_parallel(
 
 
 def _active_infoset_indices(tree: PublicTree, active_player: int) -> tuple[int, ...]:
-    if active_player not in {0, 1}:
+    if active_player not in {0, 1, 2, 3, 4, 5}:
         raise ValueError("active_player must be between 0 and 5")
 
     infoset_indices: list[int] = []
@@ -952,9 +962,7 @@ def _backward_node_update(
     strategy = store.current_strategy(infoset_index)
     value_p0 = np.float32(np.sum(strategy * child_values_p0, dtype=np.float64))
     value_p1 = np.float32(np.sum(strategy * child_values_p1, dtype=np.float64))
-    action_values = (
-        child_values_p0 if node_type is NodeType.PLAYER0 else child_values_p1
-    )
+    action_values = child_values_p0 if node_type is NodeType.PLAYER0 else child_values_p1
     return node_index, value_p0, value_p1, infoset_index, action_values
 
 

@@ -316,6 +316,42 @@ def test_parallel_forward_and_backward_match_serial() -> None:
     )
 
 
+def test_three_player_traversal_handles_player2_nodes() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.PLAYER2,
+            NodeType.LEAF,
+            NodeType.LEAF,
+        ),
+        is_frontier=(False, False, True, True),
+        first_child=(0, 1, 4, 4),
+        child_count=(1, 2, 0, 0),
+        children=(
+            ChildLink(NodeId(1)),
+            ChildLink(NodeId(2)),
+            ChildLink(NodeId(3)),
+        ),
+        infoset_ids=(InfosetId(0), InfosetId(1), None, None),
+        terminal_payoffs=(None, None, None, None),
+    )
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([1, 2]))
+    store.regrets[:] = np.array([0.0, 2.0, 1.0], dtype=np.float32)
+
+    forward = compute_reach_probabilities(tree, store)
+    backward = compute_counterfactual_values(
+        tree,
+        store,
+        leaf_values_player0=np.array([0.0, 4.0, 1.0, -1.0], dtype=np.float32),
+        leaf_values_player1=np.array([0.0, -4.0, -1.0, 1.0], dtype=np.float32),
+    )
+
+    assert forward.reach_by_player.shape == (3, 4)
+    assert backward.node_values_by_player.shape == (3, 4)
+    assert 1 in backward.infoset_action_values
+    assert backward.infoset_action_values[1].shape == (2,)
+
+
 def test_deterministic_reducers_merge_partial_results_stably() -> None:
     reduced_array = reduce_float32_arrays(
         (
