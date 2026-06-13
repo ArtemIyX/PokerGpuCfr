@@ -905,7 +905,9 @@ def _backward_pass_gpu_batched(
         infoset_id = tree.infoset_ids[node_index]
         if infoset_id is None:
             continue
-        infoset_index = int(infoset_id)
+        infoset_index = int(plan.node_infoset[node_index].item())
+        if infoset_index < 0 or infoset_index >= strategy_table.shape[0]:
+            continue
         limit = min(count, int(strategy_table.shape[1]))
         if limit <= 0:
             continue
