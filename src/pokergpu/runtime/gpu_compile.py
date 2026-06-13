@@ -9,6 +9,7 @@ except Exception as exc:  # pragma: no cover
 
 from pokergpu.tree import NodeType
 from pokergpu.tree.builder import BuiltPublicTree
+from pokergpu.cfr.traversal import build_leaf_feature_batch
 
 from .cache import PackedGpuSubtree
 
@@ -58,6 +59,7 @@ def compile_packed_subtree(
         dtype=torch.int64,
         device=device,
     )
+    leaf_feature_batch = build_leaf_feature_batch(tree.tree, tuple(int(index) for index in frontier_nodes.tolist()), node_states=tree.node_states)
     action_infoset_index, action_slot_index = _action_maps(tree)
     root_infoset = int(tree.tree.infoset_ids[0] or -1)
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
@@ -76,6 +78,7 @@ def compile_packed_subtree(
         action_slot=action_slot,
         chance_prob=chance_prob,
         frontier_nodes=frontier_nodes,
+        leaf_feature_batch=leaf_feature_batch,
         action_infoset_index=action_infoset_index,
         action_slot_index=action_slot_index,
         root_node=0,

@@ -191,6 +191,7 @@ class PackedGpuSubtree:
     action_slot: Any
     chance_prob: Any
     frontier_nodes: Any
+    leaf_feature_batch: Any
     action_infoset_index: Any
     action_slot_index: Any
     root_node: int = 0

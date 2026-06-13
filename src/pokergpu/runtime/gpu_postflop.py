@@ -16,7 +16,6 @@ from pokergpu.abstraction.actions import (
     make_postflop_mvp_profile,
 )
 from pokergpu.cfr import InfosetLayout, InfosetStore, TreeLevels, build_tree_levels
-from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.cfr.traversal import compute_counterfactual_values
 from pokergpu.core.board import Street
 from pokergpu.core.payouts import compute_payouts, total_pot
@@ -56,6 +55,7 @@ class BatchedGpuPlan:
     node_infoset: torch.Tensor
     node_type: torch.Tensor
     frontier_nodes: torch.Tensor
+    frontier_leaf_batch: object
     root_child_nodes: torch.Tensor
     root_child_parent_infoset: int
     action_counts: torch.Tensor
@@ -125,6 +125,7 @@ def _build_batched_gpu_plan(
     levels: TreeLevels,
     layout: InfosetLayout,
     *,
+    frontier_leaf_batch: object | None = None,
     device: torch.device,
 ) -> BatchedGpuPlan:
     forward_levels: list[dict[str, torch.Tensor]] = []
@@ -170,6 +171,7 @@ def _build_batched_gpu_plan(
         node_infoset=torch.as_tensor(node_infoset, dtype=torch.int64, device=device),
         node_type=torch.as_tensor(node_type, dtype=torch.int64, device=device),
         frontier_nodes=torch.as_tensor(frontier_nodes, dtype=torch.int64, device=device),
+        frontier_leaf_batch=frontier_leaf_batch,
         root_child_nodes=torch.as_tensor(root_children, dtype=torch.int64, device=device),
         root_child_parent_infoset=int(tree.infoset_ids[0] or 0),
         action_counts=action_counts,
@@ -203,6 +205,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
         tree.actions_by_node,
         levels,
         layout,
+        frontier_leaf_batch=packed_subtree.leaf_feature_batch,
         device=torch.device("cuda"),
     )
     packed = PackedGpuSolve(
@@ -739,12 +742,7 @@ def _backward_pass_gpu_batched(
 
     frontier_nodes = tuple(int(index) for index in plan.frontier_nodes.tolist())
     if frontier_nodes:
-        batch = build_leaf_feature_batch(
-            tree,
-            frontier_nodes,
-            node_states=node_states,
-        )
-        leaf_values = evaluator.evaluate(batch)
+        leaf_values = evaluator.evaluate(plan.frontier_leaf_batch)
         for row, node_index in enumerate(frontier_nodes):
             out_p0[node_index] = float(leaf_values.ev_player0[row])
             out_p1[node_index] = float(leaf_values.ev_player1[row])
