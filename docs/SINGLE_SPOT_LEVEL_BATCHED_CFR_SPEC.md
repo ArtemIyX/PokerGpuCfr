@@ -308,9 +308,9 @@ Cache values:
 
 ### Phase 3
 
-- [ ] Reduce Python overhead in tree flattening.
-- [ ] Keep all hot tensors resident on GPU.
-- [ ] Batch leaf evaluation into one GPU call.
+- [x] Reduce Python overhead in tree flattening.
+- [x] Keep all hot tensors resident on GPU.
+- [x] Batch leaf evaluation into one GPU call.
 
 ### Phase 4
 

@@ -48,20 +48,26 @@ def compile_packed_subtree(
     terminal_payoffs = torch.as_tensor(flat.terminal_payoff, dtype=torch.float32, device=device)
     node_depth = torch.as_tensor(flat.node_depth, dtype=torch.int64, device=device)
     street = torch.as_tensor(flat.street, dtype=torch.int64, device=device)
-    action_slot = torch.as_tensor(
-        [slot if slot >= 0 else -1 for slot in flat.edge_action_slot],
-        dtype=torch.int64,
-        device=device,
-    )
+    action_slot = torch.as_tensor(flat.edge_action_slot, dtype=torch.int64, device=device)
     chance_prob = torch.as_tensor(flat.edge_chance_prob, dtype=torch.float32, device=device)
     children = torch.as_tensor(flat.edge_child, dtype=torch.int64, device=device)
     frontier_nodes = torch.as_tensor(
-        [index for index, is_front in enumerate(flat.is_frontier) if is_front and flat.node_type[index] is not NodeType.TERMINAL],
+        tuple(
+            index
+            for level in tree.level_schedule.forward_levels
+            for index in level
+            if flat.is_frontier[index] and flat.node_type[index] is not NodeType.TERMINAL
+        ),
         dtype=torch.int64,
         device=device,
     )
-    leaf_feature_batch = build_leaf_feature_batch(tree.tree, tuple(int(index) for index in frontier_nodes.tolist()), node_states=tree.node_states)
-    action_infoset_index, action_slot_index = _action_maps(tree, infoset_remap, device=device)
+    frontier_node_indices = tuple(int(index) for index in frontier_nodes.tolist())
+    leaf_feature_batch = build_leaf_feature_batch(
+        tree.tree,
+        frontier_node_indices,
+        node_states=tree.node_states,
+    )
+    action_infoset_index, action_slot_index = _action_maps(flat, infoset_remap, device=device)
     if action_infoset_index.numel() != action_slot_index.numel():
         raise ValueError("packed action maps must have matching lengths")
     root_infoset = int(infoset_ids[0].item()) if infoset_ids.numel() else -1
@@ -109,7 +115,7 @@ def _node_type_code(node_type: NodeType) -> int:
 
 
 def _action_maps(
-    tree: BuiltPublicTree,
+    flat: object,
     infoset_remap: dict[int, int],
     *,
     device: str,
@@ -117,16 +123,17 @@ def _action_maps(
     infoset_index: list[int] = []
     action_slot: list[int] = []
     max_by_infoset: dict[int, int] = {}
-    for node_index, infoset in enumerate(tree.tree.infoset_ids):
-        if infoset is None:
+    edge_infoset_ids = getattr(flat, "edge_infoset_id")
+    edge_action_slots = getattr(flat, "edge_action_slot")
+    for infoset, slot in zip(edge_infoset_ids, edge_action_slots, strict=True):
+        if infoset < 0:
             continue
-        actions = tree.actions_by_node[node_index]
-        infoset_int = int(infoset)
-        compact_index = infoset_remap[infoset_int]
-        max_by_infoset[compact_index] = max(max_by_infoset.get(compact_index, 0), len(actions))
-    for infoset_int in sorted(max_by_infoset):
-        for slot in range(max_by_infoset[infoset_int]):
-            infoset_index.append(infoset_int)
+        compact_index = infoset_remap[int(infoset)]
+        slot_index = int(slot)
+        max_by_infoset[compact_index] = max(max_by_infoset.get(compact_index, 0), slot_index + 1)
+    for compact_index in sorted(max_by_infoset):
+        for slot in range(max_by_infoset[compact_index]):
+            infoset_index.append(compact_index)
             action_slot.append(slot)
     return (
         torch.as_tensor(infoset_index, dtype=torch.int64, device=device),
