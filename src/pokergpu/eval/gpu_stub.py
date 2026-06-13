@@ -23,31 +23,31 @@ class GpuBatchLeafEvaluator(LeafEvaluator):
             return self._cpu_fallback.evaluate(batch)
 
         try:
-            _ = build_gpu_leaf_tensors(batch, self._device)
+            build_gpu_leaf_tensors(batch, self._device)
             ev_p0 = torch.zeros(batch.size, dtype=torch.float32, device=self._device)
             ev_p1 = torch.zeros(batch.size, dtype=torch.float32, device=self._device)
-            for index in range(batch.size):
-                payoff = float(batch.terminal_payoff[index])
-                if not torch.isnan(torch.tensor(payoff)):
-                    ev_p0[index] = payoff
-                    ev_p1[index] = -payoff
-                    continue
-                node_state = None if batch.node_states is None else batch.node_states[index]
-                if node_state is None:
-                    continue
-                if node_state.phase not in {HandPhase.SHOWDOWN, HandPhase.TERMINAL}:
-                    continue
-                payouts = compute_payouts(node_state)
-                payout_p0 = next(
-                    (payout.amount for payout in payouts if payout.player == 0),
-                    0,
-                )
-                payout_p1 = next(
-                    (payout.amount for payout in payouts if payout.player == 1),
-                    0,
-                )
-                ev_p0[index] = float(payout_p0)
-                ev_p1[index] = float(payout_p1)
+            terminal_mask = ~torch.isnan(torch.as_tensor(batch.terminal_payoff, device=self._device))
+            if torch.any(terminal_mask):
+                payoff = torch.as_tensor(batch.terminal_payoff, dtype=torch.float32, device=self._device)
+                ev_p0[terminal_mask] = payoff[terminal_mask]
+                ev_p1[terminal_mask] = -payoff[terminal_mask]
+            if batch.node_states is not None:
+                for index, node_state in enumerate(batch.node_states):
+                    if terminal_mask[index]:
+                        continue
+                    if node_state.phase not in {HandPhase.SHOWDOWN, HandPhase.TERMINAL}:
+                        continue
+                    payouts = compute_payouts(node_state)
+                    payout_p0 = next(
+                        (payout.amount for payout in payouts if payout.player == 0),
+                        0,
+                    )
+                    payout_p1 = next(
+                        (payout.amount for payout in payouts if payout.player == 1),
+                        0,
+                    )
+                    ev_p0[index] = float(payout_p0)
+                    ev_p1[index] = float(payout_p1)
             return LeafValueBatch(
                 ev_player0=ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
                 ev_player1=ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
