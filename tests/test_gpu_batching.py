@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 from pytest import MonkeyPatch
+import torch
 
 from pokergpu.abstraction.hands import RangeVector
 from pokergpu.abstraction.actions import ActionAbstraction
@@ -165,6 +167,83 @@ def test_single_spot_builds_and_reuses_tree_template_cache(
 
     assert calls["build"] == 2
     assert cache.bundle.tree_template.stats()["entries"] == 1
+
+
+def test_prepared_gpu_solve_reuses_resident_gpu_state(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    built = build_public_tree(_make_state("AhKdTc"), config=TreeBuildConfig(max_depth=1, max_nodes=16))
+    spec = _make_spec("AhKdTc")
+
+    calls = {"state": 0}
+
+    def fake_compile_packed_subtree(tree: BuiltPublicTree, *, spot_key: str, device: str) -> Any:
+        return type(
+            "Packed",
+            (),
+            {
+                "spot_key": spot_key,
+                "node_type": torch.tensor([0], device="cuda"),
+                "is_frontier": torch.tensor([False], device="cuda"),
+                "first_child": torch.tensor([0], device="cuda"),
+                "child_count": torch.tensor([0], device="cuda"),
+                "children": torch.tensor([], dtype=torch.int64, device="cuda"),
+                "infoset_ids": torch.tensor([0], device="cuda"),
+                "terminal_payoffs": torch.tensor([0.0], device="cuda"),
+                "node_depth": torch.tensor([0], device="cuda"),
+                "street": torch.tensor([0], device="cuda"),
+                "action_slot": torch.tensor([], dtype=torch.int64, device="cuda"),
+                "chance_prob": torch.tensor([], dtype=torch.float32, device="cuda"),
+                "frontier_nodes": torch.tensor([], dtype=torch.int64, device="cuda"),
+                "leaf_feature_batch": pytest.importorskip("pokergpu.eval").LeafFeatureBatch(
+                    node_indices=(),
+                    node_states=(),
+                    terminal_payoff=np.zeros(0, dtype=np.float32),
+                    player_to_act=np.zeros(0, dtype=np.int32),
+                    street=np.zeros(0, dtype=np.int32),
+                    pot=np.zeros(0, dtype=np.float32),
+                    stack_p0=np.zeros(0, dtype=np.float32),
+                    stack_p1=np.zeros(0, dtype=np.float32),
+                    board_size=np.zeros(0, dtype=np.int32),
+                    reach_p0=np.zeros(0, dtype=np.float32),
+                    reach_p1=np.zeros(0, dtype=np.float32),
+                    reach_p2=np.zeros(0, dtype=np.float32),
+                    is_terminal=np.zeros(0, dtype=np.bool_),
+                    is_frontier=np.zeros(0, dtype=np.bool_),
+                    infoset_id=np.zeros(0, dtype=np.int32),
+                ),
+                "action_infoset_index": torch.tensor([], dtype=torch.int64, device="cuda"),
+                "action_slot_index": torch.tensor([], dtype=torch.int64, device="cuda"),
+                "root_node": 0,
+                "root_infoset": 0,
+                "node_count": 1,
+                "edge_count": 0,
+                "infoset_count": 1,
+                "leaf_count": 0,
+                "max_actions": 1,
+                "device": "cuda",
+                "tree_version": "1",
+            },
+        )()
+
+    def fake_make_gpu_state(packed: object, layout: object) -> object:
+        calls["state"] += 1
+        return object()
+
+    def fake_run_gpu_solve(packed: object, evaluator: object) -> GpuSolveTrace:
+        return _fake_trace(packed)
+
+    from pokergpu.runtime import gpu_postflop as module
+    monkeypatch.setattr(module, "_make_gpu_state", fake_make_gpu_state)
+    monkeypatch.setattr(module, "compile_packed_subtree", fake_compile_packed_subtree)
+    monkeypatch.setattr(module, "_run_gpu_solve", fake_run_gpu_solve)
+    monkeypatch.setattr(module, "build_public_tree", lambda *args, **kwargs: built)
+
+    first = _prepare_gpu_solve(spec)
+    second = _prepare_gpu_solve(spec)
+
+    assert calls["state"] == 2
+    assert first.packed_subtree is second.packed_subtree
 
 
 def _fake_result() -> Any:

@@ -26,41 +26,37 @@ def compile_packed_subtree(
     spot_key: str,
     device: str = "cuda",
 ) -> PackedGpuSubtree:
+    flat = tree.flat_view
     infoset_remap: dict[int, int] = {}
     compact_infoset_ids: list[int] = []
-    for infoset in tree.tree.infoset_ids:
-        if infoset is None:
+    for infoset in flat.infoset_id:
+        if infoset < 0:
             compact_infoset_ids.append(-1)
             continue
         infoset_int = int(infoset)
         compact_index = infoset_remap.setdefault(infoset_int, len(infoset_remap))
         compact_infoset_ids.append(compact_index)
-    node_count = tree.tree.node_count
     node_type = torch.as_tensor(
-        [_node_type_code(node_type) for node_type in tree.tree.node_types],
+        [_node_type_code(node_type) for node_type in flat.node_type],
         dtype=torch.int64,
         device=device,
     )
-    is_frontier = torch.as_tensor(tree.tree.is_frontier, dtype=torch.bool, device=device)
-    first_child = torch.as_tensor(tree.tree.first_child, dtype=torch.int64, device=device)
-    child_count = torch.as_tensor(tree.tree.child_count, dtype=torch.int64, device=device)
+    is_frontier = torch.as_tensor(flat.is_frontier, dtype=torch.bool, device=device)
+    first_child = torch.as_tensor(flat.first_child, dtype=torch.int64, device=device)
+    child_count = torch.as_tensor(flat.child_count, dtype=torch.int64, device=device)
     infoset_ids = torch.as_tensor(compact_infoset_ids, dtype=torch.int64, device=device)
-    terminal_payoffs = torch.as_tensor(
-        [float(payoff or 0.0) for payoff in tree.tree.terminal_payoffs],
-        dtype=torch.float32,
-        device=device,
-    )
-    node_depth = torch.as_tensor(_node_depths(tree), dtype=torch.int64, device=device)
-    street = torch.as_tensor(_street_ids(tree), dtype=torch.int64, device=device)
-    action_slot = torch.as_tensor(_action_slots(tree), dtype=torch.int64, device=device)
-    chance_prob = torch.as_tensor(_chance_probs(tree), dtype=torch.float32, device=device)
-    children = torch.as_tensor(
-        [int(link.child) for link in tree.tree.children],
+    terminal_payoffs = torch.as_tensor(flat.terminal_payoff, dtype=torch.float32, device=device)
+    node_depth = torch.as_tensor(flat.node_depth, dtype=torch.int64, device=device)
+    street = torch.as_tensor(flat.street, dtype=torch.int64, device=device)
+    action_slot = torch.as_tensor(
+        [slot if slot >= 0 else -1 for slot in flat.edge_action_slot],
         dtype=torch.int64,
         device=device,
     )
+    chance_prob = torch.as_tensor(flat.edge_chance_prob, dtype=torch.float32, device=device)
+    children = torch.as_tensor(flat.edge_child, dtype=torch.int64, device=device)
     frontier_nodes = torch.as_tensor(
-        [index for index, is_front in enumerate(tree.tree.is_frontier) if is_front and tree.tree.node_types[index] is not NodeType.TERMINAL],
+        [index for index, is_front in enumerate(flat.is_frontier) if is_front and flat.node_type[index] is not NodeType.TERMINAL],
         dtype=torch.int64,
         device=device,
     )
@@ -90,7 +86,7 @@ def compile_packed_subtree(
         action_slot_index=action_slot_index,
         root_node=0,
         root_infoset=root_infoset,
-        node_count=node_count,
+        node_count=tree.tree.node_count,
         edge_count=int(children.numel()),
         infoset_count=infoset_count,
         leaf_count=int(frontier_nodes.numel()),
@@ -110,50 +106,6 @@ def _node_type_code(node_type: NodeType) -> int:
     if node_type is NodeType.PLAYER2:
         return 3
     return 4
-
-
-def _node_depths(tree: BuiltPublicTree) -> list[int]:
-    depth = [-1] * tree.tree.node_count
-    depth[0] = 0
-    for node_index in range(tree.tree.node_count):
-        start = tree.tree.first_child[node_index]
-        count = tree.tree.child_count[node_index]
-        for link_index in range(start, start + count):
-            child = int(tree.tree.children[link_index].child)
-            depth[child] = depth[node_index] + 1
-    return depth
-
-
-def _street_ids(tree: BuiltPublicTree) -> list[int]:
-    values: list[int] = []
-    for state in tree.node_states:
-        street_value = getattr(state.current_street, "value", "")
-        values.append(
-            {
-                "preflop": 0,
-                "flop": 1,
-                "turn": 2,
-                "river": 3,
-            }.get(street_value, 0)
-        )
-    return values
-
-
-def _action_slots(tree: BuiltPublicTree) -> list[int]:
-    slots: list[int] = []
-    for node_index, actions in enumerate(tree.actions_by_node):
-        if len(actions) == 0:
-            slots.append(-1)
-        else:
-            slots.append(0)
-    return slots
-
-
-def _chance_probs(tree: BuiltPublicTree) -> list[float]:
-    probs: list[float] = []
-    for link in tree.tree.children:
-        probs.append(float(link.chance_prob or 0.0))
-    return probs
 
 
 def _action_maps(
