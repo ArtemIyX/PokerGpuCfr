@@ -104,7 +104,7 @@ def test_postflop_resolver_root_ev_matches_action_ev_weighting() -> None:
             dtype=np.float64,
         )
     )
-    assert np.isclose(result.root_ev_player0, expected / 300.0)
+    assert np.isclose(result.root_ev_player0, expected / 100.0)
     assert np.isclose(result.root_ev_player1, -result.root_ev_player0)
 
 

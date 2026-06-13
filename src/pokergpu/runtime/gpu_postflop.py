@@ -126,9 +126,9 @@ def resolve_postflop_gpu(
         if spec.time_budget_sec <= 0.0:
             break
 
-    pot_scale = float(total_pot(spec.state))
-    if pot_scale <= 0.0:
-        pot_scale = 1.0
+    bb_scale = float(spec.state.betting_round.blinds.big_blind)
+    if bb_scale <= 0.0:
+        bb_scale = 1.0
     root_strategy = store.average_strategy(int(root_infoset))
     cpu_backward = compute_counterfactual_values(
         tree.tree,
@@ -145,12 +145,13 @@ def resolve_postflop_gpu(
         dtype=np.float32,
     )
     root_action_ev_p1 = -root_action_ev_p0
+    root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
+    root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
     root_ev_p0 = float(
         np.sum(
             root_strategy[: root_action_ev_p0.shape[0]] * root_action_ev_p0,
             dtype=np.float64,
         )
-        / pot_scale
     )
     root_ev_p1 = -root_ev_p0
     return PostflopResolveResult(

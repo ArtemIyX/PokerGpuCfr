@@ -129,7 +129,7 @@ def test_postflop_gpu_resolver_returns_coherent_root_summary(
     assert result.root_action_ev_player1.shape == result.root_strategy.shape
     assert np.isclose(
         result.root_ev_player0,
-        float(np.sum(result.root_strategy * result.root_action_ev_player0) / 300.0),
+        float(np.sum(result.root_strategy * result.root_action_ev_player0) / 100.0),
     )
     assert np.isclose(result.root_ev_player1, -result.root_ev_player0)
 

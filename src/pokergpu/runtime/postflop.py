@@ -24,7 +24,6 @@ from pokergpu.core.betting import Chips
 from pokergpu.core.board import Street
 from pokergpu.core.cards import Card
 from pokergpu.core.payouts import compute_payouts
-from pokergpu.core.payouts import total_pot
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import LeafEvaluator
 from pokergpu.runtime.cache import WarmStartState
@@ -274,19 +273,21 @@ def resolve_postflop_hu(
         dtype=np.float32,
     )
     root_action_ev_player1 = -root_action_ev_player0
+    bb_scale = float(spec.state.betting_round.blinds.big_blind)
+    if bb_scale <= 0.0:
+        bb_scale = 1.0
+    root_action_ev_player0 = np.asarray(root_action_ev_player0 / bb_scale, dtype=np.float32)
+    root_action_ev_player1 = np.asarray(root_action_ev_player1 / bb_scale, dtype=np.float32)
     root_ev_player0 = _summarize_root_ev(root_strategy, root_action_ev_player0)
     root_ev_player1 = -root_ev_player0
-    pot_scale = float(total_pot(spec.state))
-    if pot_scale <= 0.0:
-        pot_scale = 1.0
     return PostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
         root_strategy=root_strategy,
         root_action_ev_player0=root_action_ev_player0,
         root_action_ev_player1=root_action_ev_player1,
-        root_ev_player0=float(root_ev_player0 / pot_scale),
-        root_ev_player1=float(root_ev_player1 / pot_scale),
+        root_ev_player0=float(root_ev_player0),
+        root_ev_player1=float(root_ev_player1),
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         node_count=tree.tree.node_count,
@@ -412,17 +413,17 @@ def resolve_postflop_multi(
         evaluator=evaluator_impl,
     )
     root_ev = np.zeros(spec.state.player_count, dtype=np.float32)
-    pot_scale = float(total_pot(spec.state))
-    if pot_scale <= 0.0:
-        pot_scale = 1.0
-    root_ev[0] = float(final_backward.node_values_player0[0] / pot_scale)
+    bb_scale = float(spec.state.betting_round.blinds.big_blind)
+    if bb_scale <= 0.0:
+        bb_scale = 1.0
+    root_ev[0] = float(final_backward.node_values_player0[0] / bb_scale)
     if spec.state.player_count > 1:
-        root_ev[1] = float(final_backward.node_values_player1[0] / pot_scale)
+        root_ev[1] = float(final_backward.node_values_player1[0] / bb_scale)
     if spec.state.player_count > 2:
         node_values_player2 = final_backward.node_values_player2
         root_ev[2] = float(
             (node_values_player2[0] if node_values_player2 is not None else 0.0)
-            / pot_scale
+            / bb_scale
         )
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
@@ -706,7 +707,7 @@ def _coalition_root_ev(
     if active_count > 2:
         remainder = -float(np.sum(root_ev[:2], dtype=np.float64))
         root_ev[2:] = np.float32(remainder / float(active_count - 2))
-    pot_scale = float(total_pot(spec.state))
-    if pot_scale <= 0.0:
+    bb_scale = float(spec.state.betting_round.blinds.big_blind)
+    if bb_scale <= 0.0:
         return root_ev
-    return np.asarray(root_ev / np.float32(pot_scale), dtype=np.float32)
+    return np.asarray(root_ev / np.float32(bb_scale), dtype=np.float32)
