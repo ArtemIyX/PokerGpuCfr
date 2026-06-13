@@ -1,3 +1,5 @@
+import pytest
+
 from pokergpu.runtime import (
     CachedLeafResult,
     CachedTree,
@@ -10,6 +12,10 @@ from pokergpu.runtime import (
     make_warm_start_state,
     normalize_sequence,
 )
+from pokergpu.cfr import InfosetLayout
+from pokergpu.tree import NodeType
+from pokergpu.runtime import gpu_postflop
+from pokergpu.runtime.cache import PackedGpuSubtree
 
 
 def test_public_state_key_is_deterministic() -> None:
@@ -153,3 +159,125 @@ def test_lru_cache_replaces_old_entries() -> None:
     cache.put("b", 2)
     assert cache.get("a") is None
     assert cache.get("b") == 2
+
+
+def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"build": 0, "compile": 0}
+
+    class DummyTree:
+        def __init__(self) -> None:
+            from types import SimpleNamespace
+
+            self.tree = SimpleNamespace(
+                node_count=1,
+                node_types=(NodeType.PLAYER0,),
+                is_frontier=(False,),
+                first_child=(0,),
+                child_count=(0,),
+                children=(),
+                infoset_ids=(0,),
+                terminal_payoffs=(None,),
+            )
+            self.actions_by_node = ((object(),),)
+            self.node_states = ()
+
+    def fake_build_public_tree(*args: object, **kwargs: object) -> object:
+        calls["build"] += 1
+        return DummyTree()
+
+    def fake_build_tree_levels(tree: object) -> object:
+        return type("L", (), {"forward_levels": ((),), "backward_levels": ((),)})()
+
+    class DummyLayout:
+        action_counts = (1,)
+        offsets = (0,)
+        total_actions = 1
+        infoset_count = 1
+
+        @classmethod
+        def from_action_counts(cls, counts: tuple[int, ...]) -> "DummyLayout":
+            return cls()
+
+    def fake_plan(*args: object, **kwargs: object) -> object:
+        return type(
+            "P",
+            (),
+            {
+                "forward_levels": (),
+                "backward_levels": (),
+                "edge_parent": None,
+                "edge_child": None,
+                "edge_node_type": None,
+                "edge_infoset": None,
+                "edge_action_slot": None,
+                "edge_chance_prob": None,
+                "node_infoset": None,
+                "node_type": None,
+                "frontier_nodes": None,
+                "frontier_leaf_batch": None,
+                "root_child_nodes": None,
+                "root_child_parent_infoset": 0,
+                "action_counts": None,
+                "action_offsets": None,
+            },
+        )()
+
+    def fake_compile_packed_subtree(tree: object, *, spot_key: str, device: str) -> PackedGpuSubtree:
+        calls["compile"] += 1
+        return PackedGpuSubtree(
+            spot_key=spot_key,
+            node_type=(),
+            is_frontier=(),
+            first_child=(),
+            child_count=(),
+            children=(),
+            infoset_ids=(),
+            terminal_payoffs=(),
+            node_depth=(),
+            street=(),
+            action_slot=(),
+            chance_prob=(),
+            frontier_nodes=(),
+            leaf_feature_batch=type("B", (), {"size": 0})(),
+            action_infoset_index=(),
+            action_slot_index=(),
+            root_node=0,
+            root_infoset=0,
+            node_count=1,
+            edge_count=0,
+            infoset_count=1,
+            leaf_count=0,
+            max_actions=1,
+            device=device,
+            tree_version="1",
+        )
+
+    monkeypatch.setattr(gpu_postflop, "build_public_tree", fake_build_public_tree)
+    monkeypatch.setattr(gpu_postflop, "compile_packed_subtree", fake_compile_packed_subtree)
+    monkeypatch.setattr(gpu_postflop, "build_tree_levels", fake_build_tree_levels)
+    monkeypatch.setattr(InfosetLayout, "from_action_counts", DummyLayout.from_action_counts)
+    monkeypatch.setattr(gpu_postflop, "_build_batched_gpu_plan", fake_plan)
+    gpu_postflop._GPU_PLAN_CACHE.clear()
+
+    from types import SimpleNamespace
+
+    spec: object = SimpleNamespace(
+        state=SimpleNamespace(
+            player_count=2,
+            current_street=SimpleNamespace(value="flop"),
+            betting_round=SimpleNamespace(
+                pot=SimpleNamespace(amount=300),
+                to_act=0,
+                blinds=SimpleNamespace(big_blind=100),
+            ),
+        ),
+        max_depth=1,
+        max_nodes=8,
+        min_reach_prob=0.0,
+        solver_version="test",
+    )
+    gpu_postflop._prepare_gpu_solve(spec)  # type: ignore[arg-type]
+    gpu_postflop._prepare_gpu_solve(spec)  # type: ignore[arg-type]
+
+    assert calls["build"] == 1
+    assert calls["compile"] == 1
