@@ -217,6 +217,7 @@ class PackedGpuSubtree:
 
 @dataclass(slots=True)
 class PackedGpuSolveState:
+    plan: Any
     packed: PackedGpuSubtree
     regrets: Any
     strategy_sums: Any

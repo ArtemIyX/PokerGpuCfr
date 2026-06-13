@@ -350,7 +350,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
             root_infoset=cached.root_infoset,
             root_actions=cached.root_actions,
             packed_subtree=cached.packed_subtree,
-            gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout),
+            gpu_state=_make_gpu_state(cached.plan, cached.packed_subtree, cached.layout),
         )
     tree = built
     packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
@@ -385,7 +385,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         root_infoset=packed.root_infoset,
         root_actions=packed.root_actions,
         packed_subtree=packed.packed_subtree,
-        gpu_state=_make_gpu_state(packed.packed_subtree, packed.layout),
+        gpu_state=_make_gpu_state(packed.plan, packed.packed_subtree, packed.layout),
     )
     _load_warm_start_into_gpu_state(packed, spec)
     _GPU_PLAN_CACHE.put(cache_key, packed)
@@ -447,7 +447,7 @@ def _rebuilt_tree_from_template(
     )
 
 
-def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGpuSolveState:
+def _make_gpu_state(plan: BatchedGpuPlan, packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGpuSolveState:
     device = packed.node_type.device
     action_count = int(layout.total_actions)
     regrets = torch.zeros(action_count, dtype=torch.float32, device=device)
@@ -464,6 +464,7 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
     root_action_ev_p1 = torch.zeros_like(root_action_ev_p0)
     root_strategy = torch.zeros_like(root_action_ev_p0)
     return PackedGpuSolveState(
+        plan=plan,
         packed=packed,
         regrets=regrets,
         strategy_sums=strategy_sums,
@@ -554,7 +555,7 @@ def _run_gpu_solve(
     leaf_count = int(plan.frontier_nodes.numel())
     state = packed.gpu_state
     if state is None:
-        state = _make_gpu_state(packed.packed_subtree, packed.layout)
+        state = _make_gpu_state(packed.plan, packed.packed_subtree, packed.layout)
         packed = PackedGpuSolve(
             spec=packed.spec,
             tree=packed.tree,
@@ -568,6 +569,7 @@ def _run_gpu_solve(
     regrets = state.regrets
     strategy_sums = state.strategy_sums
     strategy_table = state.strategy_table
+    plan = state.plan
     forward_reach_p0 = state.forward_reach_p0
     forward_reach_p1 = state.forward_reach_p1
     backward_p0 = state.backward_p0
@@ -593,7 +595,7 @@ def _run_gpu_solve(
             regrets,
             state.action_infoset_index,
             state.action_slot_index,
-            state.action_counts,
+            plan.action_counts,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
@@ -639,7 +641,7 @@ def _run_gpu_solve(
         regrets,
         state.action_infoset_index,
         state.action_slot_index,
-        state.action_counts,
+        plan.action_counts,
     )
     forward_reach_p0.zero_()
     forward_reach_p1.zero_()
