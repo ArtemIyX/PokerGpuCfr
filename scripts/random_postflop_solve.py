@@ -108,9 +108,9 @@ def make_random_postflop_state(
 
     sb = max(1, int(rng.choice((25, 50, 100))))
     bb = max(sb, int(sb * rng.choice((2, 2, 3, 4))))
-    stacks_raw = [int(bb * rng.randint(2, 25)) for _ in range(player_count)]
+    stacks_raw = [int(bb * rng.randint(50, 200)) for _ in range(player_count)]
     commitments = _make_random_commitments(rng, stacks_raw, bb, player_count)
-    base_pot = int(bb * rng.randint(1, 10))
+    base_pot = int(bb * rng.randint(1, 5))
     pot = max(0, base_pot + sum(commitments))
     to_act = PlayerIndex(int(np.argmax(stacks_raw)))
     dealer = PlayerIndex(rng.randrange(player_count))
@@ -147,18 +147,11 @@ def _make_random_commitments(
     big_blind: int,
     player_count: int,
 ) -> list[int]:
+    del rng, big_blind
     commitments = [0 for _ in range(player_count)]
-    highest = int(rng.randint(0, max(1, min(stacks) // 4)))
-    for index in range(player_count):
-        room = max(0, min(int(stacks[index]), highest))
-        commitments[index] = int(rng.randint(0, room)) if room > 0 else 0
-    if player_count > 1 and len(set(commitments)) == 1:
-        idx = int(rng.randrange(player_count))
-        room = max(0, int(stacks[idx]))
-        commitments[idx] = min(room, commitments[idx] + max(1, big_blind // 2))
     acting_player = int(np.argmax(stacks))
-    commitments[acting_player] = min(commitments[acting_player], max(0, stacks[acting_player] - big_blind))
-    return [max(0, int(value)) for value in commitments]
+    commitments[acting_player] = 0
+    return commitments
 
 
 def take_two_unique(
