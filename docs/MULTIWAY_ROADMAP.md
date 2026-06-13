@@ -35,9 +35,9 @@ Goal: make the current HU postflop code ready for extension.
 
 Done when:
 
-- [ ] all 2-player assumptions are isolated
+- [x] all 2-player assumptions are isolated
 - [x] the extension points are explicit
-- [ ] HU behavior still matches current output
+- [x] HU behavior still matches current output
 
 ## Phase 1: Core Multiway Data Model
 
@@ -49,7 +49,7 @@ Goal: make the solver data structures player-count aware.
 - [x] Store one counterfactual value vector per active player.
 - [x] Keep flat arrays, not pointer graphs.
 - [x] Update terminal payoff handling for `N` players.
-- [ ] Update card removal for every active player.
+- [x] Update card removal for every active player.
 
 Done when:
 
@@ -198,22 +198,3 @@ Done when:
 
 - [ ] failures are visible
 - [ ] unsafe outputs do not reach runtime
-
-## Suggested Order
-
-1. Phase 0
-2. Phase 1
-3. Phase 2
-4. Phase 3
-5. Phase 4
-6. Phase 5
-7. Phase 6
-8. Phase 7
-9. Phase 8
-
-## Definition Of Success
-
-- 3-player postflop is supported with a real solver path.
-- 4-6 player spots are supported with controlled approximations.
-- The value network can be trained from approximate labels.
-- The runtime solver can choose between exact and approximate modes.

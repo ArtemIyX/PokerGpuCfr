@@ -212,6 +212,36 @@ def test_apply_board_dead_cards_normalizes_after_filtering() -> None:
     assert math.isclose(float(filtered.values[live_index]), 1.0, abs_tol=1e-6)
 
 
+def test_player_range_vectors_mask_and_normalize_each_player() -> None:
+    board = Board.from_str("AhKdQc")
+    values0 = [0.0] * private_hand_count()
+    values1 = [0.0] * private_hand_count()
+    live0 = int(private_hand_index(card_from_str("Js"), card_from_str("Ts")))
+    live1 = int(private_hand_index(card_from_str("9c"), card_from_str("8d")))
+    dead = int(private_hand_index(card_from_str("Ah"), card_from_str("Qs")))
+    values0[live0] = 5.0
+    values0[dead] = 2.0
+    values1[live1] = 7.0
+    values1[dead] = 3.0
+
+    ranges = PlayerRangeVectors.from_values(
+        (
+            RangeVector.from_values(values0),
+            RangeVector.from_values(values1),
+            RangeVector.uniform(),
+        )
+    )
+
+    masked = ranges.normalized_masked(board.cards)
+
+    assert len(masked.values) == 3
+    assert math.isclose(masked.values[0].total_weight(), 1.0, abs_tol=1e-6)
+    assert math.isclose(masked.values[1].total_weight(), 1.0, abs_tol=1e-6)
+    assert math.isclose(masked.values[2].total_weight(), 1.0, abs_tol=1e-6)
+    assert math.isclose(float(masked.values[0].values[dead]), 0.0, abs_tol=1e-6)
+    assert math.isclose(float(masked.values[1].values[dead]), 0.0, abs_tol=1e-6)
+
+
 def test_canonicalize_private_hand_for_board_uses_board_suit_map() -> None:
     board = Board.from_str("AhKhQd")
     hand = PrivateHand.from_cards(card_from_str("As"), card_from_str("2c"))

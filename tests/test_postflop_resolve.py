@@ -223,3 +223,42 @@ def test_postflop_resolver_is_deterministic_for_same_seed() -> None:
     assert np.allclose(result_a.root_action_ev_player0, result_b.root_action_ev_player0)
     assert np.allclose(result_a.root_action_ev_player1, result_b.root_action_ev_player1)
     assert result_a.root_infoset_id == result_b.root_infoset_id
+
+
+def test_postflop_multiway_masks_each_player_range_independently() -> None:
+    from pokergpu.runtime.postflop import _apply_root_ranges
+
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    ranges = (
+        RangeVector.uniform(),
+        RangeVector.uniform(),
+        RangeVector.uniform(),
+    )
+
+    masked = _apply_root_ranges(state, ranges)
+
+    assert len(masked) == 3
+    assert all(np.isclose(float(r.total_weight()), 1.0) for r in masked)
