@@ -20,12 +20,13 @@ from pokergpu.cfr.traversal import (
     build_leaf_feature_batch,
 )
 from pokergpu.core.board import Street
+from pokergpu.core.canonical import canonical_board_key
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import LeafEvaluator
 from pokergpu.eval.types import LeafFeatureBatch
 from pokergpu.runtime.cache import LruCache, PackedGpuSolveState, PackedGpuSubtree
-from pokergpu.runtime.caching import TreeTemplateKey
+from pokergpu.runtime.caching import TreeTemplateKey, make_warm_start_state
 from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 from pokergpu.tree.public_tree import PublicTreeTemplate
@@ -79,6 +80,7 @@ class PackedGpuSolve:
 class BatchedGpuSolveInput:
     spec: PostflopResolveSpec
     template: PublicTreeTemplate
+    cache_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,16 +242,8 @@ def _build_batched_gpu_plan(
 
 
 def _prepare_batched_input(spec: PostflopResolveSpec) -> BatchedGpuSolveInput:
-    built = build_public_tree(
-        spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
-        config=TreeBuildConfig(
-            max_depth=spec.max_depth,
-            max_nodes=spec.max_nodes,
-            min_reach_prob=spec.min_reach_prob,
-        ),
-    )
-    return BatchedGpuSolveInput(spec=spec, template=built.template)
+    built = _build_or_load_tree_template(spec)
+    return BatchedGpuSolveInput(spec=spec, template=built.template, cache_key=built.template.tree_key)
 
 
 def _group_batched_gpu_inputs(
@@ -262,7 +256,8 @@ def _group_batched_gpu_inputs(
 
 
 def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplate | None = None) -> PackedGpuSolve:
-    cache_key = _gpu_plan_key(spec, template=template)
+    built = _build_or_load_tree_template(spec, template=template)
+    cache_key = _gpu_plan_key(spec, template=built.template)
     cached = _GPU_PLAN_CACHE.get(cache_key)
     if cached is not None:
         return PackedGpuSolve(
@@ -275,15 +270,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
             packed_subtree=cached.packed_subtree,
             gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout),
         )
-    tree = build_public_tree(
-        spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
-        config=TreeBuildConfig(
-            max_depth=spec.max_depth,
-            max_nodes=spec.max_nodes,
-            min_reach_prob=spec.min_reach_prob,
-        ),
-    )
+    tree = built
     packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
     action_counts = _build_compact_infoset_action_counts(packed_subtree)
     layout = InfosetLayout.from_action_counts(action_counts)
@@ -318,8 +305,62 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         packed_subtree=packed.packed_subtree,
         gpu_state=_make_gpu_state(packed.packed_subtree, packed.layout),
     )
+    _load_warm_start_into_gpu_state(packed, spec)
     _GPU_PLAN_CACHE.put(cache_key, packed)
+    if spec.cache_state is not None:
+        spec.cache_state.store_tree_template(_tree_template_cache_key(spec), tree.template)
     return packed
+
+
+def _build_or_load_tree_template(
+    spec: PostflopResolveSpec,
+    *,
+    template: PublicTreeTemplate | None = None,
+) -> BuiltPublicTree:
+    cache_key = _tree_template_cache_key(spec)
+    if template is not None:
+        return _rebuilt_tree_from_template(spec, template)
+    if spec.cache_state is not None:
+        cached_template = spec.cache_state.lookup_tree_template(cache_key)
+        if cached_template is not None:
+            return _rebuilt_tree_from_template(spec, cached_template)
+    built = build_public_tree(
+        spec.state,
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
+        config=TreeBuildConfig(
+            max_depth=spec.max_depth,
+            max_nodes=spec.max_nodes,
+            min_reach_prob=spec.min_reach_prob,
+        ),
+    )
+    if spec.cache_state is not None:
+        spec.cache_state.store_tree_template(cache_key, built.template)
+    return built
+
+
+def _rebuilt_tree_from_template(
+    spec: PostflopResolveSpec,
+    template: PublicTreeTemplate,
+) -> BuiltPublicTree:
+    built = build_public_tree(
+        spec.state,
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
+        config=TreeBuildConfig(
+            max_depth=spec.max_depth,
+            max_nodes=spec.max_nodes,
+            min_reach_prob=spec.min_reach_prob,
+        ),
+    )
+    return BuiltPublicTree(
+        tree=template.as_public_tree(built.tree.children),
+        template=template,
+        node_states=built.node_states,
+        actions_by_node=built.actions_by_node,
+        action_abstraction_id=built.action_abstraction_id,
+        canonical_board_key=built.canonical_board_key,
+        player_count=built.player_count,
+        active_players=built.active_players,
+    )
 
 
 def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGpuSolveState:
@@ -501,6 +542,16 @@ def _run_gpu_solve(
     root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
     root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
     root_ev_p1 = -root_ev_p0
+    if spec.cache_state is not None:
+        spec.cache_state.store_warm_start(
+            _gpu_plan_key(spec, template=packed.tree.template),
+            make_warm_start_state(
+                regret=tuple(float(value) for value in regrets.detach().cpu().tolist()),
+                strategy_sum=tuple(float(value) for value in strategy_sums.detach().cpu().tolist()),
+                source_key=_gpu_plan_key(spec, template=packed.tree.template),
+                blend_alpha=1.0,
+            ),
+        )
     return GpuSolveTrace(
         packed=packed,
         iterations=iterations,
@@ -537,6 +588,35 @@ def _gpu_plan_key(spec: PostflopResolveSpec, *, template: PublicTreeTemplate | N
             template_key,
         ]
     )
+
+
+def _tree_template_cache_key(spec: PostflopResolveSpec) -> str:
+    return TreeTemplateKey(
+        street=spec.state.current_street.value,
+        canonical_board=canonical_board_key(spec.state.board),
+        pot=int(spec.state.betting_round.pot.amount),
+        stacks=tuple(int(stack.stack) for stack in spec.state.betting_round.stacks),
+        to_act=int(spec.state.betting_round.to_act),
+        action_abstraction_id=BaselineActionAbstraction(profile=make_postflop_mvp_profile()).abstraction_id(spec.state),
+    ).digest()
+
+
+def _load_warm_start_into_gpu_state(
+    packed: PackedGpuSolve,
+    spec: PostflopResolveSpec,
+) -> None:
+    if spec.cache_state is None or packed.gpu_state is None:
+        return
+    warm_start = spec.cache_state.lookup_warm_start(_gpu_plan_key(spec, template=packed.tree.template))
+    if warm_start is None:
+        return
+    state = packed.gpu_state
+    regret = np.asarray(warm_start.regret, dtype=np.float32)
+    strategy_sum = np.asarray(warm_start.strategy_sum, dtype=np.float32)
+    if regret.size == state.regrets.numel():
+        state.regrets.copy_(torch.as_tensor(regret, dtype=torch.float32, device=state.regrets.device))
+    if strategy_sum.size == state.strategy_sums.numel():
+        state.strategy_sums.copy_(torch.as_tensor(strategy_sum, dtype=torch.float32, device=state.strategy_sums.device))
 
 
 def _build_level_plan(

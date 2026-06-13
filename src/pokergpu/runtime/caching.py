@@ -13,6 +13,7 @@ from .cache import (
     WarmStartState,
     entropy_from_probs,
 )
+from pokergpu.tree.public_tree import PublicTreeTemplate
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,12 +167,29 @@ class SolveCacheState:
                          size_bytes: int = 0) -> None:
         self.bundle.warm_start.put(key, warm, size_bytes=size_bytes)
 
+    def lookup_tree_template(self, key: str) -> PublicTreeTemplate | None:
+        template = self.bundle.tree_template.get(key)
+        if template is None:
+            self.counters.miss()
+        else:
+            self.counters.hit()
+        return template
+
+    def store_tree_template(
+        self,
+        key: str,
+        template: PublicTreeTemplate,
+        size_bytes: int = 0,
+    ) -> None:
+        self.bundle.tree_template.put(key, template, size_bytes=size_bytes)
+
     def stats(self) -> dict[str, Any]:
         return {
             "tree": self.bundle.tree.stats(),
             "packed_subtree": self.bundle.packed_subtree.stats(),
             "leaf": self.bundle.leaf.stats(),
             "warm_start": self.bundle.warm_start.stats(),
+            "tree_template": self.bundle.tree_template.stats(),
             "hits": self.counters.hits,
             "misses": self.counters.misses,
         }

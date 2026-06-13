@@ -259,6 +259,9 @@ class CacheBundle:
     warm_start: LruCache[WarmStartState] = field(
         default_factory=lambda: LruCache(max_entries=128)
     )
+    tree_template: LruCache[Any] = field(
+        default_factory=lambda: LruCache(max_entries=128)
+    )
 
 
 @dataclass(slots=True)

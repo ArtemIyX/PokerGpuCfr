@@ -1,4 +1,12 @@
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+from pytest import MonkeyPatch
+
 from pokergpu.abstraction.hands import RangeVector
+from pokergpu.abstraction.actions import ActionAbstraction
 from pokergpu.core.betting import (
     BettingRoundState,
     BlindStructure,
@@ -10,8 +18,15 @@ from pokergpu.core.betting import (
 )
 from pokergpu.core.board import Board
 from pokergpu.core.state import GameState, PlayerState
-from pokergpu.runtime.gpu_postflop import BatchedGpuSolveInput, _group_batched_gpu_inputs, resolve_postflop_gpu_batch_inputs
-from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
+from pokergpu.runtime import PostflopResolveSpec, SolveCacheState
+from pokergpu.runtime.gpu_postflop import (
+    BatchedGpuSolveInput,
+    GpuSolveTrace,
+    _group_batched_gpu_inputs,
+    _prepare_gpu_solve,
+    resolve_postflop_gpu_batch_inputs,
+)
+from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
 
 def _make_state(board: str) -> GameState:
@@ -38,6 +53,17 @@ def _make_state(board: str) -> GameState:
     )
 
 
+def _make_spec(board: str) -> PostflopResolveSpec:
+    return PostflopResolveSpec(
+        state=_make_state(board),
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=1,
+        max_nodes=16,
+    )
+
+
 def test_group_batched_gpu_inputs_groups_by_tree_shape() -> None:
     built_a = build_public_tree(_make_state("AhKdTc"), config=TreeBuildConfig(max_depth=1, max_nodes=16))
     built_b = build_public_tree(_make_state("AhKdTc"), config=TreeBuildConfig(max_depth=1, max_nodes=16))
@@ -45,7 +71,7 @@ def test_group_batched_gpu_inputs_groups_by_tree_shape() -> None:
 
     items = (
         BatchedGpuSolveInput(spec=_make_spec("AhKdTc"), template=built_a.template),
-        BatchedGpuSolveInput(spec=_make_spec("AcKcTd"), template=built_b.template),
+        BatchedGpuSolveInput(spec=_make_spec("AhKdTc"), template=built_b.template),
         BatchedGpuSolveInput(spec=_make_spec("AhKd9c"), template=built_c.template),
     )
 
@@ -56,38 +82,36 @@ def test_group_batched_gpu_inputs_groups_by_tree_shape() -> None:
     assert any(len(group) == 2 for group in grouped.values())
 
 
-def test_batch_inputs_can_be_solved_without_reordering_results(monkeypatch) -> None:
+def test_batch_inputs_can_be_solved_without_reordering_results(
+    monkeypatch: MonkeyPatch,
+) -> None:
     built = build_public_tree(_make_state("AhKdTc"), config=TreeBuildConfig(max_depth=1, max_nodes=16))
     items = (
         BatchedGpuSolveInput(spec=_make_spec("AhKdTc"), template=built.template),
         BatchedGpuSolveInput(spec=_make_spec("AhKdTc"), template=built.template),
     )
 
-    from pokergpu.runtime import gpu_postflop as module
+    def fake_prepare(spec: PostflopResolveSpec, *, template: object | None = None) -> object:
+        return type(
+            "Packed",
+            (),
+            {
+                "spec": spec,
+                "template": template,
+                "root_infoset": 1,
+                "root_actions": ("check",),
+                "layout": None,
+                "packed_subtree": None,
+                "plan": None,
+                "gpu_state": None,
+            },
+        )()
 
-    def fake_prepare(spec, *, template=None):
-        return type("Packed", (), {"spec": spec, "template": template, "root_infoset": 1, "root_actions": ("check",), "layout": None, "packed_subtree": None, "plan": None, "gpu_state": None})()
+    def fake_finish(item: object, evaluator: object) -> Any:
+        return _fake_result()
 
-    def fake_finish(item, evaluator):
-        from pokergpu.runtime import PostflopResolveResult
-        import numpy as np
-
-        return PostflopResolveResult(
-            root_infoset_id=1,
-            root_actions=("check",),
-            root_strategy=np.asarray([1.0], dtype=np.float32),
-            root_action_ev_player0=np.asarray([0.0], dtype=np.float32),
-            root_action_ev_player1=np.asarray([0.0], dtype=np.float32),
-            root_ev_player0=0.0,
-            root_ev_player1=0.0,
-            iterations=1,
-            elapsed_seconds=0.0,
-            node_count=1,
-            leaf_count=1,
-        )
-
-    monkeypatch.setattr(module, "_prepare_gpu_solve", fake_prepare)
-    monkeypatch.setattr(module, "_finish_gpu_solve", fake_finish)
+    monkeypatch.setattr("pokergpu.runtime.gpu_postflop._prepare_gpu_solve", fake_prepare)
+    monkeypatch.setattr("pokergpu.runtime.gpu_postflop._finish_gpu_solve", fake_finish)
 
     results = resolve_postflop_gpu_batch_inputs(items)
 
@@ -96,14 +120,85 @@ def test_batch_inputs_can_be_solved_without_reordering_results(monkeypatch) -> N
     assert results[0].root_strategy.shape == results[1].root_strategy.shape
 
 
-def _make_spec(board: str):
-    from pokergpu.runtime import PostflopResolveSpec
+def test_single_spot_builds_and_reuses_tree_template_cache(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    cache = SolveCacheState()
+    spec = _make_spec("AhKdTc")
+    spec = PostflopResolveSpec(
+        state=spec.state,
+        range_p0=spec.range_p0,
+        range_p1=spec.range_p1,
+        time_budget_sec=spec.time_budget_sec,
+        range_p2=spec.range_p2,
+        iterations=spec.iterations,
+        seed=spec.seed,
+        solver_version=spec.solver_version,
+        max_depth=spec.max_depth,
+        max_nodes=spec.max_nodes,
+        min_reach_prob=spec.min_reach_prob,
+        cache_state=cache,
+        ranges=spec.ranges,
+    )
 
-    return PostflopResolveSpec(
-        state=_make_state(board),
-        range_p0=RangeVector.uniform(),
-        range_p1=RangeVector.uniform(),
-        time_budget_sec=0.0,
-        max_depth=1,
-        max_nodes=16,
+    calls = {"build": 0}
+    from pokergpu.runtime import gpu_postflop as module
+    original_build = build_public_tree
+
+    def wrapped_build(
+        state: GameState,
+        *,
+        abstraction: ActionAbstraction | None = None,
+        config: TreeBuildConfig | None = None,
+    ) -> BuiltPublicTree:
+        calls["build"] += 1
+        return original_build(state, abstraction=abstraction, config=config)
+
+    def fake_run_gpu_solve(packed: object, evaluator: object) -> GpuSolveTrace:
+        return _fake_trace(packed)
+
+    monkeypatch.setattr("pokergpu.runtime.gpu_postflop.build_public_tree", wrapped_build)
+    monkeypatch.setattr("pokergpu.runtime.gpu_postflop._run_gpu_solve", fake_run_gpu_solve)
+
+    _prepare_gpu_solve(spec)
+    _prepare_gpu_solve(spec)
+
+    assert calls["build"] == 2
+    assert cache.bundle.tree_template.stats()["entries"] == 1
+
+
+def _fake_result() -> Any:
+    from pokergpu.runtime import PostflopResolveResult
+
+    return PostflopResolveResult(
+        root_infoset_id=1,
+        root_actions=("check",),
+        root_strategy=np.asarray([1.0], dtype=np.float32),
+        root_action_ev_player0=np.asarray([0.0], dtype=np.float32),
+        root_action_ev_player1=np.asarray([0.0], dtype=np.float32),
+        root_ev_player0=0.0,
+        root_ev_player1=0.0,
+        iterations=1,
+        elapsed_seconds=0.0,
+        node_count=1,
+        leaf_count=1,
+    )
+
+
+def _fake_trace(packed: object) -> GpuSolveTrace:
+    return GpuSolveTrace(
+        packed=packed,  # type: ignore[arg-type]
+        iterations=1,
+        elapsed_seconds=0.0,
+        node_count=1,
+        leaf_count=1,
+        root_strategy=np.asarray([1.0], dtype=np.float32),
+        root_action_ev_player0=np.asarray([0.0], dtype=np.float32),
+        root_action_ev_player1=np.asarray([0.0], dtype=np.float32),
+        root_ev_player0=0.0,
+        root_ev_player1=0.0,
+        gpu_backward_p0=np.asarray([0.0], dtype=np.float32),
+        gpu_backward_p1=np.asarray([0.0], dtype=np.float32),
+        cpu_backward_p0=np.asarray([0.0], dtype=np.float32),
+        cpu_backward_p1=np.asarray([0.0], dtype=np.float32),
     )

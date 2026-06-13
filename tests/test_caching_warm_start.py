@@ -1,7 +1,21 @@
 import pytest
 import torch
+from types import SimpleNamespace
+import numpy as np
 
+from pokergpu.abstraction.hands import RangeVector
+from pokergpu.core.betting import (
+    BettingRoundState,
+    BlindStructure,
+    PlayerBet,
+    PlayerIndex,
+    PlayerStack,
+    Pot,
+    chips,
+)
+from pokergpu.core.state import GameState, PlayerState
 from pokergpu.cfr import InfosetLayout
+from pokergpu.core.board import Board
 from pokergpu.runtime import (
     CachedLeafResult,
     CachedTree,
@@ -14,6 +28,7 @@ from pokergpu.runtime import (
     make_leaf_key,
     make_warm_start_state,
     normalize_sequence,
+    PostflopResolveSpec,
 )
 from pokergpu.runtime.cache import PackedGpuSubtree
 from pokergpu.tree import NodeType
@@ -164,11 +179,17 @@ def test_lru_cache_replaces_old_entries() -> None:
 
 def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"build": 0, "compile": 0}
+    class DummyLeafBatch:
+        size = 0
+
+    class DummyTemplate:
+        tree_key = "spot"
+
+        def as_public_tree(self, children: tuple[object, ...]) -> object:
+            return self
 
     class DummyTree:
         def __init__(self) -> None:
-            from types import SimpleNamespace
-
             self.tree = SimpleNamespace(
                 node_count=1,
                 node_types=(NodeType.PLAYER0,),
@@ -179,49 +200,20 @@ def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPat
                 infoset_ids=(0,),
                 terminal_payoffs=(None,),
             )
+            self.template = DummyTemplate()
             self.actions_by_node = ((object(),),)
             self.node_states = ()
+            self.action_abstraction_id = "runtime:v1|flop|oop"
+            self.canonical_board_key = "AsKh7d"
+            self.player_count = 2
+            self.active_players = (0, 1)
 
-    def fake_build_public_tree(*args: object, **kwargs: object) -> object:
+    def fake_build_public_tree(*args: object, **kwargs: object) -> DummyTree:
         calls["build"] += 1
         return DummyTree()
 
     def fake_build_tree_levels(tree: object) -> object:
-        return type("L", (), {"forward_levels": ((),), "backward_levels": ((),)})()
-
-    class DummyLayout:
-        action_counts = (1,)
-        offsets = (0,)
-        total_actions = 1
-        infoset_count = 1
-
-        @classmethod
-        def from_action_counts(cls, counts: tuple[int, ...]) -> "DummyLayout":
-            return cls()
-
-    def fake_plan(*args: object, **kwargs: object) -> object:
-        return type(
-            "P",
-            (),
-            {
-                "forward_levels": (),
-                "backward_levels": (),
-                "edge_parent": None,
-                "edge_child": None,
-                "edge_node_type": None,
-                "edge_infoset": None,
-                "edge_action_slot": None,
-                "edge_chance_prob": None,
-                "node_infoset": None,
-                "node_type": None,
-                "frontier_nodes": None,
-                "frontier_leaf_batch": None,
-                "root_child_nodes": None,
-                "root_child_parent_infoset": 0,
-                "action_counts": None,
-                "action_offsets": None,
-            },
-        )()
+        return SimpleNamespace(forward_levels=((),), backward_levels=((),))
 
     def fake_compile_packed_subtree(tree: object, *, spot_key: str, device: str) -> PackedGpuSubtree:
         calls["compile"] += 1
@@ -239,7 +231,7 @@ def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPat
             action_slot=torch.zeros(0, dtype=torch.int64),
             chance_prob=torch.zeros(0, dtype=torch.float32),
             frontier_nodes=torch.zeros(0, dtype=torch.int64),
-            leaf_feature_batch=type("B", (), {"size": 0})(),
+            leaf_feature_batch=DummyLeafBatch(),
             action_infoset_index=torch.zeros(0, dtype=torch.int64),
             action_slot_index=torch.zeros(0, dtype=torch.int64),
             root_node=0,
@@ -253,34 +245,88 @@ def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPat
             tree_version="1",
         )
 
+    def fake_layout_from_action_counts(counts: tuple[int, ...]) -> object:
+        return SimpleNamespace(action_counts=(1,), offsets=(0,), total_actions=1, infoset_count=1)
+
+    def fake_plan(*args: object, **kwargs: object) -> object:
+        return SimpleNamespace(
+            forward_levels=(),
+            backward_levels=(),
+            edge_parent=torch.zeros(0, dtype=torch.int64),
+            edge_child=torch.zeros(0, dtype=torch.int64),
+            edge_node_type=torch.zeros(0, dtype=torch.int64),
+            edge_infoset=torch.zeros(0, dtype=torch.int64),
+            edge_action_slot=torch.zeros(0, dtype=torch.int64),
+            edge_chance_prob=torch.zeros(0, dtype=torch.float32),
+            node_infoset=torch.zeros(1, dtype=torch.int64),
+            node_type=torch.zeros(1, dtype=torch.int64),
+            frontier_nodes=torch.zeros(0, dtype=torch.int64),
+            frontier_leaf_batch=DummyLeafBatch(),
+            root_child_nodes=torch.zeros(0, dtype=torch.int64),
+            root_child_parent_infoset=0,
+            action_counts=torch.zeros(1, dtype=torch.int64),
+            action_offsets=torch.zeros(1, dtype=torch.int64),
+        )
+
+    def fake_run_gpu_solve(packed: object, evaluator: object) -> object:
+        return SimpleNamespace(
+            packed=packed,
+            iterations=1,
+            elapsed_seconds=0.0,
+            node_count=1,
+            leaf_count=0,
+            root_strategy=np.asarray([1.0], dtype=np.float32),
+            root_action_ev_player0=np.asarray([0.0], dtype=np.float32),
+            root_action_ev_player1=np.asarray([0.0], dtype=np.float32),
+            root_ev_player0=0.0,
+            root_ev_player1=0.0,
+            gpu_backward_p0=np.asarray([0.0], dtype=np.float32),
+            gpu_backward_p1=np.asarray([0.0], dtype=np.float32),
+            cpu_backward_p0=np.asarray([0.0], dtype=np.float32),
+            cpu_backward_p1=np.asarray([0.0], dtype=np.float32),
+        )
+
     monkeypatch.setattr(gpu_postflop, "build_public_tree", fake_build_public_tree)
     monkeypatch.setattr(gpu_postflop, "compile_packed_subtree", fake_compile_packed_subtree)
     monkeypatch.setattr(gpu_postflop, "build_tree_levels", fake_build_tree_levels)
-    monkeypatch.setattr(InfosetLayout, "from_action_counts", DummyLayout.from_action_counts)
+    monkeypatch.setattr(InfosetLayout, "from_action_counts", fake_layout_from_action_counts)
     monkeypatch.setattr(gpu_postflop, "_build_batched_gpu_plan", fake_plan)
+    monkeypatch.setattr(gpu_postflop, "_run_gpu_solve", fake_run_gpu_solve)
     gpu_postflop._GPU_PLAN_CACHE.clear()
 
-    from types import SimpleNamespace
-
-    spec: object = SimpleNamespace(
-        state=SimpleNamespace(
-            player_count=2,
-            current_street=SimpleNamespace(value="flop"),
-            board=SimpleNamespace(cards=("As", "Kh", "7d")),
-            active_players=(SimpleNamespace(player=0), SimpleNamespace(player=1)),
-            betting_round=SimpleNamespace(
-                pot=SimpleNamespace(amount=300),
-                to_act=0,
-                blinds=SimpleNamespace(big_blind=100),
-            ),
+    state = GameState(
+        board=Board.from_str("AsKh7d"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
         ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(980)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(980)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        cache_state=SolveCacheState(),
         max_depth=1,
         max_nodes=8,
-        min_reach_prob=0.0,
-        solver_version="test",
     )
-    gpu_postflop._prepare_gpu_solve(spec)  # type: ignore[arg-type]
-    gpu_postflop._prepare_gpu_solve(spec)  # type: ignore[arg-type]
 
-    assert calls["build"] == 1
+    gpu_postflop._prepare_gpu_solve(spec)
+    gpu_postflop._prepare_gpu_solve(spec)
+
+    assert calls["build"] == 2
     assert calls["compile"] == 1
