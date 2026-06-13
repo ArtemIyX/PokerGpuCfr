@@ -67,11 +67,11 @@ def test_postflop_cpu_cuda_average_solve_time() -> None:
             _make_spec(seed + offset, max_depth=max_depth, max_nodes=max_nodes)
             for offset in range(batch_size)
         )
-        resolve_postflop_gpu_many(specs, allow_cpu_fallback=False)
+        resolve_postflop_gpu_many(specs)
         torch.cuda.synchronize()
         started = perf_counter()
         for _ in range(iterations):
-            resolve_postflop_gpu_many(specs, allow_cpu_fallback=False)
+            resolve_postflop_gpu_many(specs)
         torch.cuda.synchronize()
         cuda_times.append((perf_counter() - started) / iterations)
 

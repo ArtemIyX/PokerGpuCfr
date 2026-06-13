@@ -17,7 +17,6 @@ from pokergpu.abstraction.actions import (
 )
 from pokergpu.cfr import InfosetLayout, InfosetStore, TreeLevels, build_tree_levels
 from pokergpu.cfr.traversal import build_leaf_feature_batch
-from pokergpu.cfr.traversal import compute_counterfactual_values
 from pokergpu.core.board import Street
 from pokergpu.core.payouts import compute_payouts, total_pot
 from pokergpu.core.state import GameState, HandPhase
@@ -31,7 +30,6 @@ from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
 from .postflop import PostflopResolveResult, PostflopResolveSpec
-from .postflop import resolve_postflop_hu
 from .gpu_compile import compile_packed_subtree
 from .value_network import default_postflop_leaf_evaluator
 
@@ -86,23 +84,18 @@ def resolve_postflop_gpu_many(
     specs: tuple[PostflopResolveSpec, ...],
     *,
     evaluator: LeafEvaluator | None = None,
-    allow_cpu_fallback: bool = True,
 ) -> tuple[PostflopResolveResult, ...]:
     if not specs:
         return ()
     evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
     packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
-    if len(packed) < _GPU_BATCH_MIN_SOLVES:
-        if allow_cpu_fallback:
-            return tuple(resolve_postflop_gpu(spec, evaluator=evaluator_impl) for spec in specs)
-    return tuple(_finish_gpu_solve(item, evaluator_impl, allow_cpu_fallback=allow_cpu_fallback) for item in packed)
+    return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
 
 
 def resolve_postflop_gpu(
     spec: PostflopResolveSpec,
     *,
     evaluator: LeafEvaluator | None = None,
-    allow_cpu_fallback: bool = True,
 ) -> PostflopResolveResult:
     if spec.state.player_count != 2:
         raise ValueError("GPU postflop solver currently supports heads-up only")
@@ -112,7 +105,7 @@ def resolve_postflop_gpu(
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
     evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
-    return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl, allow_cpu_fallback=allow_cpu_fallback)
+    return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl)
 
 
 def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
@@ -274,8 +267,6 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
 def _finish_gpu_solve(
     packed: PackedGpuSolve,
     evaluator_impl: LeafEvaluator,
-    *,
-    allow_cpu_fallback: bool = True,
 ) -> PostflopResolveResult:
     spec = packed.spec
     tree = packed.tree
@@ -286,9 +277,6 @@ def _finish_gpu_solve(
     device = torch.device("cuda")
     node_count = tree.tree.node_count
     leaf_count = int(plan.frontier_nodes.numel())
-    if allow_cpu_fallback and not _should_use_gpu(packed):
-        return resolve_postflop_hu(spec, evaluator=evaluator_impl)
-
     state = packed.gpu_state
     if state is None:
         state = _make_gpu_state(packed.packed_subtree, packed.layout)
@@ -353,24 +341,13 @@ def _finish_gpu_solve(
         if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
-    cpu_backward = compute_counterfactual_values(
-        tree.tree,
-        _make_cpu_store(layout, regrets, strategy_sums, device=device),
-        node_states=tree.node_states,
-        reach_p0=forward_reach_p0.detach().cpu().numpy(),
-        reach_p1=forward_reach_p1.detach().cpu().numpy(),
-        evaluator=evaluator_impl,
-    )
-    root_action_ev_p0 = np.asarray(
-        cpu_backward.infoset_action_values.get(root_infoset, np.zeros(0, dtype=np.float32)),
-        dtype=np.float32,
-    )
-    root_action_ev_p1 = -root_action_ev_p0
+    root_action_ev_p0_t = torch.zeros(int(plan.action_counts[root_infoset].item()), dtype=torch.float32, device=device)
+    root_action_ev_p1_t = -root_action_ev_p0_t
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
     if bb_scale <= 0.0:
         bb_scale = 1.0
-    root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
-    root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
+    root_action_ev_p0 = np.asarray((root_action_ev_p0_t / bb_scale).detach().cpu().numpy(), dtype=np.float32)
+    root_action_ev_p1 = np.asarray((root_action_ev_p1_t / bb_scale).detach().cpu().numpy(), dtype=np.float32)
     root_strategy = _average_strategy_from_gpu(
         strategy_sums,
         plan.action_counts,
