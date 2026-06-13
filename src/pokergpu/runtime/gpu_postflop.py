@@ -23,6 +23,7 @@ from pokergpu.core.payouts import compute_payouts, total_pot
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import EvalDeviceConfig, LeafEvaluator
 from pokergpu.eval.gpu_stub import GpuBatchLeafEvaluator
+from pokergpu.runtime.cache import LruCache
 from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
@@ -58,6 +59,36 @@ class BatchedGpuPlan:
     action_offsets: torch.Tensor
 
 
+@dataclass(frozen=True, slots=True)
+class PackedGpuSolve:
+    spec: PostflopResolveSpec
+    tree: BuiltPublicTree
+    plan: BatchedGpuPlan
+    layout: InfosetLayout
+    root_infoset: int
+    root_actions: tuple[str, ...]
+
+
+_GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
+_GPU_BATCH_MIN_SOLVES = 4
+_GPU_MIN_LEAFS = 256
+_GPU_MIN_INFOSSETS = 512
+
+
+def resolve_postflop_gpu_many(
+    specs: tuple[PostflopResolveSpec, ...],
+    *,
+    evaluator: LeafEvaluator | None = None,
+) -> tuple[PostflopResolveResult, ...]:
+    if not specs:
+        return ()
+    evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
+    packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
+    if len(packed) < _GPU_BATCH_MIN_SOLVES:
+        return tuple(resolve_postflop_gpu(spec, evaluator=evaluator_impl) for spec in specs)
+    return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
+
+
 def resolve_postflop_gpu(
     spec: PostflopResolveSpec,
     *,
@@ -71,106 +102,7 @@ def resolve_postflop_gpu(
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
     evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
-    started_at = time.monotonic()
-    tree = build_public_tree(
-        spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
-        config=TreeBuildConfig(
-            max_depth=spec.max_depth,
-            max_nodes=spec.max_nodes,
-            min_reach_prob=spec.min_reach_prob,
-        ),
-    )
-    action_counts = _build_infoset_action_counts(tree.tree, tree.actions_by_node)
-    layout = InfosetLayout.from_action_counts(action_counts)
-    root_infoset = tree.tree.infoset_ids[0]
-    if root_infoset is None:
-        raise ValueError("root node must be a player infoset")
-    root_actions = tuple(_format_action(action) for action in tree.actions_by_node[0])
-
-    device = torch.device("cuda")
-    node_count = tree.tree.node_count
-    levels = build_tree_levels(tree.tree)
-    plan = _build_batched_gpu_plan(tree.tree, tree.actions_by_node, levels, layout, device=device)
-    leaf_count = int(plan.frontier_nodes.numel())
-    regrets = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
-    strategy_sums = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
-    forward_reach_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
-    forward_reach_p1 = torch.zeros(node_count, dtype=torch.float32, device=device)
-    backward_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
-    backward_p1 = torch.zeros(node_count, dtype=torch.float32, device=device)
-
-    iterations = 0
-    deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
-    target_iterations = max(0, int(spec.iterations))
-    while (
-        (target_iterations > 0 and iterations < target_iterations)
-        or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
-    ):
-        strategy_table = _regret_matching_table(regrets, plan.action_counts, plan.action_offsets)
-        forward_reach_p0.zero_()
-        forward_reach_p1.zero_()
-        forward_reach_p0[0] = 1.0
-        forward_reach_p1[0] = 1.0
-        _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
-
-        backward_p0.zero_()
-        backward_p1.zero_()
-        _backward_pass_gpu(
-            tree.tree,
-            plan,
-            strategy_table,
-            evaluator_impl,
-            tree.node_states,
-            backward_p0,
-            backward_p1,
-        )
-        _update_regrets_gpu(tree.tree, plan, regrets, strategy_sums, strategy_table, backward_p0, backward_p1)
-        iterations += 1
-        if target_iterations > 0 and iterations >= target_iterations:
-            break
-        if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
-            break
-
-    strategy_table = _regret_matching_table(regrets, plan.action_counts, plan.action_offsets)
-    cpu_backward = compute_counterfactual_values(
-        tree.tree,
-        _make_cpu_store(layout, regrets, strategy_sums, device=device),
-        node_states=tree.node_states,
-        reach_p0=forward_reach_p0.detach().cpu().numpy(),
-        reach_p1=forward_reach_p1.detach().cpu().numpy(),
-        evaluator=evaluator_impl,
-    )
-    root_action_ev_p0 = np.asarray(
-        cpu_backward.infoset_action_values.get(
-            int(root_infoset), np.zeros(0, dtype=np.float32)
-        ),
-        dtype=np.float32,
-    )
-    root_action_ev_p1 = -root_action_ev_p0
-    bb_scale = float(spec.state.betting_round.blinds.big_blind)
-    if bb_scale <= 0.0:
-        bb_scale = 1.0
-    root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
-    root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
-    root_strategy = _average_strategy_from_gpu(strategy_sums, plan.action_counts, plan.action_offsets, int(root_infoset))
-    root_ev_p0 = float(
-        np.sum(root_strategy[: root_action_ev_p0.shape[0]] * root_action_ev_p0, dtype=np.float64)
-    )
-    root_ev_p1 = -root_ev_p0
-    return PostflopResolveResult(
-        root_infoset_id=int(root_infoset),
-        root_actions=root_actions,
-        root_strategy=root_strategy,
-        root_action_ev_player0=root_action_ev_p0,
-        root_action_ev_player1=root_action_ev_p1,
-        root_ev_player0=root_ev_p0,
-        root_ev_player1=root_ev_p1,
-        iterations=iterations,
-        elapsed_seconds=time.monotonic() - started_at,
-        node_count=node_count,
-        leaf_count=leaf_count,
-    )
+    return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl)
 
 
 def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
@@ -234,6 +166,167 @@ def _build_batched_gpu_plan(
         root_child_parent_infoset=int(tree.infoset_ids[0] or 0),
         action_counts=action_counts,
         action_offsets=action_offsets,
+    )
+
+
+def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
+    cache_key = _gpu_plan_key(spec)
+    cached = _GPU_PLAN_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    tree = build_public_tree(
+        spec.state,
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
+        config=TreeBuildConfig(
+            max_depth=spec.max_depth,
+            max_nodes=spec.max_nodes,
+            min_reach_prob=spec.min_reach_prob,
+        ),
+    )
+    action_counts = _build_infoset_action_counts(tree.tree, tree.actions_by_node)
+    layout = InfosetLayout.from_action_counts(action_counts)
+    root_infoset = tree.tree.infoset_ids[0]
+    if root_infoset is None:
+        raise ValueError("root node must be a player infoset")
+    levels = build_tree_levels(tree.tree)
+    plan = _build_batched_gpu_plan(tree.tree, tree.actions_by_node, levels, layout, device=torch.device("cuda"))
+    packed = PackedGpuSolve(
+        spec=spec,
+        tree=tree,
+        plan=plan,
+        layout=layout,
+        root_infoset=int(root_infoset),
+        root_actions=tuple(_format_action(action) for action in tree.actions_by_node[0]),
+    )
+    _GPU_PLAN_CACHE.put(cache_key, packed)
+    return packed
+
+
+def _finish_gpu_solve(
+    packed: PackedGpuSolve,
+    evaluator_impl: LeafEvaluator,
+) -> PostflopResolveResult:
+    spec = packed.spec
+    tree = packed.tree
+    plan = packed.plan
+    layout = packed.layout
+    root_infoset = packed.root_infoset
+    started_at = time.monotonic()
+    device = torch.device("cuda")
+    node_count = tree.tree.node_count
+    leaf_count = int(plan.frontier_nodes.numel())
+    if not _should_use_gpu(packed):
+        return resolve_postflop_hu(spec, evaluator=evaluator_impl)
+
+    regrets = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
+    strategy_sums = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
+    forward_reach_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
+    forward_reach_p1 = torch.zeros(node_count, dtype=torch.float32, device=device)
+    backward_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
+    backward_p1 = torch.zeros(node_count, dtype=torch.float32, device=device)
+
+    iterations = 0
+    deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
+    target_iterations = max(0, int(spec.iterations))
+    while (
+        (target_iterations > 0 and iterations < target_iterations)
+        or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
+    ):
+        strategy_table = _regret_matching_table(regrets, plan.action_counts, plan.action_offsets)
+        forward_reach_p0.zero_()
+        forward_reach_p1.zero_()
+        forward_reach_p0[0] = 1.0
+        forward_reach_p1[0] = 1.0
+        _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
+        backward_p0.zero_()
+        backward_p1.zero_()
+        _backward_pass_gpu(
+            tree.tree,
+            plan,
+            strategy_table,
+            evaluator_impl,
+            tree.node_states,
+            backward_p0,
+            backward_p1,
+        )
+        _update_regrets_gpu(
+            tree.tree,
+            plan,
+            regrets,
+            strategy_sums,
+            strategy_table,
+            backward_p0,
+            backward_p1,
+        )
+        iterations += 1
+        if target_iterations > 0 and iterations >= target_iterations:
+            break
+        if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
+            break
+
+    cpu_backward = compute_counterfactual_values(
+        tree.tree,
+        _make_cpu_store(layout, regrets, strategy_sums, device=device),
+        node_states=tree.node_states,
+        reach_p0=forward_reach_p0.detach().cpu().numpy(),
+        reach_p1=forward_reach_p1.detach().cpu().numpy(),
+        evaluator=evaluator_impl,
+    )
+    root_action_ev_p0 = np.asarray(
+        cpu_backward.infoset_action_values.get(root_infoset, np.zeros(0, dtype=np.float32)),
+        dtype=np.float32,
+    )
+    root_action_ev_p1 = -root_action_ev_p0
+    bb_scale = float(spec.state.betting_round.blinds.big_blind)
+    if bb_scale <= 0.0:
+        bb_scale = 1.0
+    root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
+    root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
+    root_strategy = _average_strategy_from_gpu(
+        strategy_sums,
+        plan.action_counts,
+        plan.action_offsets,
+        root_infoset,
+    )
+    root_ev_p0 = float(
+        np.sum(
+            root_strategy[: root_action_ev_p0.shape[0]] * root_action_ev_p0,
+            dtype=np.float64,
+        )
+    )
+    return PostflopResolveResult(
+        root_infoset_id=root_infoset,
+        root_actions=packed.root_actions,
+        root_strategy=root_strategy,
+        root_action_ev_player0=root_action_ev_p0,
+        root_action_ev_player1=root_action_ev_p1,
+        root_ev_player0=root_ev_p0,
+        root_ev_player1=-root_ev_p0,
+        iterations=iterations,
+        elapsed_seconds=time.monotonic() - started_at,
+        node_count=node_count,
+        leaf_count=leaf_count,
+    )
+
+
+def _should_use_gpu(packed: PackedGpuSolve) -> bool:
+    return packed.layout.infoset_count >= _GPU_MIN_INFOSSETS or int(packed.plan.frontier_nodes.numel()) >= _GPU_MIN_LEAFS
+
+
+def _gpu_plan_key(spec: PostflopResolveSpec) -> str:
+    return "|".join(
+        [
+            spec.solver_version,
+            str(spec.state.player_count),
+            str(spec.state.current_street.value),
+            str(spec.state.betting_round.pot.amount),
+            str(spec.state.betting_round.to_act),
+            str(spec.max_depth),
+            str(spec.max_nodes),
+            str(spec.min_reach_prob),
+            str(spec.state.board.cards),
+            str(tuple(int(player.player) for player in spec.state.active_players)),
+        ]
     )
 
 

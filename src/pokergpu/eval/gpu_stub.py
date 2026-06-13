@@ -55,3 +55,6 @@ class GpuBatchLeafEvaluator(LeafEvaluator):
             )
         except Exception:
             return self._cpu_fallback.evaluate(batch)
+
+    def evaluate_many(self, batches: tuple[LeafFeatureBatch, ...]) -> tuple[LeafValueBatch, ...]:
+        return tuple(self.evaluate(batch) for batch in batches)

@@ -23,6 +23,9 @@ from pokergpu.runtime.gpu_postflop import (
     _backward_pass_gpu,
     _build_infoset_action_counts,
     _forward_pass_gpu,
+    _gpu_plan_key,
+    _prepare_gpu_solve,
+    _should_use_gpu,
     _root_child_nodes,
     resolve_postflop_gpu,
 )
@@ -227,6 +230,37 @@ def test_cuda_matches_cpu_root_shape_and_values_without_checkpoint() -> None:
     assert np.allclose(cuda.root_action_ev_player1, cpu.root_action_ev_player1)
     assert np.isclose(cuda.root_ev_player0, cpu.root_ev_player0)
     assert np.isclose(cuda.root_ev_player1, cpu.root_ev_player1)
+
+
+def test_gpu_plan_key_is_stable_for_same_state() -> None:
+    spec = PostflopResolveSpec(
+        state=_make_state(),
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=2,
+        max_nodes=64,
+    )
+
+    assert _gpu_plan_key(spec) == _gpu_plan_key(spec)
+
+
+def test_gpu_threshold_rejects_tiny_solve() -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for this test")
+
+    spec = PostflopResolveSpec(
+        state=_make_state(),
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=1,
+        max_nodes=16,
+    )
+    packed = _prepare_gpu_solve(spec)
+
+    assert _should_use_gpu(packed) is False
 
 
 def test_cuda_fold_ev_matches_cpu_fold_ev() -> None:

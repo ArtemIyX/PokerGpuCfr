@@ -82,6 +82,29 @@ class MultiwayPostflopResolveResult:
     leaf_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class BatchedPostflopResolveResult:
+    results: tuple[PostflopResolveResult, ...]
+    elapsed_seconds: float
+
+
+def resolve_postflop_gpu_batch(
+    specs: tuple[PostflopResolveSpec, ...],
+    *,
+    evaluator: LeafEvaluator | None = None,
+) -> BatchedPostflopResolveResult:
+    if not specs:
+        return BatchedPostflopResolveResult(results=(), elapsed_seconds=0.0)
+    from .gpu_postflop import resolve_postflop_gpu_many
+
+    started_at = time.monotonic()
+    results = resolve_postflop_gpu_many(specs, evaluator=evaluator)
+    return BatchedPostflopResolveResult(
+        results=results,
+        elapsed_seconds=time.monotonic() - started_at,
+    )
+
+
 def resolve_postflop_multi_mccfr(
     spec: PostflopResolveSpec,
     *,

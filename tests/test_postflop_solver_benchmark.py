@@ -5,6 +5,7 @@ from time import perf_counter
 
 import numpy as np
 import pytest
+import torch
 from tqdm import tqdm
 
 from pokergpu.abstraction.hands import RangeVector
@@ -21,17 +22,21 @@ from pokergpu.core.board import Board, Street
 from pokergpu.core.cards import Card, make_deck
 from pokergpu.core.state import GameState, HandPhase, PlayerState
 from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_hu
-from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
+from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu, resolve_postflop_gpu_many
 
 
 pytestmark = pytest.mark.benchmark_suite
 
 
 def test_postflop_cpu_cuda_average_solve_time() -> None:
-    seeds = tuple(range(1, 11))
-    max_depth = 1024
-    max_nodes = 4096
-    iterations = 32
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for this benchmark")
+
+    seeds = tuple(range(1, 5))
+    batch_size = 32
+    max_depth = 1
+    max_nodes = 32
+    iterations = 4
 
     cpu_times: list[float] = []
     cuda_times: list[float] = []
@@ -49,41 +54,41 @@ def test_postflop_cpu_cuda_average_solve_time() -> None:
             max_nodes=max_nodes,
         )
 
+        resolve_postflop_hu(spec)
         started = perf_counter()
         for _ in tqdm(range(iterations), desc=f"cpu seed {seed}", leave=False, total=iterations):
             resolve_postflop_hu(spec)
         cpu_times.append(perf_counter() - started)
 
     for seed in tqdm(seeds, desc="cuda seeds", total=len(seeds)):
-        state = _make_spot(seed)
-        spec = PostflopResolveSpec(
-            state=state,
-            range_p0=RangeVector.uniform(),
-            range_p1=RangeVector.uniform(),
-            time_budget_sec=0.0,
-            seed=seed,
-            max_depth=max_depth,
-            max_nodes=max_nodes,
+        specs = tuple(
+            _make_spec(seed + offset, max_depth=max_depth, max_nodes=max_nodes)
+            for offset in range(batch_size)
         )
-
+        resolve_postflop_gpu_many(specs)
+        torch.cuda.synchronize()
         started = perf_counter()
-        for _ in tqdm(range(iterations), desc=f"cuda seed {seed}", leave=False, total=iterations):
-            resolve_postflop_gpu(spec)
-        cuda_times.append(perf_counter() - started)
+        for _ in range(iterations):
+            resolve_postflop_gpu_many(specs)
+        torch.cuda.synchronize()
+        cuda_times.append((perf_counter() - started) / iterations)
 
     cpu_avg = float(np.mean(cpu_times, dtype=np.float64))
     cuda_avg = float(np.mean(cuda_times, dtype=np.float64))
 
     print(f"seeds={list(seeds)}")
+    print(f"batch_size={batch_size}")
     print(f"iterations={iterations}")
     print(f"total_runs={total_runs}")
     print("time_budget_sec=0.0")
     print(f"max_depth={max_depth}")
     print(f"max_nodes={max_nodes}")
-    print("mode=repeat_full_solve")
+    print("mode=batch_throughput")
     print(f"cpu_avg_seconds={cpu_avg:.6f}")
     print(f"cuda_avg_seconds={cuda_avg:.6f}")
     print(f"speedup={cpu_avg / cuda_avg:.3f}")
+    print(f"cpu_throughput_sps={1.0 / cpu_avg:.3f}")
+    print(f"cuda_throughput_sps={1.0 / cuda_avg:.3f}")
 
 
 def _make_spot(seed: int) -> GameState:
@@ -111,6 +116,18 @@ def _make_spot(seed: int) -> GameState:
         ),
         dealer=PlayerIndex(0),
         phase=HandPhase.IN_PROGRESS,
+    )
+
+
+def _make_spec(seed: int, *, max_depth: int, max_nodes: int) -> PostflopResolveSpec:
+    return PostflopResolveSpec(
+        state=_make_spot(seed),
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        seed=seed,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
     )
 
 
