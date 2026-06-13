@@ -15,8 +15,8 @@ from pokergpu.core.betting import (
     chips,
 )
 from pokergpu.core.board import Board
-from pokergpu.core.cards import card_from_str
-from pokergpu.core.state import GameState, PlayerState
+from pokergpu.core.cards import Card, card_from_str
+from pokergpu.core.state import GameState, HandPhase, PlayerState
 from pokergpu.cfr import InfosetLayout, InfosetStore, build_leaf_feature_batch, compute_counterfactual_values, compute_reach_probabilities
 from pokergpu.eval import EvalDeviceConfig, make_leaf_evaluator
 from pokergpu.runtime.gpu_postflop import (
@@ -29,12 +29,14 @@ from pokergpu.runtime.gpu_postflop import (
     _should_use_gpu,
     _root_child_nodes,
     resolve_postflop_gpu,
+    resolve_postflop_gpu_many,
 )
 from pokergpu.runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
-from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
 from pokergpu.cfr.traversal import build_tree_levels
 from pokergpu.tree import NodeType
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
+from pokergpu.core.cards import make_deck
+from random import Random
 
 
 def _make_state(board_text: str = "AhKdTc") -> GameState:
@@ -294,3 +296,85 @@ def test_cuda_fold_ev_matches_cpu_fold_ev() -> None:
 
     assert np.isclose(cuda.root_action_ev_player0[0], cpu.root_action_ev_player0[0])
     assert np.isclose(cuda.root_action_ev_player1[0], cpu.root_action_ev_player1[0])
+
+
+@pytest.mark.benchmark_suite
+def test_cpu_gpu_solve_timing() -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for this benchmark")
+
+    batch_size = 32
+    max_depth = 3
+    max_nodes = 128
+    specs = tuple(
+        PostflopResolveSpec(
+            state=_make_benchmark_state(index + 7),
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            seed=index + 7,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+        for index in range(batch_size)
+    )
+
+    for _ in range(2):
+        for spec in specs:
+            resolve_postflop_hu(spec)
+        resolve_postflop_gpu_many(specs)
+    torch.cuda.synchronize()
+
+    started = __import__("time").perf_counter()
+    cpu_results = [resolve_postflop_hu(spec) for spec in specs]
+    cpu_seconds = __import__("time").perf_counter() - started
+    cpu_per_solve = cpu_seconds / len(specs)
+
+    torch.cuda.synchronize()
+    started = __import__("time").perf_counter()
+    cuda_results = resolve_postflop_gpu_many(specs)
+    torch.cuda.synchronize()
+    cuda_seconds = __import__("time").perf_counter() - started
+    cuda_per_solve = cuda_seconds / len(specs)
+
+    print(f"cpu_seconds={cpu_seconds:.6f}", flush=True)
+    print(f"cuda_seconds={cuda_seconds:.6f}", flush=True)
+    print(f"cpu_per_solve_seconds={cpu_per_solve:.6f}", flush=True)
+    print(f"cuda_per_solve_seconds={cuda_per_solve:.6f}", flush=True)
+    print(f"speedup={cpu_seconds / cuda_seconds:.3f}", flush=True)
+    print(f"cpu_throughput_sps={len(specs) / cpu_seconds:.3f}", flush=True)
+    print(f"cuda_throughput_sps={len(specs) / cuda_seconds:.3f}", flush=True)
+    print(f"cpu_root_ev={cpu_results[0].root_ev_player0:.6f}", flush=True)
+    print(f"cuda_root_ev={cuda_results[0].root_ev_player0:.6f}", flush=True)
+
+
+def _make_benchmark_state(seed: int) -> GameState:
+    rng = Random(seed)
+    deck = list(make_deck())
+    rng.shuffle(deck)
+    board = tuple(deck[:3])
+    hole_0: tuple[Card, Card] = (deck[3], deck[4])
+    hole_1: tuple[Card, Card] = (deck[5], deck[6])
+    return GameState(
+        board=Board(cards=board),
+        players=(
+            PlayerState(player=PlayerIndex(0), hole_cards=hole_0),
+            PlayerState(player=PlayerIndex(1), hole_cards=hole_1),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+        phase=HandPhase.IN_PROGRESS,
+    )
