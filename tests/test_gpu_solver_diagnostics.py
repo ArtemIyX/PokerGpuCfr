@@ -24,6 +24,7 @@ from pokergpu.runtime.gpu_postflop import (
     _build_infoset_action_counts,
     _forward_pass_gpu,
     _gpu_plan_key,
+    debug_first_gpu_cpu_divergence,
     _prepare_gpu_solve,
     _should_use_gpu,
     _root_child_nodes,
@@ -230,6 +231,20 @@ def test_cuda_matches_cpu_root_shape_and_values_without_checkpoint() -> None:
     assert np.allclose(cuda.root_action_ev_player1, cpu.root_action_ev_player1)
     assert np.isclose(cuda.root_ev_player0, cpu.root_ev_player0)
     assert np.isclose(cuda.root_ev_player1, cpu.root_ev_player1)
+
+
+
+def test_debug_first_gpu_cpu_divergence() -> None:
+    debug_first_gpu_cpu_divergence(
+        PostflopResolveSpec(
+            state=_make_state(),
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=2,
+            max_nodes=64,
+        )
+    )
 
 
 def test_gpu_plan_key_is_stable_for_same_state() -> None:

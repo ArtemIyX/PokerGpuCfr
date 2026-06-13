@@ -60,7 +60,7 @@ def compile_packed_subtree(
         device=device,
     )
     leaf_feature_batch = build_leaf_feature_batch(tree.tree, tuple(int(index) for index in frontier_nodes.tolist()), node_states=tree.node_states)
-    action_infoset_index, action_slot_index = _action_maps(tree)
+    action_infoset_index, action_slot_index = _action_maps(tree, device=device)
     root_infoset = int(tree.tree.infoset_ids[0] or -1)
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
     infoset_count = max((int(infoset) for infoset in tree.tree.infoset_ids if infoset is not None), default=-1) + 1
@@ -152,7 +152,7 @@ def _chance_probs(tree: BuiltPublicTree) -> list[float]:
     return probs
 
 
-def _action_maps(tree: BuiltPublicTree) -> tuple[torch.Tensor, torch.Tensor]:
+def _action_maps(tree: BuiltPublicTree, *, device: str) -> tuple[torch.Tensor, torch.Tensor]:
     infoset_index: list[int] = []
     action_slot: list[int] = []
     for node_index, infoset in enumerate(tree.tree.infoset_ids):
@@ -162,7 +162,6 @@ def _action_maps(tree: BuiltPublicTree) -> tuple[torch.Tensor, torch.Tensor]:
         for slot in range(len(actions)):
             infoset_index.append(int(infoset))
             action_slot.append(slot)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     return (
         torch.as_tensor(infoset_index, dtype=torch.int64, device=device),
         torch.as_tensor(action_slot, dtype=torch.int64, device=device),

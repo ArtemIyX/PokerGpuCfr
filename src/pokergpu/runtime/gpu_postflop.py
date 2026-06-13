@@ -16,20 +16,21 @@ from pokergpu.abstraction.actions import (
     make_postflop_mvp_profile,
 )
 from pokergpu.cfr import InfosetLayout, InfosetStore, TreeLevels, build_tree_levels
+from pokergpu.cfr.traversal import compute_counterfactual_values
+from pokergpu.cfr.traversal import compute_reach_probabilities
 from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.core.board import Street
 from pokergpu.core.payouts import compute_payouts, total_pot
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import EvalDeviceConfig, LeafEvaluator
 from pokergpu.eval.types import LeafFeatureBatch
-from pokergpu.eval.gpu_stub import GpuBatchLeafEvaluator
 from pokergpu.runtime.cache import LruCache
 from pokergpu.runtime.cache import PackedGpuSolveState
 from pokergpu.runtime.cache import PackedGpuSubtree
-from pokergpu.tree import NodeType, PublicTree
+from pokergpu.tree import NodeId, NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
-from .postflop import PostflopResolveResult, PostflopResolveSpec
+from .postflop import PostflopResolveResult, PostflopResolveSpec, _summarize_root_ev
 from .gpu_compile import compile_packed_subtree
 from .value_network import default_postflop_leaf_evaluator
 
@@ -74,6 +75,24 @@ class PackedGpuSolve:
     gpu_state: PackedGpuSolveState | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class GpuSolveTrace:
+    packed: PackedGpuSolve
+    iterations: int
+    elapsed_seconds: float
+    node_count: int
+    leaf_count: int
+    root_strategy: np.ndarray
+    root_action_ev_player0: np.ndarray
+    root_action_ev_player1: np.ndarray
+    root_ev_player0: float
+    root_ev_player1: float
+    gpu_backward_p0: np.ndarray
+    gpu_backward_p1: np.ndarray
+    cpu_backward_p0: np.ndarray
+    cpu_backward_p1: np.ndarray
+
+
 _GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
 _GPU_BATCH_MIN_SOLVES = 4
 _GPU_MIN_LEAFS = 1024
@@ -87,7 +106,7 @@ def resolve_postflop_gpu_many(
 ) -> tuple[PostflopResolveResult, ...]:
     if not specs:
         return ()
-    evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
     return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
 
@@ -101,7 +120,7 @@ def resolve_postflop_gpu_batch(
         return ()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for resolve_postflop_gpu_batch")
-    evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
     return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
 
@@ -118,7 +137,7 @@ def resolve_postflop_gpu(
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
-    evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl)
 
 
@@ -282,6 +301,26 @@ def _finish_gpu_solve(
     packed: PackedGpuSolve,
     evaluator_impl: LeafEvaluator,
 ) -> PostflopResolveResult:
+    trace = _run_gpu_solve(packed, evaluator_impl)
+    return PostflopResolveResult(
+        root_infoset_id=trace.packed.root_infoset,
+        root_actions=trace.packed.root_actions,
+        root_strategy=trace.root_strategy,
+        root_action_ev_player0=trace.root_action_ev_player0,
+        root_action_ev_player1=trace.root_action_ev_player1,
+        root_ev_player0=trace.root_ev_player0,
+        root_ev_player1=trace.root_ev_player1,
+        iterations=trace.iterations,
+        elapsed_seconds=trace.elapsed_seconds,
+        node_count=trace.node_count,
+        leaf_count=trace.leaf_count,
+    )
+
+
+def _run_gpu_solve(
+    packed: PackedGpuSolve,
+    evaluator_impl: LeafEvaluator,
+) -> GpuSolveTrace:
     spec = packed.spec
     tree = packed.tree
     plan = packed.plan
@@ -355,37 +394,68 @@ def _finish_gpu_solve(
         if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
-    root_action_ev_p0_t = torch.zeros(int(plan.action_counts[root_infoset].item()), dtype=torch.float32, device=device)
-    root_action_ev_p1_t = -root_action_ev_p0_t
-    bb_scale = float(spec.state.betting_round.blinds.big_blind)
-    if bb_scale <= 0.0:
-        bb_scale = 1.0
-    root_action_ev_p0 = np.asarray((root_action_ev_p0_t / bb_scale).detach().cpu().numpy(), dtype=np.float32)
-    root_action_ev_p1 = np.asarray((root_action_ev_p1_t / bb_scale).detach().cpu().numpy(), dtype=np.float32)
-    root_strategy = _average_strategy_from_gpu(
-        strategy_sums,
+    strategy_table = _regret_matching_table(
+        regrets,
+        state.action_infoset_index,
+        state.action_slot_index,
         plan.action_counts,
-        plan.action_offsets,
-        root_infoset,
     )
-    root_ev_p0 = float(
-        np.sum(
-            root_strategy[: root_action_ev_p0.shape[0]] * root_action_ev_p0,
-            dtype=np.float64,
-        )
+    forward_reach_p0.zero_()
+    forward_reach_p1.zero_()
+    forward_reach_p0[0] = 1.0
+    forward_reach_p1[0] = 1.0
+    _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
+    backward_p0.zero_()
+    backward_p1.zero_()
+    _backward_pass_gpu(
+        tree.tree,
+        plan,
+        strategy_table,
+        evaluator_impl,
+        tree.node_states,
+        backward_p0,
+        backward_p1,
     )
-    return PostflopResolveResult(
-        root_infoset_id=root_infoset,
-        root_actions=packed.root_actions,
-        root_strategy=root_strategy,
-        root_action_ev_player0=root_action_ev_p0,
-        root_action_ev_player1=root_action_ev_p1,
-        root_ev_player0=root_ev_p0,
-        root_ev_player1=-root_ev_p0,
+
+    cpu_store = InfosetStore.zeros(packed.layout)
+    cpu_store.regrets[:] = regrets.detach().cpu().numpy()
+    cpu_store.strategy_sums[:] = strategy_sums.detach().cpu().numpy()
+    cpu_forward = compute_reach_probabilities(tree.tree, cpu_store)
+    cpu_backward = compute_counterfactual_values(
+        tree.tree,
+        cpu_store,
+        node_states=tree.node_states,
+        reach_p0=cpu_forward.player0_reach,
+        reach_p1=cpu_forward.player1_reach,
+        terminal_values_player0=packed.packed_subtree.terminal_payoffs.detach().cpu().numpy(),
+        evaluator=evaluator_impl,
+    )
+    root_strategy = cpu_store.average_strategy(root_infoset)
+    root_action_ev_p0 = np.asarray(
+        cpu_backward.infoset_action_values.get(
+            root_infoset, np.zeros(0, dtype=np.float32)
+        ),
+        dtype=np.float32,
+    )
+    root_action_ev_p1 = -root_action_ev_p0
+    root_strategy = np.asarray(root_strategy, dtype=np.float32)
+    root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
+    root_ev_p1 = -root_ev_p0
+    return GpuSolveTrace(
+        packed=packed,
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         node_count=node_count,
         leaf_count=leaf_count,
+        root_strategy=root_strategy,
+        root_action_ev_player0=root_action_ev_p0,
+        root_action_ev_player1=root_action_ev_p1,
+        root_ev_player0=root_ev_p0,
+        root_ev_player1=root_ev_p1,
+        gpu_backward_p0=backward_p0.detach().cpu().numpy(),
+        gpu_backward_p1=backward_p1.detach().cpu().numpy(),
+        cpu_backward_p0=np.asarray(cpu_backward.node_values_player0, dtype=np.float32),
+        cpu_backward_p1=np.asarray(cpu_backward.node_values_player1, dtype=np.float32),
     )
 
 
@@ -580,20 +650,18 @@ def _update_regrets_gpu_batched(
     valid_node_type = edge_node_type[valid_mask]
     valid_offsets = edge_offsets[valid_infoset]
     flat_indices = valid_offsets + valid_slots
+    strat = strategy_table[valid_infoset, valid_slots]
     child_values = torch.where(
         valid_node_type == 1,
         node_values_p0[valid_children],
         node_values_p1[valid_children],
     )
     infoset_values = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-    infoset_values.scatter_add_(0, valid_infoset, child_values)
-    counts = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-    counts.scatter_add_(0, valid_infoset, torch.ones_like(child_values))
-    per_infoset_value = infoset_values[valid_infoset] / torch.clamp(counts[valid_infoset], min=1.0)
-    action_regrets = child_values - per_infoset_value
+    infoset_values.scatter_add_(0, valid_infoset, strat * child_values)
+    action_regrets = child_values - infoset_values[valid_infoset]
     regrets.index_add_(0, flat_indices, action_regrets)
     regrets.clamp_(min=0.0)
-    strategy_sums.index_add_(0, flat_indices, strategy_table[valid_infoset, valid_slots])
+    strategy_sums.index_add_(0, flat_indices, strat)
 
 
 def _forward_pass_gpu(*args: Any) -> None:
@@ -729,42 +797,52 @@ def _backward_pass_gpu_batched(
             out_p0[node_index] = float(leaf_values.ev_player0[row])
             out_p1[node_index] = float(leaf_values.ev_player1[row])
 
-    edge_parent = plan.edge_parent
-    edge_child = plan.edge_child
-    edge_node_type = plan.edge_node_type
-    edge_infoset = plan.edge_infoset
-    edge_action_slot = plan.edge_action_slot
-    edge_chance_prob = plan.edge_chance_prob
-    if edge_parent.numel() == 0:
+    if plan.edge_parent.numel() == 0:
         return
-    child_p0 = out_p0[edge_child]
-    child_p1 = out_p1[edge_child]
-    contrib_p0 = torch.zeros_like(child_p0)
-    contrib_p1 = torch.zeros_like(child_p1)
-    chance_mask = edge_node_type == 0
-    if torch.any(chance_mask):
-        contrib_p0[chance_mask] = child_p0[chance_mask] * edge_chance_prob[chance_mask]
-        contrib_p1[chance_mask] = child_p1[chance_mask] * edge_chance_prob[chance_mask]
-    player0_mask = edge_node_type == 1
-    if torch.any(player0_mask):
-        contrib_p0[player0_mask] = child_p0[player0_mask] * strategy_table[
-            edge_infoset[player0_mask].clamp_min(0),
-            edge_action_slot[player0_mask],
-        ]
-        contrib_p1[player0_mask] = child_p1[player0_mask]
-    player1_mask = edge_node_type == 2
-    if torch.any(player1_mask):
-        contrib_p0[player1_mask] = child_p0[player1_mask]
-        contrib_p1[player1_mask] = child_p1[player1_mask] * strategy_table[
-            edge_infoset[player1_mask].clamp_min(0),
-            edge_action_slot[player1_mask],
-        ]
-    other_mask = ~(chance_mask | player0_mask | player1_mask)
-    if torch.any(other_mask):
-        contrib_p0[other_mask] = child_p0[other_mask]
-        contrib_p1[other_mask] = child_p1[other_mask]
-    out_p0.scatter_add_(0, edge_parent, contrib_p0)
-    out_p1.scatter_add_(0, edge_parent, contrib_p1)
+    for node_index in range(tree.node_count - 1, -1, -1):
+        if tree.is_frontier[node_index]:
+            continue
+        node_type = tree.node_types[node_index]
+        if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+            continue
+        start = tree.first_child[node_index]
+        count = tree.child_count[node_index]
+        if count <= 0:
+            continue
+        child_links = tree.children[start : start + count]
+        child_indices = torch.as_tensor(
+            [int(link.child) for link in child_links],
+            dtype=torch.int64,
+            device=out_p0.device,
+        )
+        child_p0 = out_p0[child_indices]
+        child_p1 = out_p1[child_indices]
+        if node_type is NodeType.CHANCE:
+            probs = torch.as_tensor(
+                [float(link.chance_prob or 0.0) for link in child_links],
+                dtype=torch.float32,
+                device=out_p0.device,
+            )
+            out_p0[node_index] = torch.sum(probs * child_p0)
+            out_p1[node_index] = torch.sum(probs * child_p1)
+            continue
+        infoset_id = tree.infoset_ids[node_index]
+        if infoset_id is None:
+            continue
+        infoset_index = int(infoset_id)
+        limit = min(count, int(strategy_table.shape[1]))
+        if limit <= 0:
+            continue
+        strategy = strategy_table[infoset_index, :limit]
+        if node_type is NodeType.PLAYER0:
+            out_p0[node_index] = torch.sum(strategy * child_p0[:limit])
+            out_p1[node_index] = torch.sum(strategy * child_p1[:limit])
+        elif node_type is NodeType.PLAYER1:
+            out_p0[node_index] = torch.sum(strategy * child_p0[:limit])
+            out_p1[node_index] = torch.sum(strategy * child_p1[:limit])
+        else:
+            out_p0[node_index] = torch.sum(strategy * child_p0[:limit])
+            out_p1[node_index] = torch.sum(strategy * child_p1[:limit])
 
 
 def _backward_pass_gpu_legacy(
@@ -906,3 +984,92 @@ def _terminal_value_player0(state: GameState) -> float:
     )
     other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
     return float(player0_payout - other_payouts)
+
+
+def debug_first_gpu_cpu_divergence(
+    spec: PostflopResolveSpec,
+    *,
+    evaluator: LeafEvaluator | None = None,
+) -> None:
+    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
+    packed = _prepare_gpu_solve(spec)
+    trace = _run_gpu_solve(packed, evaluator_impl)
+    tree = packed.tree
+    gpu_nodes = trace.root_action_ev_player0
+    cpu_nodes = trace.cpu_backward_p0[
+        packed.plan.root_child_nodes.detach().cpu().numpy()
+    ]
+    print("root_child_nodes", packed.plan.root_child_nodes.detach().cpu().tolist())
+    print("gpu_root_action_ev", gpu_nodes.tolist())
+    print("cpu_root_action_ev", cpu_nodes.tolist())
+    branch_node = None
+    limit = min(gpu_nodes.shape[0], cpu_nodes.shape[0])
+    for index in range(limit):
+        if not np.isclose(gpu_nodes[index], cpu_nodes[index]):
+            branch_node = int(packed.plan.root_child_nodes[index].item())
+            print(
+                "gpu_cpu_divergence",
+                {
+                    "index": index,
+                    "gpu": float(gpu_nodes[index]),
+                    "cpu": float(cpu_nodes[index]),
+                    "root_infoset": packed.root_infoset,
+                    "root_action": packed.root_actions[index] if index < len(packed.root_actions) else "",
+                    "root_child": branch_node,
+                    "child_node_type": str(packed.tree.tree.node_types[branch_node]),
+                    "child_state": packed.tree.node_states[branch_node],
+                },
+            )
+            break
+    if branch_node is None and limit > 2:
+        branch_node = int(packed.plan.root_child_nodes[2].item())
+    if branch_node is not None:
+        _print_first_branch_divergence(
+            tree.tree,
+            tree.node_states,
+            branch_node,
+            trace,
+        )
+        return
+    print("gpu_cpu_divergence", {"status": "no divergence found"})
+
+
+def _print_first_branch_divergence(
+    tree: PublicTree,
+    node_states: tuple[GameState, ...],
+    start_node: int,
+    trace: GpuSolveTrace,
+) -> None:
+    gpu_values = trace.gpu_backward_p0
+    cpu_values = trace.cpu_backward_p0
+    if gpu_values is None or cpu_values is None:
+        return
+    stack = [start_node]
+    visited: set[int] = set()
+    while stack:
+        node_index = stack.pop()
+        if node_index in visited:
+            continue
+        visited.add(node_index)
+        node_type = tree.node_types[node_index]
+        if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+            continue
+        if node_index < len(gpu_values) and node_index < len(cpu_values):
+            gpu_value = float(gpu_values[node_index])
+            cpu_value = float(cpu_values[node_index])
+            if not np.isclose(gpu_value, cpu_value):
+                print(
+                    "gpu_cpu_branch_divergence",
+                    {
+                        "node": node_index,
+                        "gpu": gpu_value,
+                        "cpu": cpu_value,
+                        "node_type": str(node_type),
+                        "state": node_states[node_index],
+                    },
+                )
+                return
+        start = tree.first_child[node_index]
+        count = tree.child_count[node_index]
+        for child_link in reversed(tree.children[start : start + count]):
+            stack.append(int(child_link.child))
