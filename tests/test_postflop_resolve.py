@@ -20,6 +20,7 @@ from pokergpu.runtime import (
     SolveCacheState,
     WarmStartState,
     resolve_postflop_hu,
+    resolve_postflop_threeway,
 )
 
 
@@ -262,3 +263,44 @@ def test_postflop_multiway_masks_each_player_range_independently() -> None:
 
     assert len(masked) == 3
     assert all(np.isclose(float(r.total_weight()), 1.0) for r in masked)
+
+
+def test_postflop_threeway_resolver_returns_three_player_result() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_threeway(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            range_p2=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert result.root_ev.shape == (3,)
+    assert np.isclose(float(result.root_ev.sum()), float(result.root_ev[0] + result.root_ev[1] + result.root_ev[2]))

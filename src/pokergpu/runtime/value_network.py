@@ -126,4 +126,6 @@ def _build_runtime_leaf_features(
     put(batch.is_frontier.astype(np.float32))
     put(np.clip(batch.infoset_id, -1, 1_000_000))
     put(batch.reach_p0)
+    put(batch.reach_p1)
+    put(batch.reach_p2)
     return features

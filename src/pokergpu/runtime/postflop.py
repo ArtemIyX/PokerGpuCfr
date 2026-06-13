@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from pokergpu.abstraction.actions import (
     BaselineActionAbstraction,
     make_postflop_mvp_profile,
+    make_postflop_threeway_profile,
 )
 from pokergpu.abstraction.hands import RangeVector, apply_board_dead_cards
 from pokergpu.cfr import (
@@ -46,6 +47,7 @@ class PostflopResolveSpec:
     range_p0: RangeVector
     range_p1: RangeVector
     time_budget_sec: float
+    range_p2: RangeVector | None = None
     iterations: int = 0
     seed: int = POSTFLOP_SOLVER_DEFAULT_SEED
     solver_version: str = POSTFLOP_SOLVER_VERSION
@@ -337,7 +339,7 @@ def resolve_postflop_multi(
     started_at = time.monotonic()
     tree = build_public_tree(
         spec.state,
-        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
+        abstraction=BaselineActionAbstraction(profile=make_postflop_threeway_profile() if spec.state.player_count == 3 else make_postflop_mvp_profile()),
         config=TreeBuildConfig(
             max_depth=spec.max_depth,
             max_nodes=spec.max_nodes,
@@ -450,10 +452,25 @@ def resolve_postflop_multi(
     )
 
 
+def resolve_postflop_threeway(
+    spec: PostflopResolveSpec,
+    *,
+    evaluator: LeafEvaluator | None = None,
+) -> MultiwayPostflopResolveResult:
+    if spec.state.player_count != 3:
+        raise ValueError("three-way resolver requires exactly 3 players")
+    if spec.state.current_street is Street.PREFLOP:
+        raise ValueError("three-way resolver requires a postflop state")
+    return resolve_postflop_multi(spec, evaluator=evaluator, max_player_count=3)
+
+
 def _resolve_spec_ranges(spec: PostflopResolveSpec) -> tuple[RangeVector, ...]:
     if spec.ranges is not None:
         return tuple(spec.ranges)
-    return (spec.range_p0, spec.range_p1)
+    ranges = [spec.range_p0, spec.range_p1]
+    if spec.range_p2 is not None:
+        ranges.append(spec.range_p2)
+    return tuple(ranges)
 
 
 def _apply_root_ranges(

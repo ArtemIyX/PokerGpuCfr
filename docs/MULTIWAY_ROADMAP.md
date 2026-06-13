@@ -70,20 +70,27 @@ Approach:
 
 Checklist:
 
-- [ ] Generalize CFR traversal to 3 active players.
-- [ ] Generalize regret updates to `N` players.
-- [ ] Generalize average strategy storage.
-- [ ] Add 3-way action abstraction.
+- [x] Generalize CFR traversal to 3 active players.
+- [x] Generalize regret updates to `N` players.
+- [x] Generalize average strategy storage.
+- [x] Add 3-way action abstraction.
 - [ ] Add 3-way range propagation.
-- [ ] Add 3-way leaf evaluation format.
-- [ ] Add 3-way runtime resolve path.
-- [ ] Add 3-way benchmark spots.
+- [x] Add 3-way leaf evaluation format.
+- [x] Add 3-way runtime resolve path.
+- [x] Add 3-way benchmark spots.
 
 Done when:
 
 - [ ] 3-way postflop can be solved end to end
-- [ ] runtime returns an action distribution
-- [ ] the solve finishes inside a bounded time budget
+- [x] runtime returns an action distribution
+- [x] the solve finishes inside a bounded time budget
+
+Current status:
+
+- traversal and storage now have multiway-friendly plumbing
+- 3-way action abstraction is in place
+- 3-way resolve entry point exists
+- range propagation still needs full multiway node-level support
 
 ## Phase 3: 3-Player Quality Controls
 

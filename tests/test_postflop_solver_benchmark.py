@@ -135,6 +135,47 @@ def _make_spec(seed: int, *, max_depth: int, max_nodes: int) -> PostflopResolveS
     )
 
 
+def test_threeway_benchmark_spot_builds() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+        phase=HandPhase.IN_PROGRESS,
+    )
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        range_p2=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=1,
+        max_nodes=16,
+    )
+
+    assert spec.state.player_count == 3
+    assert spec.range_p2 is not None
+    assert np.isclose(spec.range_p2.total_weight(), 1.0)
+
+
 def _sample_board(rng: Random) -> Board:
     deck = list(make_deck())
     rng.shuffle(deck)

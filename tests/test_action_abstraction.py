@@ -13,6 +13,7 @@ from pokergpu.core.betting import (
     chips,
 )
 from pokergpu.core.board import Board
+from pokergpu.core.board import Street
 from pokergpu.core.state import GameState, PlayerState
 
 
@@ -371,3 +372,12 @@ def test_postflop_mvp_profile_is_compact() -> None:
         "bet",
         "bet",
     ]
+
+
+def test_postflop_threeway_profile_is_compact() -> None:
+    from pokergpu.abstraction.actions import make_postflop_threeway_profile
+
+    profile = make_postflop_threeway_profile()
+
+    assert profile.template_for_street(Street.FLOP).bet_sizes == (0.33, 0.5, 0.75)
+    assert profile.template_for_street(Street.TURN).raise_to_multipliers == (1.0, 1.5)
