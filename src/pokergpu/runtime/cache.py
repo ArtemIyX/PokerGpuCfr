@@ -243,6 +243,35 @@ class PackedGpuSolveState:
     root_strategy: Any
     frontier_nodes: Any
     frontier_leaf_batch: Any
+    node_type: Any
+    node_first_child: Any
+    node_child_count: Any
+    node_parent: Any
+    node_infoset: Any
+    node_street: Any
+    node_depth: Any
+    node_terminal_payoff: Any
+    node_is_frontier: Any
+    node_player: Any
+    edge_parent: Any
+    edge_child: Any
+    edge_node_type: Any
+    edge_infoset: Any
+    edge_action_slot: Any
+    edge_chance_prob: Any
+    level_nodes: Any
+    level_frontier_mask: Any
+    level_player_mask: Any
+    level_edge_start: Any
+    level_edge_count: Any
+    level_edge_src: Any
+    level_edge_dst: Any
+    level_edge_infoset: Any
+    level_edge_slot: Any
+    level_edge_kind: Any
+    level_edge_prob: Any
+    root_child_nodes: Any
+    root_child_parent_infoset: int = -1
     iteration: int = 0
 
 
