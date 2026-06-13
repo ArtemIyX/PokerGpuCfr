@@ -51,6 +51,21 @@ def test_average_strategy_falls_back_to_uniform() -> None:
     assert np.allclose(average, np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float32))
 
 
+def test_strategy_profiles_cover_all_infosets() -> None:
+    layout = InfosetLayout.from_action_counts((2, 1, 3))
+    store = InfosetStore.zeros(layout)
+    store.regrets[:] = np.array([1.0, 3.0, 0.0, 2.0, 4.0, 2.0], dtype=np.float32)
+    store.strategy_sums[:] = np.array([1.0, 3.0, 2.0, 0.0, 4.0, 2.0], dtype=np.float32)
+
+    current = store.current_strategy_profile()
+    average = store.average_strategy_profile()
+
+    assert len(current) == 3
+    assert len(average) == 3
+    assert np.allclose(current[0], np.array([0.25, 0.75], dtype=np.float32))
+    assert np.allclose(average[1], np.array([1.0], dtype=np.float32))
+
+
 def test_regret_matching_is_uniform_on_zero_regrets() -> None:
     result = regret_matching(np.zeros(4, dtype=np.float32))
 

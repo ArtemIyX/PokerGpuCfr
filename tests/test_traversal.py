@@ -325,7 +325,7 @@ def test_three_player_traversal_handles_player2_nodes() -> None:
             NodeType.LEAF,
         ),
         is_frontier=(False, False, True, True),
-        first_child=(0, 1, 4, 4),
+        first_child=(0, 1, 3, 3),
         child_count=(1, 2, 0, 0),
         children=(
             ChildLink(NodeId(1)),

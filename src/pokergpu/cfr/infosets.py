@@ -104,6 +104,18 @@ class InfosetStore:
             return np.full(action_count, value, dtype=np.float32)
         return strategy_sums / np.float32(total)
 
+    def average_strategy_profile(self) -> tuple[NDArray[np.float32], ...]:
+        return tuple(
+            self.average_strategy(infoset_index)
+            for infoset_index in range(self.layout.infoset_count)
+        )
+
+    def current_strategy_profile(self) -> tuple[NDArray[np.float32], ...]:
+        return tuple(
+            self.current_strategy(infoset_index)
+            for infoset_index in range(self.layout.infoset_count)
+        )
+
 
 def regret_matching(regrets: NDArray[np.float32]) -> NDArray[np.float32]:
     if regrets.ndim != 1:
