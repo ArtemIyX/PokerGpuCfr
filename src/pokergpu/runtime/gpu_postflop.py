@@ -25,8 +25,10 @@ from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import LeafEvaluator
 from pokergpu.eval.types import LeafFeatureBatch
 from pokergpu.runtime.cache import LruCache, PackedGpuSolveState, PackedGpuSubtree
+from pokergpu.runtime.caching import TreeTemplateKey
 from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
+from pokergpu.tree.public_tree import PublicTreeTemplate
 
 from .gpu_compile import compile_packed_subtree
 from .postflop import PostflopResolveResult, PostflopResolveSpec, _summarize_root_ev
@@ -74,6 +76,12 @@ class PackedGpuSolve:
 
 
 @dataclass(frozen=True, slots=True)
+class BatchedGpuSolveInput:
+    spec: PostflopResolveSpec
+    template: PublicTreeTemplate
+
+
+@dataclass(frozen=True, slots=True)
 class GpuSolveTrace:
     packed: PackedGpuSolve
     iterations: int
@@ -104,9 +112,8 @@ def resolve_postflop_gpu_many(
 ) -> tuple[PostflopResolveResult, ...]:
     if not specs:
         return ()
-    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
-    packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
-    return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
+    inputs = tuple(_prepare_batched_input(spec) for spec in specs)
+    return resolve_postflop_gpu_batch_inputs(inputs, evaluator=evaluator)
 
 
 def resolve_postflop_gpu_batch(
@@ -118,9 +125,26 @@ def resolve_postflop_gpu_batch(
         return ()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for resolve_postflop_gpu_batch")
+    inputs = tuple(_prepare_batched_input(spec) for spec in specs)
+    return resolve_postflop_gpu_batch_inputs(inputs, evaluator=evaluator)
+
+
+def resolve_postflop_gpu_batch_inputs(
+    items: tuple[BatchedGpuSolveInput, ...],
+    *,
+    evaluator: LeafEvaluator | None = None,
+) -> tuple[PostflopResolveResult, ...]:
+    if not items:
+        return ()
     evaluator_impl = evaluator or default_postflop_leaf_evaluator()
-    packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
-    return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
+    groups = _group_batched_gpu_inputs(items)
+    results: dict[int, PostflopResolveResult] = {}
+    for group_items in groups.values():
+        packed = tuple(_prepare_gpu_solve(item.spec, template=item.template) for item in group_items)
+        solved = tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
+        for group_item, result in zip(group_items, solved, strict=True):
+            results[id(group_item)] = result
+    return tuple(results[id(item)] for item in items)
 
 
 def resolve_postflop_gpu(
@@ -215,8 +239,30 @@ def _build_batched_gpu_plan(
     )
 
 
-def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
-    cache_key = _gpu_plan_key(spec)
+def _prepare_batched_input(spec: PostflopResolveSpec) -> BatchedGpuSolveInput:
+    built = build_public_tree(
+        spec.state,
+        abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
+        config=TreeBuildConfig(
+            max_depth=spec.max_depth,
+            max_nodes=spec.max_nodes,
+            min_reach_prob=spec.min_reach_prob,
+        ),
+    )
+    return BatchedGpuSolveInput(spec=spec, template=built.template)
+
+
+def _group_batched_gpu_inputs(
+    items: tuple[BatchedGpuSolveInput, ...],
+) -> dict[str, tuple[BatchedGpuSolveInput, ...]]:
+    grouped: dict[str, list[BatchedGpuSolveInput]] = {}
+    for item in items:
+        grouped.setdefault(item.template.tree_key, []).append(item)
+    return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplate | None = None) -> PackedGpuSolve:
+    cache_key = _gpu_plan_key(spec, template=template)
     cached = _GPU_PLAN_CACHE.get(cache_key)
     if cached is not None:
         return PackedGpuSolve(
@@ -473,7 +519,8 @@ def _run_gpu_solve(
     )
 
 
-def _gpu_plan_key(spec: PostflopResolveSpec) -> str:
+def _gpu_plan_key(spec: PostflopResolveSpec, *, template: PublicTreeTemplate | None = None) -> str:
+    template_key = template.tree_key if template is not None else ""
     return "|".join(
         [
             "gpu-pack-v2",
@@ -487,6 +534,7 @@ def _gpu_plan_key(spec: PostflopResolveSpec) -> str:
             str(spec.min_reach_prob),
             str(spec.state.board.cards),
             str(tuple(int(player.player) for player in spec.state.active_players)),
+            template_key,
         ]
     )
 
