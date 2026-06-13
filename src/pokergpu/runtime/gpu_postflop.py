@@ -354,8 +354,8 @@ def _rebuilt_tree_from_template(
     return BuiltPublicTree(
         tree=template.as_public_tree(built.tree.children),
         template=template,
-        flat_view=template.flat_view,
-        level_schedule=template.level_schedule,
+        flat_view=getattr(template, "flat_view", None) or built.template.flat_view,
+        level_schedule=getattr(template, "level_schedule", None) or built.template.level_schedule,
         node_states=built.node_states,
         actions_by_node=built.actions_by_node,
         action_abstraction_id=built.action_abstraction_id,

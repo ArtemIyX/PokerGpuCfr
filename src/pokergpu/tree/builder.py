@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from typing import Sequence
 
 from pokergpu.abstraction.actions import ActionAbstraction, BaselineActionAbstraction
 from pokergpu.core.actions import Action
@@ -258,7 +259,7 @@ def _node_depths(tree: PublicTree) -> tuple[int, ...]:
     return tuple(depths)
 
 
-def _build_flat_view(tree: PublicTree, node_states: tuple[GameState, ...]) -> PublicTreeFlatView:
+def _build_flat_view(tree: PublicTree, node_states: Sequence[GameState]) -> PublicTreeFlatView:
     node_depth = _node_depths(tree)
     node_level = node_depth
     edge_parent: list[int] = []
@@ -289,9 +290,7 @@ def _build_flat_view(tree: PublicTree, node_states: tuple[GameState, ...]) -> Pu
         first_child=tree.first_child,
         child_count=tree.child_count,
         is_frontier=tree.is_frontier,
-        terminal_payoff=tuple(
-            float(payoff.amount) if payoff is not None else 0.0 for payoff in tree.terminal_payoffs
-        ),
+        terminal_payoff=tuple(float(payoff) if payoff is not None else 0.0 for payoff in tree.terminal_payoffs),
         edge_parent=tuple(edge_parent),
         edge_child=tuple(edge_child),
         edge_action_slot=tuple(edge_action_slot),
