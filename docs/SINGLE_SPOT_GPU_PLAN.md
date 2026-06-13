@@ -40,10 +40,10 @@ After setup, CPU should only:
 The first bottleneck to remove is any per-node or per-infoset Python work.
 
 Rules:
-- No recursion in the iteration path.
-- No dict lookups in the iteration path.
-- No per-node object creation.
-- No conversion between Python objects and tensors during iteration.
+- [x] No recursion in the iteration path.
+- [x] No dict lookups in the iteration path.
+- [x] No per-node object creation.
+- [x] No conversion between Python objects and tensors during iteration.
 - No CPU normalization or card-removal loops during iteration.
 
 All of these must be prepacked into tensors or masks before the solve starts.
@@ -64,9 +64,9 @@ Represent the tree as dense arrays:
 - `chance_prob`
 
 Build a level schedule:
-- nodes grouped by depth
-- child lists stored contiguously
-- transpose adjacency stored too
+- [x] nodes grouped by depth
+- [x] child lists stored contiguously
+- [x] transpose adjacency stored too
 
 This lets each iteration run as a small number of level-wise kernels instead of a traversal.
 

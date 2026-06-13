@@ -161,6 +161,12 @@ class PublicTreeTemplate:
     terminal_payoffs: tuple[Chips | None, ...]
     depth: tuple[int, ...]
     street: tuple[str, ...]
+    edge_parent: tuple[int, ...]
+    edge_child: tuple[int, ...]
+    edge_action_slot: tuple[int, ...]
+    edge_chance_prob: tuple[float, ...]
+    edge_infoset_id: tuple[int, ...]
+    edge_player: tuple[int, ...]
     level_schedule: PublicTreeLevelSchedule
     flat_view: PublicTreeFlatView
     canonical_board_key: str
