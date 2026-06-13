@@ -71,15 +71,17 @@ def main() -> int:
         max_nodes=args.max_nodes,
     )
 
-    cpu_result = resolve_postflop_hu(spec)
-    print_result("cpu", cpu_result)
-    print_action_mix("cpu", cpu_result)
+    cpu_result = None
+    if args.compare_cpu:
+        cpu_result = resolve_postflop_hu(spec)
+        print_result("cpu", cpu_result)
+        print_action_mix("cpu", cpu_result)
 
     if args.use_gpu and not args.cpu_fallback:
         gpu_result = resolve_postflop_gpu(spec)
         print_result("cuda", gpu_result)
         print_action_mix("cuda", gpu_result)
-        if args.compare_cpu:
+        if cpu_result is not None:
             print("\ncompare")
             print(
                 "  root_strategy_delta: "

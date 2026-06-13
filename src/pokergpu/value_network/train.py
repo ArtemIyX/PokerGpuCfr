@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable, TypeVar
 import time
 
 import numpy as np
 from numpy.typing import NDArray
 
+_T = TypeVar("_T")
+tqdm_progress: Any
 try:
-    from tqdm import tqdm  # type: ignore[import-untyped]
+    import tqdm as _tqdm_module
+    tqdm_progress = _tqdm_module.tqdm
 except Exception:  # pragma: no cover
-    def tqdm(iterable: object, **_kwargs: object) -> object:
+    def _tqdm_passthrough(iterable: Iterable[_T], **_kwargs: object) -> Iterable[_T]:
         return iterable
+    tqdm_progress = _tqdm_passthrough
 
 from .checkpoint import ValueCheckpoint, save_checkpoint
 from .dataset import (
@@ -260,7 +264,7 @@ def train_baseline(
         epoch_losses: list[float] = []
         batch_total = (len(train_samples) + config.batch_size - 1) // config.batch_size
         batch_index = 0
-        for start in tqdm(
+        for start in tqdm_progress(
             range(0, len(train_samples), config.batch_size),
             total=batch_total,
             desc=f"train epoch {epoch + 1}",
