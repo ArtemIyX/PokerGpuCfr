@@ -222,25 +222,19 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
         root_infoset=packed.root_infoset,
         root_actions=packed.root_actions,
         packed_subtree=packed.packed_subtree,
-        gpu_state=_make_gpu_state(packed.packed_subtree),
+        gpu_state=_make_gpu_state(packed.packed_subtree, packed.layout),
     )
     _GPU_PLAN_CACHE.put(cache_key, packed)
     return packed
 
 
-def _make_gpu_state(packed: PackedGpuSubtree) -> PackedGpuSolveState:
+def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGpuSolveState:
     device = packed.node_type.device
-    regrets = torch.zeros(
-        packed.infoset_count * max(packed.max_actions, 1),
-        dtype=torch.float32,
-        device=device,
-    )
+    action_count = int(packed.action_infoset_index.numel())
+    regrets = torch.zeros(action_count, dtype=torch.float32, device=device)
     strategy_sums = torch.zeros_like(regrets)
-    strategy_table = torch.zeros(
-        (packed.infoset_count, max(packed.max_actions, 1)),
-        dtype=torch.float32,
-        device=device,
-    )
+    strategy_table = torch.zeros((packed.infoset_count, max(packed.max_actions, 1)), dtype=torch.float32, device=device)
+    strategy_flat = torch.zeros(action_count, dtype=torch.float32, device=device)
     forward_reach_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
     forward_reach_p1 = torch.zeros_like(forward_reach_p0)
     backward_p0 = torch.zeros_like(forward_reach_p0)
@@ -255,6 +249,11 @@ def _make_gpu_state(packed: PackedGpuSubtree) -> PackedGpuSolveState:
         regrets=regrets,
         strategy_sums=strategy_sums,
         strategy_table=strategy_table,
+        strategy_flat=strategy_flat,
+        action_infoset_index=packed.action_infoset_index,
+        action_slot_index=packed.action_slot_index,
+        action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
+        action_counts=torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device),
         forward_reach_p0=forward_reach_p0,
         forward_reach_p1=forward_reach_p1,
         backward_p0=backward_p0,
@@ -287,7 +286,7 @@ def _finish_gpu_solve(
 
     state = packed.gpu_state
     if state is None:
-        state = _make_gpu_state(packed.packed_subtree)
+        state = _make_gpu_state(packed.packed_subtree, packed.layout)
         packed = PackedGpuSolve(
             spec=packed.spec,
             tree=packed.tree,
@@ -312,7 +311,12 @@ def _finish_gpu_solve(
         (target_iterations > 0 and iterations < target_iterations)
         or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
     ):
-        strategy_table = _regret_matching_table(regrets, plan.action_counts, plan.action_offsets)
+        strategy_table = _regret_matching_table(
+            regrets,
+            state.action_infoset_index,
+            state.action_slot_index,
+            plan.action_counts,
+        )
         forward_reach_p0.zero_()
         forward_reach_p1.zero_()
         forward_reach_p0[0] = 1.0
@@ -463,23 +467,31 @@ def _node_type_code(node_type: NodeType) -> int:
 
 def _regret_matching_table(
     regrets: torch.Tensor,
+    action_infoset_index: torch.Tensor,
+    action_slot_index: torch.Tensor,
     action_counts: torch.Tensor,
-    action_offsets: torch.Tensor,
 ) -> torch.Tensor:
-    max_actions = int(action_counts.max().item()) if action_counts.numel() else 1
-    table = torch.zeros((action_counts.numel(), max_actions), dtype=torch.float32, device=regrets.device)
-    for infoset_index in range(int(action_counts.numel())):
-        count = int(action_counts[infoset_index].item())
-        if count <= 0:
-            continue
-        start = int(action_offsets[infoset_index].item())
-        slice_ = regrets[start : start + count]
-        positive = torch.clamp(slice_, min=0.0)
-        total = positive.sum()
-        if float(total.item()) <= 0.0:
-            table[infoset_index, :count] = 1.0 / float(count)
-        else:
-            table[infoset_index, :count] = positive / total
+    num_infosets = int(action_counts.numel())
+    max_actions = int(action_counts.max().item()) if num_infosets else 1
+    table = torch.zeros((num_infosets, max_actions), dtype=torch.float32, device=regrets.device)
+    if num_infosets == 0:
+        return table
+    positive = torch.clamp(regrets, min=0.0)
+    totals = torch.zeros(num_infosets, dtype=torch.float32, device=regrets.device)
+    totals.scatter_add_(0, action_infoset_index, positive)
+    zeros = totals <= 0.0
+    normalized = torch.where(
+        totals[action_infoset_index] > 0.0,
+        positive / totals[action_infoset_index],
+        torch.zeros_like(positive),
+    )
+    table[action_infoset_index, action_slot_index] = normalized
+    if torch.any(zeros):
+        zero_ids = torch.nonzero(zeros, as_tuple=False).flatten()
+        for infoset_index in zero_ids.tolist():
+            count = int(action_counts[infoset_index].item())
+            if count > 0:
+                table[infoset_index, :count] = 1.0 / float(count)
     return table
 
 

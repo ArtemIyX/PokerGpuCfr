@@ -58,6 +58,7 @@ def compile_packed_subtree(
         dtype=torch.int64,
         device=device,
     )
+    action_infoset_index, action_slot_index = _action_maps(tree)
     root_infoset = int(tree.tree.infoset_ids[0] or -1)
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
     infoset_count = max((int(infoset) for infoset in tree.tree.infoset_ids if infoset is not None), default=-1) + 1
@@ -75,6 +76,8 @@ def compile_packed_subtree(
         action_slot=action_slot,
         chance_prob=chance_prob,
         frontier_nodes=frontier_nodes,
+        action_infoset_index=action_infoset_index,
+        action_slot_index=action_slot_index,
         root_node=0,
         root_infoset=root_infoset,
         node_count=node_count,
@@ -144,3 +147,20 @@ def _chance_probs(tree: BuiltPublicTree) -> list[float]:
     for link in tree.tree.children:
         probs.append(float(link.chance_prob or 0.0))
     return probs
+
+
+def _action_maps(tree: BuiltPublicTree) -> tuple[torch.Tensor, torch.Tensor]:
+    infoset_index: list[int] = []
+    action_slot: list[int] = []
+    for node_index, infoset in enumerate(tree.tree.infoset_ids):
+        if infoset is None:
+            continue
+        actions = tree.actions_by_node[node_index]
+        for slot in range(len(actions)):
+            infoset_index.append(int(infoset))
+            action_slot.append(slot)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return (
+        torch.as_tensor(infoset_index, dtype=torch.int64, device=device),
+        torch.as_tensor(action_slot, dtype=torch.int64, device=device),
+    )

@@ -191,6 +191,8 @@ class PackedGpuSubtree:
     action_slot: Any
     chance_prob: Any
     frontier_nodes: Any
+    action_infoset_index: Any
+    action_slot_index: Any
     root_node: int = 0
     root_infoset: int = -1
     node_count: int = 0
@@ -218,6 +220,11 @@ class PackedGpuSolveState:
     regrets: Any
     strategy_sums: Any
     strategy_table: Any
+    strategy_flat: Any
+    action_infoset_index: Any
+    action_slot_index: Any
+    action_offsets: Any
+    action_counts: Any
     forward_reach_p0: Any
     forward_reach_p1: Any
     backward_p0: Any
