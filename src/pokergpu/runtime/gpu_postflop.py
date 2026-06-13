@@ -464,7 +464,6 @@ def _make_gpu_state(plan: BatchedGpuPlan, packed: PackedGpuSubtree, layout: Info
     root_action_ev_p1 = torch.zeros_like(root_action_ev_p0)
     root_strategy = torch.zeros_like(root_action_ev_p0)
     return PackedGpuSolveState(
-        plan=plan,
         packed=packed,
         regrets=regrets,
         strategy_sums=strategy_sums,
@@ -474,6 +473,12 @@ def _make_gpu_state(plan: BatchedGpuPlan, packed: PackedGpuSubtree, layout: Info
         action_slot_index=packed.action_slot_index,
         action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
         action_counts=torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device),
+        level_edge_dst=plan.level_edge_dst,
+        level_edge_src=plan.level_edge_src,
+        level_edge_infoset=plan.level_edge_infoset,
+        level_edge_slot=plan.level_edge_slot,
+        level_edge_kind=plan.level_edge_kind,
+        level_edge_prob=plan.level_edge_prob,
         forward_reach_p0=forward_reach_p0,
         forward_reach_p1=forward_reach_p1,
         backward_p0=backward_p0,
@@ -483,6 +488,8 @@ def _make_gpu_state(plan: BatchedGpuPlan, packed: PackedGpuSubtree, layout: Info
         root_action_ev_p0=root_action_ev_p0,
         root_action_ev_p1=root_action_ev_p1,
         root_strategy=root_strategy,
+        frontier_nodes=plan.frontier_nodes,
+        frontier_leaf_batch=plan.frontier_leaf_batch,
     )
 
 
@@ -551,7 +558,6 @@ def _run_gpu_solve(
     started_at = time.monotonic()
     device = torch.device("cuda")
     node_count = tree.tree.node_count
-    leaf_count = int(plan.frontier_nodes.numel())
     state = packed.gpu_state
     if state is None:
         state = _make_gpu_state(packed.plan, packed.packed_subtree, packed.layout)
@@ -565,10 +571,10 @@ def _run_gpu_solve(
             packed_subtree=packed.packed_subtree,
             gpu_state=state,
         )
+    leaf_count = int(state.frontier_nodes.numel())
     regrets = state.regrets
     strategy_sums = state.strategy_sums
     strategy_table = state.strategy_table
-    plan = state.plan
     forward_reach_p0 = state.forward_reach_p0
     forward_reach_p1 = state.forward_reach_p1
     backward_p0 = state.backward_p0
@@ -594,7 +600,7 @@ def _run_gpu_solve(
             regrets,
             state.action_infoset_index,
             state.action_slot_index,
-            plan.action_counts,
+            state.action_counts,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
@@ -603,14 +609,14 @@ def _run_gpu_solve(
         forward_reach_p1.zero_()
         forward_reach_p0[0] = 1.0
         forward_reach_p1[0] = 1.0
-        _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
+        _forward_pass_gpu(state, strategy_table, forward_reach_p0, forward_reach_p1)
         phase_seconds["forward"] += time.monotonic() - started_phase
 
         started_phase = time.monotonic()
         backward_p0.zero_()
         backward_p1.zero_()
         _backward_pass_gpu(
-            plan,
+            state,
             strategy_table,
             evaluator_impl,
             backward_p0,
@@ -620,7 +626,7 @@ def _run_gpu_solve(
 
         started_phase = time.monotonic()
         _update_regrets_gpu(
-            plan,
+            state,
             regrets,
             strategy_sums,
             strategy_table,
@@ -640,17 +646,17 @@ def _run_gpu_solve(
         regrets,
         state.action_infoset_index,
         state.action_slot_index,
-        plan.action_counts,
+        state.action_counts,
     )
     forward_reach_p0.zero_()
     forward_reach_p1.zero_()
     forward_reach_p0[0] = 1.0
     forward_reach_p1[0] = 1.0
-    _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
+    _forward_pass_gpu(state, strategy_table, forward_reach_p0, forward_reach_p1)
     backward_p0.zero_()
     backward_p1.zero_()
     _backward_pass_gpu(
-        plan,
+        state,
         strategy_table,
         evaluator_impl,
         backward_p0,
@@ -660,8 +666,8 @@ def _run_gpu_solve(
 
     root_strategy = _average_strategy_from_gpu(
         strategy_sums,
-        plan.action_counts,
-        plan.action_offsets,
+        state.action_counts,
+        state.action_offsets,
         root_infoset,
     )
     root_action_ev_p0 = _root_action_values_from_backward(
@@ -877,19 +883,19 @@ def _make_cpu_store(
 
 
 def _update_regrets_gpu(
-    plan: BatchedGpuPlan,
+    state: PackedGpuSolveState,
     regrets: torch.Tensor,
     strategy_sums: torch.Tensor,
     strategy_table: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    for level_index in range(len(plan.level_edge_dst)):
-        edge_src = plan.level_edge_src[level_index]
-        edge_dst = plan.level_edge_dst[level_index]
-        edge_infoset = plan.level_edge_infoset[level_index]
-        edge_slot = plan.level_edge_slot[level_index]
-        edge_kind = plan.level_edge_kind[level_index]
+    for level_index in range(len(state.level_edge_dst)):
+        edge_src = state.level_edge_src[level_index]
+        edge_dst = state.level_edge_dst[level_index]
+        edge_infoset = state.level_edge_infoset[level_index]
+        edge_slot = state.level_edge_slot[level_index]
+        edge_kind = state.level_edge_kind[level_index]
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -903,29 +909,29 @@ def _update_regrets_gpu(
         edge_infoset = edge_infoset[valid]
         edge_slot = edge_slot[valid]
         edge_kind = edge_kind[valid]
-        flat = plan.action_offsets[edge_infoset] + edge_slot
+        flat = state.action_offsets[edge_infoset] + edge_slot
         child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
         strat = strategy_table[edge_infoset, edge_slot]
-        infoset_value = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+        infoset_value = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
         infoset_value.scatter_add_(0, edge_infoset, strat * child_values)
         regrets.index_add_(0, flat, child_values - infoset_value[edge_infoset])
         strategy_sums.index_add_(0, flat, strat)
 
 
 def _update_regrets_gpu_batched(
-    plan: BatchedGpuPlan,
+    state: PackedGpuSolveState,
     regrets: torch.Tensor,
     strategy_sums: torch.Tensor,
     strategy_table: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    for level_index in range(len(plan.level_edge_dst)):
-        edge_src = plan.level_edge_src[level_index]
-        edge_dst = plan.level_edge_dst[level_index]
-        edge_infoset = plan.level_edge_infoset[level_index]
-        edge_slot = plan.level_edge_slot[level_index]
-        edge_kind = plan.level_edge_kind[level_index]
+    for level_index in range(len(state.level_edge_dst)):
+        edge_src = state.level_edge_src[level_index]
+        edge_dst = state.level_edge_dst[level_index]
+        edge_infoset = state.level_edge_infoset[level_index]
+        edge_slot = state.level_edge_slot[level_index]
+        edge_kind = state.level_edge_kind[level_index]
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -939,36 +945,36 @@ def _update_regrets_gpu_batched(
         edge_infoset = edge_infoset[valid]
         edge_slot = edge_slot[valid]
         edge_kind = edge_kind[valid]
-        flat = plan.action_offsets[edge_infoset] + edge_slot
+        flat = state.action_offsets[edge_infoset] + edge_slot
         child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
         strat = strategy_table[edge_infoset, edge_slot]
-        infoset_values = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+        infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
         infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
         strategy_sums.scatter_add_(0, flat, strat)
         regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
 
 
 def _forward_pass_gpu(*args: Any) -> None:
-    if len(args) == 4 and isinstance(args[0], BatchedGpuPlan):
-        plan, strategy_table, reach_p0, reach_p1 = args
-        _forward_pass_gpu_batched(plan, strategy_table, reach_p0, reach_p1)
+    if len(args) == 4 and isinstance(args[0], PackedGpuSolveState):
+        state, strategy_table, reach_p0, reach_p1 = args
+        _forward_pass_gpu_batched(state, strategy_table, reach_p0, reach_p1)
         return
     raise TypeError("_forward_pass_gpu received unsupported arguments")
 
 
 def _forward_pass_gpu_batched(
-    plan: BatchedGpuPlan,
+    state: PackedGpuSolveState,
     strategy_table: torch.Tensor,
     reach_p0: torch.Tensor,
     reach_p1: torch.Tensor,
 ) -> None:
-    for level_index in range(len(plan.level_edge_dst)):
-        edge_src = plan.level_edge_src[level_index]
-        edge_dst = plan.level_edge_dst[level_index]
-        edge_infoset = plan.level_edge_infoset[level_index]
-        edge_slot = plan.level_edge_slot[level_index]
-        edge_kind = plan.level_edge_kind[level_index]
-        edge_prob = plan.level_edge_prob[level_index]
+    for level_index in range(len(state.level_edge_dst)):
+        edge_src = state.level_edge_src[level_index]
+        edge_dst = state.level_edge_dst[level_index]
+        edge_infoset = state.level_edge_infoset[level_index]
+        edge_slot = state.level_edge_slot[level_index]
+        edge_kind = state.level_edge_kind[level_index]
+        edge_prob = state.level_edge_prob[level_index]
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -1011,15 +1017,15 @@ def _forward_pass_gpu_batched(
 
 
 def _backward_pass_gpu(*args: Any) -> None:
-    if len(args) == 5 and isinstance(args[0], BatchedGpuPlan):
-        plan, strategy_table, evaluator, out_p0, out_p1 = args
-        _backward_pass_gpu_batched(plan, strategy_table, evaluator, out_p0, out_p1)
+    if len(args) == 5 and isinstance(args[0], PackedGpuSolveState):
+        state, strategy_table, evaluator, out_p0, out_p1 = args
+        _backward_pass_gpu_batched(state, strategy_table, evaluator, out_p0, out_p1)
         return
     raise TypeError("_backward_pass_gpu received unsupported arguments")
 
 
 def _backward_pass_gpu_batched(
-    plan: BatchedGpuPlan,
+    state: PackedGpuSolveState,
     strategy_table: torch.Tensor,
     evaluator: LeafEvaluator,
     out_p0: torch.Tensor,
@@ -1028,19 +1034,19 @@ def _backward_pass_gpu_batched(
     out_p0.zero_()
     out_p1.zero_()
 
-    frontier_nodes = plan.frontier_nodes
+    frontier_nodes = state.frontier_nodes
     if int(frontier_nodes.numel()) > 0:
-        leaf_values = evaluator.evaluate(plan.frontier_leaf_batch)
+        leaf_values = evaluator.evaluate(state.frontier_leaf_batch)
         out_p0[frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
 
-    for level_index in reversed(range(len(plan.level_edge_dst))):
-        edge_src = plan.level_edge_src[level_index]
-        edge_dst = plan.level_edge_dst[level_index]
-        edge_infoset = plan.level_edge_infoset[level_index]
-        edge_slot = plan.level_edge_slot[level_index]
-        edge_kind = plan.level_edge_kind[level_index]
-        edge_prob = plan.level_edge_prob[level_index]
+    for level_index in reversed(range(len(state.level_edge_dst))):
+        edge_src = state.level_edge_src[level_index]
+        edge_dst = state.level_edge_dst[level_index]
+        edge_infoset = state.level_edge_infoset[level_index]
+        edge_slot = state.level_edge_slot[level_index]
+        edge_kind = state.level_edge_kind[level_index]
+        edge_prob = state.level_edge_prob[level_index]
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])

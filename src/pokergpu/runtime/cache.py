@@ -217,7 +217,6 @@ class PackedGpuSubtree:
 
 @dataclass(slots=True)
 class PackedGpuSolveState:
-    plan: Any
     packed: PackedGpuSubtree
     regrets: Any
     strategy_sums: Any
@@ -227,6 +226,12 @@ class PackedGpuSolveState:
     action_slot_index: Any
     action_offsets: Any
     action_counts: Any
+    level_edge_dst: Any
+    level_edge_src: Any
+    level_edge_infoset: Any
+    level_edge_slot: Any
+    level_edge_kind: Any
+    level_edge_prob: Any
     forward_reach_p0: Any
     forward_reach_p1: Any
     backward_p0: Any
@@ -236,6 +241,8 @@ class PackedGpuSolveState:
     root_action_ev_p0: Any
     root_action_ev_p1: Any
     root_strategy: Any
+    frontier_nodes: Any
+    frontier_leaf_batch: Any
     iteration: int = 0
 
 
