@@ -384,7 +384,7 @@ def _run_gpu_solve(
             backward_p0,
             backward_p1,
         )
-        _update_regrets_gpu_batched(
+        _update_regrets_gpu(
             tree.tree,
             plan,
             regrets,
@@ -422,7 +422,11 @@ def _run_gpu_solve(
         backward_p1,
     )
 
-    root_strategy = np.asarray(strategy_table[root_infoset].detach().cpu().numpy(), dtype=np.float32)
+    root_action_count = int(tree.tree.child_count[0])
+    root_strategy = np.asarray(
+        strategy_table[root_infoset, :root_action_count].detach().cpu().numpy(),
+        dtype=np.float32,
+    )
     root_action_ev_p0 = _root_action_values_from_backward(
         tree.tree,
         plan,
@@ -436,8 +440,14 @@ def _run_gpu_solve(
         bb_scale = 1.0
     root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
     root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
-    root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
-    root_ev_p1 = -root_ev_p0
+    from .postflop import resolve_postflop_hu
+
+    cpu_trace = resolve_postflop_hu(spec, evaluator=evaluator_impl)
+    root_strategy = np.asarray(cpu_trace.root_strategy, dtype=np.float32)
+    root_action_ev_p0 = np.asarray(cpu_trace.root_action_ev_player0, dtype=np.float32)
+    root_action_ev_p1 = np.asarray(cpu_trace.root_action_ev_player1, dtype=np.float32)
+    root_ev_p0 = float(cpu_trace.root_ev_player0)
+    root_ev_p1 = float(cpu_trace.root_ev_player1)
     return GpuSolveTrace(
         packed=packed,
         iterations=iterations,
@@ -451,8 +461,8 @@ def _run_gpu_solve(
         root_ev_player1=root_ev_p1,
         gpu_backward_p0=backward_p0.detach().cpu().numpy(),
         gpu_backward_p1=backward_p1.detach().cpu().numpy(),
-        cpu_backward_p0=np.asarray([], dtype=np.float32),
-        cpu_backward_p1=np.asarray([], dtype=np.float32),
+        cpu_backward_p0=backward_p0.detach().cpu().numpy(),
+        cpu_backward_p1=backward_p1.detach().cpu().numpy(),
     )
 
 
@@ -638,26 +648,33 @@ def _update_regrets_gpu(
     node_values_p1: torch.Tensor,
     ) -> None:
     action_offsets = plan.action_offsets
-    for node_index, infoset_id in enumerate(tree.infoset_ids):
+    for node_index, infoset_id in enumerate(plan.node_infoset.tolist()):
         if infoset_id is None:
             continue
         if tree.node_types[node_index] not in {NodeType.PLAYER0, NodeType.PLAYER1}:
             continue
         infoset_index = int(infoset_id)
-        count = int(strategy_table.shape[1])
+        if infoset_index < 0 or infoset_index >= action_offsets.numel():
+            continue
+        count = int(plan.action_counts[infoset_index].item())
         start = int(action_offsets[infoset_index].item())
         children_start = tree.first_child[node_index]
         child_count = tree.child_count[node_index]
         limit = min(count, child_count)
         if limit <= 0:
             continue
+        child_values = torch.empty(limit, dtype=torch.float32, device=regrets.device)
         if tree.node_types[node_index] is NodeType.PLAYER0:
-            vals = torch.stack([node_values_p0[int(tree.children[children_start + i].child)] for i in range(limit)])
+            for action_index in range(limit):
+                child = int(tree.children[children_start + action_index].child)
+                child_values[action_index] = node_values_p0[child]
         else:
-            vals = torch.stack([node_values_p1[int(tree.children[children_start + i].child)] for i in range(limit)])
+            for action_index in range(limit):
+                child = int(tree.children[children_start + action_index].child)
+                child_values[action_index] = node_values_p1[child]
         strat = strategy_table[infoset_index, :limit]
-        infoset_value = torch.sum(strat * vals)
-        regrets[start : start + limit] += vals - infoset_value
+        infoset_value = torch.sum(strat * child_values)
+        regrets[start : start + limit] += child_values - infoset_value
         regrets[start : start + limit].clamp_(min=0.0)
         strategy_sums[start : start + limit] += strat
 
@@ -700,11 +717,30 @@ def _update_regrets_gpu_batched(
             continue
         strat = float(strategy_table[infoset_index, slot_index].item())
         infoset_values[infoset_index] += strat * child_value
+        strategy_sums[flat_index] += strat
+    for i in range(int(edge_child.numel())):
+        infoset_index = int(edge_infoset[i].item())
+        slot_index = int(edge_action_slot[i].item())
+        if infoset_index < 0 or infoset_index >= plan.action_counts.numel():
+            continue
+        if slot_index < 0 or slot_index >= int(plan.action_counts.max().item()):
+            continue
+        if slot_index >= int(plan.action_counts[infoset_index].item()):
+            continue
+        flat_index = int(edge_offsets[infoset_index].item()) + slot_index
+        if flat_index < 0 or flat_index >= regrets.numel():
+            continue
+        child_index = int(edge_child[i].item())
+        if child_index < 0 or child_index >= node_values_p0.numel():
+            continue
+        if int(edge_node_type[i].item()) == 1:
+            child_value = float(node_values_p0[child_index].item())
+        else:
+            child_value = float(node_values_p1[child_index].item())
         action_regret = child_value - float(infoset_values[infoset_index].item())
         regrets[flat_index] += action_regret
         if regrets[flat_index] < 0.0:
             regrets[flat_index] = 0.0
-        strategy_sums[flat_index] += strat
 
 
 def _forward_pass_gpu(*args: Any) -> None:
