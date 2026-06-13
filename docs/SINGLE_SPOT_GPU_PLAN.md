@@ -158,7 +158,7 @@ Practical options:
 
 3. Depth-limited re-solving
    - Cut the tree at a fixed depth.
-   - Use a value network or heuristic at the frontier.
+   - Use heuristic at the frontier. (In future train value network)
 
 4. Hybrid
    - exact on shallow public tree
