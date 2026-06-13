@@ -440,14 +440,8 @@ def _run_gpu_solve(
         bb_scale = 1.0
     root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
     root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
-    from .postflop import resolve_postflop_hu
-
-    cpu_trace = resolve_postflop_hu(spec, evaluator=evaluator_impl)
-    root_strategy = np.asarray(cpu_trace.root_strategy, dtype=np.float32)
-    root_action_ev_p0 = np.asarray(cpu_trace.root_action_ev_player0, dtype=np.float32)
-    root_action_ev_p1 = np.asarray(cpu_trace.root_action_ev_player1, dtype=np.float32)
-    root_ev_p0 = float(cpu_trace.root_ev_player0)
-    root_ev_p1 = float(cpu_trace.root_ev_player1)
+    root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
+    root_ev_p1 = -root_ev_p0
     return GpuSolveTrace(
         packed=packed,
         iterations=iterations,
