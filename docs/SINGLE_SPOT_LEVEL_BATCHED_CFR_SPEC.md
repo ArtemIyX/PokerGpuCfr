@@ -301,10 +301,10 @@ Cache values:
 
 ### Phase 2
 
-- [ ] Move reach propagation to level kernels.
-- [ ] Move backward CFV propagation to level kernels.
-- [ ] Move regret update to a single infoset kernel.
-- [ ] Keep warm-start load/store working.
+- [x] Move reach propagation to level kernels.
+- [x] Move backward CFV propagation to level kernels.
+- [x] Move regret update to a single infoset kernel.
+- [x] Keep warm-start load/store working.
 
 ### Phase 3
 

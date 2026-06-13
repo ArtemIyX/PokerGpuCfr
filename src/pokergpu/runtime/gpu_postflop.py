@@ -48,6 +48,7 @@ class GpuSolveStats:
 class BatchedGpuPlan:
     forward_levels: tuple[dict[str, torch.Tensor], ...]
     backward_levels: tuple[dict[str, torch.Tensor], ...]
+    level_nodes: tuple[torch.Tensor, ...]
     edge_parent: torch.Tensor
     edge_child: torch.Tensor
     edge_node_type: torch.Tensor
@@ -203,6 +204,10 @@ def _build_batched_gpu_plan(
     root_children = _root_child_nodes(tree)
     action_counts = torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device)
     action_offsets = torch.as_tensor(layout.offsets, dtype=torch.int64, device=device)
+    level_nodes = tuple(
+        torch.as_tensor(level, dtype=torch.int64, device=device)
+        for level in levels.forward_levels
+    )
     for level in levels.forward_levels:
         forward_levels.append(_build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
@@ -230,6 +235,7 @@ def _build_batched_gpu_plan(
         edge_infoset=torch.as_tensor(edge_infoset, dtype=torch.int64, device=device),
         edge_action_slot=torch.as_tensor(edge_action_slot, dtype=torch.int64, device=device),
         edge_chance_prob=torch.as_tensor(edge_chance_prob, dtype=torch.float32, device=device),
+        level_nodes=level_nodes,
         node_infoset=torch.as_tensor(node_infoset, dtype=torch.int64, device=device),
         node_type=torch.as_tensor(node_type, dtype=torch.int64, device=device),
         frontier_nodes=torch.as_tensor(frontier_nodes, dtype=torch.int64, device=device),
@@ -473,7 +479,7 @@ def _run_gpu_solve(
         forward_reach_p1.zero_()
         forward_reach_p0[0] = 1.0
         forward_reach_p1[0] = 1.0
-        _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
+        _forward_pass_gpu(tree.tree, plan, strategy_table, forward_reach_p0, forward_reach_p1)
         backward_p0.zero_()
         backward_p1.zero_()
         _backward_pass_gpu(
@@ -510,7 +516,7 @@ def _run_gpu_solve(
     forward_reach_p1.zero_()
     forward_reach_p0[0] = 1.0
     forward_reach_p1[0] = 1.0
-    _forward_pass_gpu(plan, strategy_table, forward_reach_p0, forward_reach_p1)
+    _forward_pass_gpu(tree.tree, plan, strategy_table, forward_reach_p0, forward_reach_p1)
     backward_p0.zero_()
     backward_p1.zero_()
     _backward_pass_gpu(
@@ -752,36 +758,35 @@ def _update_regrets_gpu(
     strategy_table: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
-    ) -> None:
+) -> None:
     action_offsets = plan.action_offsets
-    for node_index, infoset_id in enumerate(plan.node_infoset.tolist()):
-        if infoset_id is None:
-            continue
-        if tree.node_types[node_index] not in {NodeType.PLAYER0, NodeType.PLAYER1}:
-            continue
-        infoset_index = int(infoset_id)
-        if infoset_index < 0 or infoset_index >= action_offsets.numel():
-            continue
-        count = int(plan.action_counts[infoset_index].item())
-        start = int(action_offsets[infoset_index].item())
-        children_start = tree.first_child[node_index]
-        child_count = tree.child_count[node_index]
-        limit = min(count, child_count)
-        if limit <= 0:
-            continue
-        child_values = torch.empty(limit, dtype=torch.float32, device=regrets.device)
-        if tree.node_types[node_index] is NodeType.PLAYER0:
+    for level in plan.level_nodes:
+        for node_index in level.tolist():
+            infoset_index = int(plan.node_infoset[node_index].item())
+            if infoset_index < 0 or infoset_index >= action_offsets.numel():
+                continue
+            node_type = tree.node_types[node_index]
+            if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
+                continue
+            count = int(plan.action_counts[infoset_index].item())
+            start = int(action_offsets[infoset_index].item())
+            child_count = int(tree.child_count[node_index])
+            limit = min(count, child_count)
+            if limit <= 0:
+                continue
+            children_start = int(tree.first_child[node_index])
+            child_values = torch.empty(limit, dtype=torch.float32, device=regrets.device)
             for action_index in range(limit):
                 child = int(tree.children[children_start + action_index].child)
-                child_values[action_index] = node_values_p0[child]
-        else:
-            for action_index in range(limit):
-                child = int(tree.children[children_start + action_index].child)
-                child_values[action_index] = node_values_p1[child]
-        strat = strategy_table[infoset_index, :limit]
-        infoset_value = torch.sum(strat * child_values)
-        regrets[start : start + limit] += child_values - infoset_value
-        strategy_sums[start : start + limit] += strat
+                child_values[action_index] = (
+                    node_values_p0[child]
+                    if node_type is NodeType.PLAYER0
+                    else node_values_p1[child]
+                )
+            strat = strategy_table[infoset_index, :limit]
+            infoset_value = torch.sum(strat * child_values)
+            regrets[start : start + limit] += child_values - infoset_value
+            strategy_sums[start : start + limit] += strat
 
 
 def _update_regrets_gpu_batched(
@@ -847,9 +852,9 @@ def _update_regrets_gpu_batched(
 
 
 def _forward_pass_gpu(*args: Any) -> None:
-    if len(args) == 4 and isinstance(args[0], BatchedGpuPlan):
-        plan, strategy_table, reach_p0, reach_p1 = args
-        _forward_pass_gpu_batched(plan, strategy_table, reach_p0, reach_p1)
+    if len(args) == 5 and isinstance(args[1], BatchedGpuPlan):
+        tree, plan, strategy_table, reach_p0, reach_p1 = args
+        _forward_pass_gpu_batched(tree, plan, strategy_table, reach_p0, reach_p1)
         return
     if len(args) == 6:
         tree, levels, store, reach_p0, reach_p1, device = args
@@ -859,50 +864,53 @@ def _forward_pass_gpu(*args: Any) -> None:
 
 
 def _forward_pass_gpu_batched(
+    tree: PublicTree,
     plan: BatchedGpuPlan,
     strategy_table: torch.Tensor,
     reach_p0: torch.Tensor,
     reach_p1: torch.Tensor,
 ) -> None:
-    edge_parent = plan.edge_parent
-    edge_child = plan.edge_child
-    edge_node_type = plan.edge_node_type
-    edge_infoset = plan.edge_infoset
-    edge_action_slot = plan.edge_action_slot
-    edge_chance_prob = plan.edge_chance_prob
-    if edge_parent.numel() == 0:
-        return
-    for i in range(int(edge_parent.numel())):
-        parent_index = int(edge_parent[i].item())
-        child_index = int(edge_child[i].item())
-        node_type = int(edge_node_type[i].item())
-        if child_index < 0 or child_index >= reach_p0.numel():
-            continue
-        if node_type == 0:
-            prob = float(edge_chance_prob[i].item())
-            reach_p0[child_index] += reach_p0[parent_index] * prob
-            reach_p1[child_index] += reach_p1[parent_index] * prob
-            continue
-        infoset_index = int(edge_infoset[i].item())
-        slot_index = int(edge_action_slot[i].item())
-        if infoset_index < 0 or infoset_index >= strategy_table.shape[0]:
-            reach_p0[child_index] += reach_p0[parent_index]
-            reach_p1[child_index] += reach_p1[parent_index]
-            continue
-        if slot_index < 0 or slot_index >= strategy_table.shape[1]:
-            reach_p0[child_index] += reach_p0[parent_index]
-            reach_p1[child_index] += reach_p1[parent_index]
-            continue
-        prob = float(strategy_table[infoset_index, slot_index].item())
-        if node_type == 1:
-            reach_p0[child_index] += reach_p0[parent_index] * prob
-            reach_p1[child_index] += reach_p1[parent_index]
-        elif node_type == 2:
-            reach_p0[child_index] += reach_p0[parent_index]
-            reach_p1[child_index] += reach_p1[parent_index] * prob
-        else:
-            reach_p0[child_index] += reach_p0[parent_index]
-            reach_p1[child_index] += reach_p1[parent_index]
+    for level in plan.level_nodes:
+        for node_index in level.tolist():
+            if tree.is_frontier[node_index]:
+                continue
+            node_type = tree.node_types[node_index]
+            if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+                continue
+            start = tree.first_child[node_index]
+            count = tree.child_count[node_index]
+            if count <= 0:
+                continue
+            links = tree.children[start : start + count]
+            if node_type is NodeType.CHANCE:
+                for link in links:
+                    if link.chance_prob is None:
+                        continue
+                    child_index = int(link.child)
+                    chance = float(link.chance_prob)
+                    reach_p0[child_index] += reach_p0[node_index] * chance
+                    reach_p1[child_index] += reach_p1[node_index] * chance
+                continue
+            infoset_id = tree.infoset_ids[node_index]
+            if infoset_id is None:
+                continue
+            infoset_index = int(plan.node_infoset[node_index].item())
+            if infoset_index < 0 or infoset_index >= strategy_table.shape[0]:
+                continue
+            strategy = strategy_table[infoset_index]
+            limit = min(count, int(strategy.shape[0]))
+            for action_index, link in enumerate(links[:limit]):
+                child_index = int(link.child)
+                prob = float(strategy[action_index].item())
+                if node_type is NodeType.PLAYER0:
+                    reach_p0[child_index] += reach_p0[node_index] * prob
+                    reach_p1[child_index] += reach_p1[node_index]
+                elif node_type is NodeType.PLAYER1:
+                    reach_p0[child_index] += reach_p0[node_index]
+                    reach_p1[child_index] += reach_p1[node_index] * prob
+                else:
+                    reach_p0[child_index] += reach_p0[node_index]
+                    reach_p1[child_index] += reach_p1[node_index]
 
 
 def _forward_pass_gpu_legacy(
@@ -982,52 +990,44 @@ def _backward_pass_gpu_batched(
             out_p0[node_index] = float(leaf_values.ev_player0[row])
             out_p1[node_index] = float(leaf_values.ev_player1[row])
 
-    if plan.edge_parent.numel() == 0:
-        return
-    for node_index in range(tree.node_count - 1, -1, -1):
-        if tree.is_frontier[node_index]:
-            continue
-        node_type = tree.node_types[node_index]
-        if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
-            continue
-        start = tree.first_child[node_index]
-        count = tree.child_count[node_index]
-        if count <= 0:
-            continue
-        child_links = tree.children[start : start + count]
-        child_indices = torch.as_tensor(
-            [int(link.child) for link in child_links],
-            dtype=torch.int64,
-            device=out_p0.device,
-        )
-        child_p0 = out_p0[child_indices]
-        child_p1 = out_p1[child_indices]
-        if node_type is NodeType.CHANCE:
-            probs = torch.as_tensor(
-                [float(link.chance_prob or 0.0) for link in child_links],
-                dtype=torch.float32,
+    for level in reversed(plan.level_nodes):
+        for node_index in level.tolist():
+            if tree.is_frontier[node_index]:
+                continue
+            node_type = tree.node_types[node_index]
+            if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+                continue
+            start = tree.first_child[node_index]
+            count = tree.child_count[node_index]
+            if count <= 0:
+                continue
+            child_links = tree.children[start : start + count]
+            child_indices = torch.as_tensor(
+                [int(link.child) for link in child_links],
+                dtype=torch.int64,
                 device=out_p0.device,
             )
-            out_p0[node_index] = torch.sum(probs * child_p0)
-            out_p1[node_index] = torch.sum(probs * child_p1)
-            continue
-        infoset_id = tree.infoset_ids[node_index]
-        if infoset_id is None:
-            continue
-        infoset_index = int(plan.node_infoset[node_index].item())
-        if infoset_index < 0 or infoset_index >= strategy_table.shape[0]:
-            continue
-        limit = min(count, int(strategy_table.shape[1]))
-        if limit <= 0:
-            continue
-        strategy = strategy_table[infoset_index, :limit]
-        if node_type is NodeType.PLAYER0:
-            out_p0[node_index] = torch.sum(strategy * child_p0[:limit])
-            out_p1[node_index] = torch.sum(strategy * child_p1[:limit])
-        elif node_type is NodeType.PLAYER1:
-            out_p0[node_index] = torch.sum(strategy * child_p0[:limit])
-            out_p1[node_index] = torch.sum(strategy * child_p1[:limit])
-        else:
+            child_p0 = out_p0[child_indices]
+            child_p1 = out_p1[child_indices]
+            if node_type is NodeType.CHANCE:
+                probs = torch.as_tensor(
+                    [float(link.chance_prob or 0.0) for link in child_links],
+                    dtype=torch.float32,
+                    device=out_p0.device,
+                )
+                out_p0[node_index] = torch.sum(probs * child_p0)
+                out_p1[node_index] = torch.sum(probs * child_p1)
+                continue
+            infoset_id = tree.infoset_ids[node_index]
+            if infoset_id is None:
+                continue
+            infoset_index = int(plan.node_infoset[node_index].item())
+            if infoset_index < 0 or infoset_index >= strategy_table.shape[0]:
+                continue
+            limit = min(count, int(strategy_table.shape[1]))
+            if limit <= 0:
+                continue
+            strategy = strategy_table[infoset_index, :limit]
             out_p0[node_index] = torch.sum(strategy * child_p0[:limit])
             out_p1[node_index] = torch.sum(strategy * child_p1[:limit])
 

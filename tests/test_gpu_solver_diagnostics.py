@@ -368,6 +368,7 @@ def test_gpu_regret_update_matches_cpu_on_crafted_tree() -> None:
     plan = BatchedGpuPlan(
         forward_levels=(),
         backward_levels=(),
+        level_nodes=(torch.tensor([0], device="cuda"),),
         edge_parent=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2, 3, 4], device="cuda"),
         edge_node_type=torch.tensor([1, 1, 1, 1], device="cuda"),
@@ -584,6 +585,7 @@ def test_gpu_update_regrets_changes_policy_state_on_tiny_tree() -> None:
     plan = BatchedGpuPlan(
         forward_levels=(),
         backward_levels=(),
+        level_nodes=(torch.tensor([0], device="cuda"),),
         edge_parent=torch.tensor([0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2], device="cuda"),
         edge_node_type=torch.tensor([1, 1], device="cuda"),
@@ -710,6 +712,7 @@ def test_gpu_update_regrets_produces_nonuniform_policy_from_distinct_children() 
     plan = BatchedGpuPlan(
         forward_levels=(),
         backward_levels=(),
+        level_nodes=(torch.tensor([0], device="cuda"),),
         edge_parent=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2, 3, 4], device="cuda"),
         edge_node_type=torch.tensor([1, 1, 1, 1], device="cuda"),
@@ -857,6 +860,7 @@ def test_gpu_batched_regret_update_matches_direct_regret_update() -> None:
     plan = BatchedGpuPlan(
         forward_levels=(),
         backward_levels=(),
+        level_nodes=(torch.tensor([0], device="cuda"),),
         edge_parent=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2, 3, 4], device="cuda"),
         edge_node_type=torch.tensor([1, 1, 1, 1], device="cuda"),
