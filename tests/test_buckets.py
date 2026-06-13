@@ -77,6 +77,20 @@ def test_bucketed_range_accumulates_live_combo_weights() -> None:
     )
 
 
+def test_bucket_survival_fraction_is_preserved() -> None:
+    bucketer = StrengthTierBucketer()
+    board = board_from_str("QhJhTh9c2d")
+    values = [0.0] * 1326
+    blocked_index = int(private_hand_index(card_from_str("Qh"), card_from_str("2c")))
+    live_index = int(private_hand_index(card_from_str("3c"), card_from_str("4d")))
+    values[blocked_index] = 0.9
+    values[live_index] = 0.1
+
+    bucketed = bucketer.bucketed_range(RangeVector.from_values(values), board)
+
+    assert math.isclose(float(bucketed.sum()), 0.1, rel_tol=0.0, abs_tol=1e-6)
+
+
 def test_suit_isomorphic_boards_share_canonical_key() -> None:
     board_a = board_from_str("AhKhQd")
     board_b = board_from_str("AcKcQd")

@@ -159,12 +159,14 @@ class PlayerRangeVectors:
         self,
         dead_cards: tuple[Card, ...] | list[Card],
     ) -> PlayerRangeVectors:
-        return PlayerRangeVectors(tuple(range_vector.masked(dead_cards)
-                                        for range_vector in self.values))
+        return PlayerRangeVectors(
+            tuple(range_vector.masked(dead_cards) for range_vector in self.values)
+        )
 
     def normalized(self) -> PlayerRangeVectors:
-        return PlayerRangeVectors(tuple(range_vector.normalized() 
-                                        for range_vector in self.values))
+        return PlayerRangeVectors(
+            tuple(range_vector.normalized() for range_vector in self.values)
+        )
 
     def normalized_masked(
         self,
@@ -201,3 +203,17 @@ def masked_range_vector(
     dead_cards: tuple[Card, ...] | list[Card],
 ) -> RangeVector:
     return range_vector.masked(dead_cards)
+
+
+def propagate_player_ranges(
+    ranges: PlayerRangeVectors,
+    dead_cards: tuple[Card, ...] | list[Card],
+) -> PlayerRangeVectors:
+    masked: list[RangeVector] = []
+    for range_vector in ranges.values:
+        masked_vector = range_vector.masked(dead_cards)
+        total = masked_vector.total_weight()
+        if total <= 0.0:
+            raise ValueError("player range became empty after masking")
+        masked.append(masked_vector.normalized())
+    return PlayerRangeVectors.from_values(tuple(masked))

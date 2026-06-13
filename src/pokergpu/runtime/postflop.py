@@ -11,7 +11,12 @@ from pokergpu.abstraction.actions import (
     make_postflop_mvp_profile,
     make_postflop_threeway_profile,
 )
-from pokergpu.abstraction.hands import RangeVector, apply_board_dead_cards
+from pokergpu.abstraction.hands import (
+    PlayerRangeVectors,
+    RangeVector,
+    apply_board_dead_cards,
+    propagate_player_ranges,
+)
 from pokergpu.cfr import (
     InfosetLayout,
     InfosetStore,
@@ -481,13 +486,10 @@ def _apply_root_ranges(
     for player in state.players:
         if player.hole_cards is not None:
             dead_cards.extend(player.hole_cards)
-    masked: list[RangeVector] = []
-    for range_vector in ranges:
-        raw_masked = apply_board_dead_cards(range_vector, state.board).masked(dead_cards)
-        if raw_masked.total_weight() <= 0.0:
-            raise ValueError("root ranges must retain positive weight after dead-card masking")
-        masked.append(raw_masked.normalized())
-    return tuple(masked)
+    player_ranges = PlayerRangeVectors.from_values(
+        tuple(apply_board_dead_cards(range_vector, state.board) for range_vector in ranges)
+    )
+    return propagate_player_ranges(player_ranges, dead_cards).values
 
 
 def _mccfr_sample_update(

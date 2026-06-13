@@ -12,6 +12,7 @@ from pokergpu.abstraction import (
     canonicalize_private_hand_for_board,
     masked_range_vector,
     normalize_range_vector,
+    propagate_player_ranges,
     private_hand_count,
     private_hand_from_index,
     private_hand_index,
@@ -240,6 +241,53 @@ def test_player_range_vectors_mask_and_normalize_each_player() -> None:
     assert math.isclose(masked.values[2].total_weight(), 1.0, abs_tol=1e-6)
     assert math.isclose(float(masked.values[0].values[dead]), 0.0, abs_tol=1e-6)
     assert math.isclose(float(masked.values[1].values[dead]), 0.0, abs_tol=1e-6)
+
+
+def test_three_way_range_propagation_masks_dead_cards() -> None:
+    board = Board.from_str("AhKdQc")
+    values0 = [0.0] * private_hand_count()
+    values1 = [0.0] * private_hand_count()
+    values2 = [0.0] * private_hand_count()
+    live = int(private_hand_index(card_from_str("Js"), card_from_str("Ts")))
+    blocked = int(private_hand_index(card_from_str("Ah"), card_from_str("Qs")))
+    values0[live] = 5.0
+    values1[live] = 7.0
+    values2[live] = 9.0
+    values0[blocked] = 2.0
+    values1[blocked] = 3.0
+    values2[blocked] = 4.0
+    ranges = PlayerRangeVectors.from_values(
+        (
+            RangeVector.from_values(values0),
+            RangeVector.from_values(values1),
+            RangeVector.from_values(values2),
+        )
+    )
+
+    propagated = propagate_player_ranges(ranges, board.cards)
+
+    assert len(propagated.values) == 3
+    assert math.isclose(float(propagated.values[0].values[blocked]), 0.0, abs_tol=1e-6)
+    assert math.isclose(float(propagated.values[1].values[blocked]), 0.0, abs_tol=1e-6)
+    assert math.isclose(float(propagated.values[2].values[blocked]), 0.0, abs_tol=1e-6)
+
+
+def test_three_way_range_propagation_renormalizes() -> None:
+    board = Board.from_str("AhKdQc")
+    values = [0.0] * private_hand_count()
+    live = int(private_hand_index(card_from_str("Js"), card_from_str("Ts")))
+    values[live] = 5.0
+    ranges = PlayerRangeVectors.from_values(
+        (
+            RangeVector.from_values(values),
+            RangeVector.from_values(values),
+            RangeVector.from_values(values),
+        )
+    )
+
+    propagated = propagate_player_ranges(ranges, board.cards)
+
+    assert all(math.isclose(rv.total_weight(), 1.0, abs_tol=1e-6) for rv in propagated.values)
 
 
 def test_canonicalize_private_hand_for_board_uses_board_suit_map() -> None:
