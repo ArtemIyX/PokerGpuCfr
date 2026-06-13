@@ -93,7 +93,11 @@ def resolve_postflop_gpu(
 
     iterations = 0
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
-    while time.monotonic() < deadline or iterations == 0:
+    target_iterations = max(0, int(spec.iterations))
+    while (
+        (target_iterations > 0 and iterations < target_iterations)
+        or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
+    ):
         forward_reach_p0.zero_()
         forward_reach_p1.zero_()
         forward_reach_p0[0] = 1.0
@@ -123,7 +127,9 @@ def resolve_postflop_gpu(
         )
         _update_store_from_gpu(tree.tree, store, backward_p0, backward_p1)
         iterations += 1
-        if spec.time_budget_sec <= 0.0:
+        if target_iterations > 0 and iterations >= target_iterations:
+            break
+        if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
     bb_scale = float(spec.state.betting_round.blinds.big_blind)

@@ -47,6 +47,7 @@ class PostflopResolveSpec:
     range_p0: RangeVector
     range_p1: RangeVector
     time_budget_sec: float
+    iterations: int = 0
     seed: int = POSTFLOP_SOLVER_DEFAULT_SEED
     solver_version: str = POSTFLOP_SOLVER_VERSION
     max_depth: int = 2
@@ -360,8 +361,12 @@ def resolve_postflop_multi(
     )
 
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
+    target_iterations = max(0, int(spec.iterations))
     iterations = 0
-    while time.monotonic() < deadline or iterations == 0:
+    while (
+        (target_iterations > 0 and iterations < target_iterations)
+        or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
+    ):
         forward = compute_reach_probabilities(
             tree.tree,
             store,
@@ -400,7 +405,9 @@ def resolve_postflop_multi(
             strategy_weight=root_range_p2.total_weight(),
         )
         iterations += 1
-        if spec.time_budget_sec <= 0.0:
+        if target_iterations > 0 and iterations >= target_iterations:
+            break
+        if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
     final_backward = compute_counterfactual_values(

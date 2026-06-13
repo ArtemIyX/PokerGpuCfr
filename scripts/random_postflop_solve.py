@@ -38,6 +38,7 @@ def main() -> int:
     parser.add_argument("--street", choices=("flop", "turn", "river", "random"), default="random")
     parser.add_argument("--history-steps", type=int, default=2)
     parser.add_argument("--time-budget", type=float, default=0.0)
+    parser.add_argument("--iterations", type=int, default=32)
     parser.add_argument("--max-depth", type=int, default=1)
     parser.add_argument("--max-nodes", type=int, default=16)
     parser.add_argument("--use-gpu", action="store_true", default=True)
@@ -58,11 +59,13 @@ def main() -> int:
     sampled = sample_spot(rng, street=args.street, history_steps=args.history_steps)
 
     print_state(sampled, seed=args.seed)
+    print()
     spec = PostflopResolveSpec(
         state=sampled.state,
         range_p0=RangeVector.uniform(),
         range_p1=RangeVector.uniform(),
         time_budget_sec=args.time_budget,
+        iterations=args.iterations,
         seed=args.seed,
         max_depth=args.max_depth,
         max_nodes=args.max_nodes,
@@ -70,10 +73,12 @@ def main() -> int:
 
     cpu_result = resolve_postflop_hu(spec)
     print_result("cpu", cpu_result)
+    print_action_mix("cpu", cpu_result)
 
     if args.use_gpu and not args.cpu_fallback:
         gpu_result = resolve_postflop_gpu(spec)
         print_result("cuda", gpu_result)
+        print_action_mix("cuda", gpu_result)
         if args.compare_cpu:
             print("\ncompare")
             print(
@@ -208,6 +213,15 @@ def print_result(label: str, result: object) -> None:
     print(f"  elapsed_seconds: {result.elapsed_seconds:.6f}")
     print(f"  node_count: {result.node_count}")
     print(f"  leaf_count: {result.leaf_count}")
+
+
+def print_action_mix(label: str, result: object) -> None:
+    print(f"  action_mix[{label}]:")
+    actions = getattr(result, "root_actions", ())
+    strategy = np.asarray(getattr(result, "root_strategy", ()), dtype=np.float32)
+    limit = min(len(actions), int(strategy.shape[0]))
+    for index in range(limit):
+        print(f"    {actions[index]}: {float(strategy[index] * 100.0):.1f}%")
 
 
 def format_array(values: np.ndarray) -> str:
