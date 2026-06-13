@@ -27,6 +27,7 @@ from .postflop import resolve_postflop_hu as resolve_postflop_hu
 from .postflop import resolve_postflop_multi as resolve_postflop_multi
 from .postflop import resolve_postflop_gpu_batch as resolve_postflop_gpu_batch
 from .gpu_postflop import resolve_postflop_gpu as resolve_postflop_gpu
+from .gpu_postflop import resolve_postflop_gpu_batch as resolve_postflop_gpu_batch_only
 from .value_network import (
     PostflopRuntimeValueNetworkConfig as PostflopRuntimeValueNetworkConfig,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "resolve_postflop_multi",
     "resolve_postflop_multi_mccfr",
     "resolve_postflop_gpu_batch",
+    "resolve_postflop_gpu_batch_only",
     "resolve_postflop_gpu",
     "stable_hash",
 ]

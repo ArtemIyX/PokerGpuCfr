@@ -92,6 +92,20 @@ def resolve_postflop_gpu_many(
     return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
 
 
+def resolve_postflop_gpu_batch(
+    specs: tuple[PostflopResolveSpec, ...],
+    *,
+    evaluator: LeafEvaluator | None = None,
+) -> tuple[PostflopResolveResult, ...]:
+    if not specs:
+        return ()
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for resolve_postflop_gpu_batch")
+    evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
+    packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
+    return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
+
+
 def resolve_postflop_gpu(
     spec: PostflopResolveSpec,
     *,
