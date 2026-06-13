@@ -262,6 +262,12 @@ def test_public_tree_template_rebuild_keeps_child_ranges_valid() -> None:
         terminal_payoffs=tree.terminal_payoffs,
         depth=(0, 1),
         street=("flop", "flop"),
+        edge_parent=(0,),
+        edge_child=(1,),
+        edge_action_slot=(0,),
+        edge_chance_prob=(0.0,),
+        edge_infoset_id=(0,),
+        edge_player=(0,),
         level_schedule=PublicTreeLevelSchedule(
             forward_levels=((0,), (1,)),
             backward_levels=((1,), (0,)),

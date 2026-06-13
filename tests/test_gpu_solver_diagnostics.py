@@ -200,7 +200,7 @@ def test_cuda_backward_matches_cpu_on_same_tree() -> None:
         evaluator=evaluator,
     )
 
-    root_child = _root_child_nodes(tree.tree)[0]
+    root_child = _root_child_nodes(tree)[0]
     assert np.isclose(
         float(backward_p0[root_child].detach().cpu().item()),
         float(cpu_backward.node_values_player0[root_child]),
@@ -367,13 +367,20 @@ def test_gpu_regret_update_matches_cpu_on_crafted_tree() -> None:
         gpu_layout,
     )
     plan = BatchedGpuPlan(
+        node_type=torch.tensor([1, 3, 3, 3, 3], device="cuda"),
+        node_first_child=torch.tensor([0, 0, 0, 0, 0], device="cuda"),
+        node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
+        node_parent=torch.tensor([-1, 0, 0, 0, 0], device="cuda"),
+        node_infoset=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
+        node_street=torch.tensor([1, 1, 1, 1, 1], device="cuda"),
+        node_depth=torch.tensor([0, 1, 1, 1, 1], device="cuda"),
+        node_terminal_payoff=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0], device="cuda"),
+        node_is_frontier=torch.tensor([False, False, False, False, False], device="cuda"),
         forward_levels=(),
         backward_levels=(),
         level_nodes=(torch.tensor([0], device="cuda"),),
         level_frontier_mask=(torch.tensor([False], device="cuda"),),
         level_player_mask=(torch.tensor([True], device="cuda"),),
-        node_first_child=torch.tensor([0, 0, 0, 0, 0], device="cuda"),
-        node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([4], device="cuda"),),
         level_edge_src=(torch.tensor([0, 0, 0, 0], device="cuda"),),
@@ -388,8 +395,6 @@ def test_gpu_regret_update_matches_cpu_on_crafted_tree() -> None:
         edge_infoset=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_action_slot=torch.tensor([0, 1, 2, 3], device="cuda"),
         edge_chance_prob=torch.tensor([], device="cuda"),
-        node_infoset=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
-        node_type=torch.tensor([1, 3, 3, 3, 3], device="cuda"),
         node_player=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
         frontier_nodes=torch.tensor([], device="cuda"),
         frontier_leaf_batch=pytest.importorskip("pokergpu.eval").LeafFeatureBatch(
@@ -434,7 +439,6 @@ def test_gpu_regret_update_matches_cpu_on_crafted_tree() -> None:
         gpu_state.action_counts,
     )
     _update_regrets_gpu(
-        tree.tree,
         plan,
         gpu_regrets,
         gpu_strategy_sums,
@@ -597,13 +601,20 @@ def test_gpu_update_regrets_changes_policy_state_on_tiny_tree() -> None:
         layout,
     )
     plan = BatchedGpuPlan(
+        node_type=torch.tensor([1, 3, 3], device="cuda"),
+        node_first_child=torch.tensor([0, 0, 0], device="cuda"),
+        node_child_count=torch.tensor([2, 0, 0], device="cuda"),
+        node_parent=torch.tensor([-1, 0, 0], device="cuda"),
+        node_infoset=torch.tensor([0, -1, -1], device="cuda"),
+        node_street=torch.tensor([1, 1, 1], device="cuda"),
+        node_depth=torch.tensor([0, 1, 1], device="cuda"),
+        node_terminal_payoff=torch.tensor([0.0, 0.0, 0.0], device="cuda"),
+        node_is_frontier=torch.tensor([False, False, False], device="cuda"),
         forward_levels=(),
         backward_levels=(),
         level_nodes=(torch.tensor([0], device="cuda"),),
         level_frontier_mask=(torch.tensor([False], device="cuda"),),
         level_player_mask=(torch.tensor([True], device="cuda"),),
-        node_first_child=torch.tensor([0, 0, 0], device="cuda"),
-        node_child_count=torch.tensor([2, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([2], device="cuda"),),
         level_edge_src=(torch.tensor([0, 0], device="cuda"),),
@@ -618,8 +629,6 @@ def test_gpu_update_regrets_changes_policy_state_on_tiny_tree() -> None:
         edge_infoset=torch.tensor([0, 0], device="cuda"),
         edge_action_slot=torch.tensor([0, 1], device="cuda"),
         edge_chance_prob=torch.tensor([], device="cuda"),
-        node_infoset=torch.tensor([0, -1, -1], device="cuda"),
-        node_type=torch.tensor([1, 3, 3], device="cuda"),
         node_player=torch.tensor([0, -1, -1], device="cuda"),
         frontier_nodes=torch.tensor([], device="cuda"),
         frontier_leaf_batch=pytest.importorskip("pokergpu.eval").LeafFeatureBatch(
@@ -683,7 +692,6 @@ def test_gpu_update_regrets_changes_policy_state_on_tiny_tree() -> None:
     backward_p1 = torch.tensor([0.0, 0.0, 0.0], device="cuda")
 
     _update_regrets_gpu(
-        tree,
         plan,
         gpu_state.regrets,
         gpu_state.strategy_sums,
@@ -737,13 +745,20 @@ def test_gpu_update_regrets_produces_nonuniform_policy_from_distinct_children() 
         },
     )()
     plan = BatchedGpuPlan(
+        node_type=torch.tensor([1, 3, 3, 3, 3], device="cuda"),
+        node_first_child=torch.tensor([0, 0, 0, 0, 0], device="cuda"),
+        node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
+        node_parent=torch.tensor([-1, 0, 0, 0, 0], device="cuda"),
+        node_infoset=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
+        node_street=torch.tensor([1, 1, 1, 1, 1], device="cuda"),
+        node_depth=torch.tensor([0, 1, 1, 1, 1], device="cuda"),
+        node_terminal_payoff=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0], device="cuda"),
+        node_is_frontier=torch.tensor([False, False, False, False, False], device="cuda"),
         forward_levels=(),
         backward_levels=(),
         level_nodes=(torch.tensor([0], device="cuda"),),
         level_frontier_mask=(torch.tensor([False], device="cuda"),),
         level_player_mask=(torch.tensor([True], device="cuda"),),
-        node_first_child=torch.tensor([0, 0, 0, 0, 0], device="cuda"),
-        node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([4], device="cuda"),),
         level_edge_src=(torch.tensor([0, 0, 0, 0], device="cuda"),),
@@ -758,8 +773,6 @@ def test_gpu_update_regrets_produces_nonuniform_policy_from_distinct_children() 
         edge_infoset=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_action_slot=torch.tensor([0, 1, 2, 3], device="cuda"),
         edge_chance_prob=torch.tensor([], device="cuda"),
-        node_infoset=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
-        node_type=torch.tensor([1, 3, 3, 3, 3], device="cuda"),
         node_player=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
         frontier_nodes=torch.tensor([], device="cuda"),
         frontier_leaf_batch=pytest.importorskip("pokergpu.eval").LeafFeatureBatch(
@@ -786,7 +799,6 @@ def test_gpu_update_regrets_produces_nonuniform_policy_from_distinct_children() 
     )
 
     _update_regrets_gpu(
-        tree,
         plan,
         regrets,
         strategy_sums,
@@ -854,7 +866,7 @@ def test_gpu_backward_pass_matches_cpu_on_crafted_root() -> None:
         evaluator=PotScaledLeafEvaluator(),
     )
 
-    root_child_nodes = _root_child_nodes(tree.tree)
+    root_child_nodes = _root_child_nodes(tree)
     assert np.allclose(
         gpu_p0.detach().cpu().numpy()[list(root_child_nodes)],
         cpu.node_values_player0[list(root_child_nodes)],
@@ -898,13 +910,20 @@ def test_gpu_batched_regret_update_matches_direct_regret_update() -> None:
         },
     )()
     plan = BatchedGpuPlan(
+        node_type=torch.tensor([1, 3, 3, 3, 3], device="cuda"),
+        node_first_child=torch.tensor([0, 0, 0, 0, 0], device="cuda"),
+        node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
+        node_parent=torch.tensor([-1, 0, 0, 0, 0], device="cuda"),
+        node_infoset=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
+        node_street=torch.tensor([1, 1, 1, 1, 1], device="cuda"),
+        node_depth=torch.tensor([0, 1, 1, 1, 1], device="cuda"),
+        node_terminal_payoff=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0], device="cuda"),
+        node_is_frontier=torch.tensor([False, False, False, False, False], device="cuda"),
         forward_levels=(),
         backward_levels=(),
         level_nodes=(torch.tensor([0], device="cuda"),),
         level_frontier_mask=(torch.tensor([False], device="cuda"),),
         level_player_mask=(torch.tensor([True], device="cuda"),),
-        node_first_child=torch.tensor([0, 0, 0, 0, 0], device="cuda"),
-        node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([4], device="cuda"),),
         level_edge_src=(torch.tensor([0, 0, 0, 0], device="cuda"),),
@@ -919,8 +938,6 @@ def test_gpu_batched_regret_update_matches_direct_regret_update() -> None:
         edge_infoset=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_action_slot=torch.tensor([0, 1, 2, 3], device="cuda"),
         edge_chance_prob=torch.tensor([], device="cuda"),
-        node_infoset=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
-        node_type=torch.tensor([1, 3, 3, 3, 3], device="cuda"),
         node_player=torch.tensor([0, -1, -1, -1, -1], device="cuda"),
         frontier_nodes=torch.tensor([], device="cuda"),
         frontier_leaf_batch=pytest.importorskip("pokergpu.eval").LeafFeatureBatch(
@@ -949,7 +966,6 @@ def test_gpu_batched_regret_update_matches_direct_regret_update() -> None:
     node_values_p1 = torch.zeros(5, dtype=torch.float32, device="cuda")
 
     _update_regrets_gpu(
-        tree,
         plan,
         regrets_a,
         strategy_sums_a,

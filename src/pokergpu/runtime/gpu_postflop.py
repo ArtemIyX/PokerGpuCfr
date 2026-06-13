@@ -74,8 +74,6 @@ class BatchedGpuPlan:
     edge_infoset: torch.Tensor
     edge_action_slot: torch.Tensor
     edge_chance_prob: torch.Tensor
-    node_infoset: torch.Tensor
-    node_type: torch.Tensor
     node_player: torch.Tensor
     frontier_nodes: torch.Tensor
     frontier_leaf_batch: LeafFeatureBatch
@@ -196,14 +194,14 @@ def _should_use_gpu(packed: PackedGpuSolve) -> bool:
     )
 
 
-def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
-    start = tree.first_child[0]
-    count = tree.child_count[0]
-    return tuple(int(tree.children[start + index].child) for index in range(count))
+def _root_child_nodes(tree: BuiltPublicTree) -> tuple[int, ...]:
+    start = tree.tree.first_child[0]
+    count = tree.tree.child_count[0]
+    return tuple(int(tree.tree.children[start + index].child) for index in range(count))
 
 
 def _build_batched_gpu_plan(
-    tree: PublicTree,
+    tree: BuiltPublicTree,
     actions_by_node: tuple[tuple[object, ...], ...],
     levels: TreeLevels,
     layout: InfosetLayout,
@@ -214,19 +212,18 @@ def _build_batched_gpu_plan(
     forward_levels: list[dict[str, torch.Tensor]] = []
     backward_levels: list[dict[str, torch.Tensor]] = []
     node_infoset: list[int] = []
-    node_type_codes: list[int] = []
     node_player: list[int] = []
-    node_parent: list[int] = [-1] * tree.node_count
+    node_parent: list[int] = [-1] * tree.tree.node_count
     flat_view = tree.template.flat_view
     frontier_nodes = [
         index
-        for index in range(tree.node_count)
+        for index in range(tree.tree.node_count)
         if flat_view.is_frontier[index] and flat_view.node_type[index] is not NodeType.TERMINAL
     ]
     root_children = _root_child_nodes(tree)
     action_counts = torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device)
     action_offsets = torch.as_tensor(layout.offsets, dtype=torch.int64, device=device)
-    node_type = torch.as_tensor([_node_type_code(nt) for nt in flat_view.node_type], dtype=torch.int64, device=device)
+    node_type_tensor = torch.as_tensor([_node_type_code(nt) for nt in flat_view.node_type], dtype=torch.int64, device=device)
     node_first_child = torch.as_tensor(flat_view.first_child, dtype=torch.int64, device=device)
     node_child_count = torch.as_tensor(flat_view.child_count, dtype=torch.int64, device=device)
     node_street = torch.as_tensor(flat_view.street, dtype=torch.int64, device=device)
@@ -238,7 +235,7 @@ def _build_batched_gpu_plan(
     edge_action_slot = torch.as_tensor(flat_view.edge_action_slot, dtype=torch.int64, device=device)
     edge_chance_prob = torch.as_tensor(flat_view.edge_chance_prob, dtype=torch.float32, device=device)
     edge_infoset = torch.as_tensor(flat_view.edge_infoset_id, dtype=torch.int64, device=device)
-    edge_node_type = torch.as_tensor(flat_view.edge_player, dtype=torch.int64, device=device)
+    edge_node_type_tensor = torch.as_tensor(flat_view.edge_player, dtype=torch.int64, device=device)
     level_nodes = tuple(
         torch.as_tensor(level, dtype=torch.int64, device=device)
         for level in levels.forward_levels
@@ -280,16 +277,15 @@ def _build_batched_gpu_plan(
         level_edge_slot.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in edge_indices], dtype=torch.int64, device=device))
         level_edge_kind.append(torch.as_tensor([flat_view.edge_player[i] for i in edge_indices], dtype=torch.int64, device=device))
         level_edge_prob.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in edge_indices], dtype=torch.float32, device=device))
-    for node_index in range(tree.node_count):
-        code = _node_type_code(tree.node_types[node_index])
-        node_type_codes.append(code)
-        node_player.append(0 if tree.node_types[node_index] is NodeType.PLAYER0 else 1 if tree.node_types[node_index] is NodeType.PLAYER1 else -1)
-        infoset_id = tree.infoset_ids[node_index]
+    for node_index in range(tree.tree.node_count):
+        node_type = tree.tree.node_types[node_index]
+        node_player.append(0 if node_type is NodeType.PLAYER0 else 1 if node_type is NodeType.PLAYER1 else -1)
+        infoset_id = tree.tree.infoset_ids[node_index]
         node_infoset.append(int(infoset_id) if infoset_id is not None else -1)
     for parent, child in enumerate(flat_view.edge_child):
         node_parent[int(child)] = int(flat_view.edge_parent[parent])
     return BatchedGpuPlan(
-        node_type=node_type,
+        node_type=node_type_tensor,
         node_first_child=node_first_child,
         node_child_count=node_child_count,
         node_parent=torch.as_tensor(node_parent, dtype=torch.int64, device=device),
@@ -304,13 +300,11 @@ def _build_batched_gpu_plan(
         level_player_mask=tuple(level_player_mask),
         edge_parent=edge_parent,
         edge_child=edge_child,
-        edge_node_type=edge_node_type,
+        edge_node_type=edge_node_type_tensor,
         edge_infoset=edge_infoset,
         edge_action_slot=edge_action_slot,
         edge_chance_prob=edge_chance_prob,
         level_nodes=level_nodes,
-        node_infoset=torch.as_tensor(node_infoset, dtype=torch.int64, device=device),
-        node_type=torch.as_tensor(node_type_codes, dtype=torch.int64, device=device),
         node_player=torch.as_tensor(node_player, dtype=torch.int64, device=device),
         level_edge_start=tuple(level_edge_start),
         level_edge_count=tuple(level_edge_count),
@@ -323,7 +317,7 @@ def _build_batched_gpu_plan(
         frontier_nodes=torch.as_tensor(frontier_nodes, dtype=torch.int64, device=device),
         frontier_leaf_batch=frontier_leaf_batch,
         root_child_nodes=torch.as_tensor(root_children, dtype=torch.int64, device=device),
-        root_child_parent_infoset=int(tree.infoset_ids[0] or 0),
+        root_child_parent_infoset=int(tree.tree.infoset_ids[0] or 0),
         action_counts=action_counts,
         action_offsets=action_offsets,
     )
@@ -367,7 +361,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         raise ValueError("root node must be a player infoset")
     levels = build_tree_levels(tree.tree)
     plan = _build_batched_gpu_plan(
-        tree.tree,
+        tree,
         tree.actions_by_node,
         levels,
         layout,
@@ -726,7 +720,7 @@ def _load_warm_start_into_gpu_state(
 
 
 def _build_level_plan(
-    tree: PublicTree,
+    tree: BuiltPublicTree,
     level: tuple[int, ...],
     actions_by_node: tuple[tuple[object, ...], ...],
     *,
@@ -739,15 +733,15 @@ def _build_level_plan(
     action_slots: list[int] = []
     chance_probs: list[float] = []
     for node_index in level:
-        if tree.is_frontier[node_index]:
+        if tree.tree.is_frontier[node_index]:
             continue
-        node_type = tree.node_types[node_index]
-        start = tree.first_child[node_index]
-        count = tree.child_count[node_index]
+        node_type = tree.tree.node_types[node_index]
+        start = tree.tree.first_child[node_index]
+        count = tree.tree.child_count[node_index]
         if count <= 0:
             continue
-        links = tree.children[start : start + count]
-        infoset_id = tree.infoset_ids[node_index]
+        links = tree.tree.children[start : start + count]
+        infoset_id = tree.tree.infoset_ids[node_index]
         for action_index, link in enumerate(links):
             parents.append(node_index)
             children.append(int(link.child))
