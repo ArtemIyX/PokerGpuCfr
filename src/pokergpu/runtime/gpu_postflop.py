@@ -138,7 +138,12 @@ def resolve_postflop_gpu(
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
     evaluator_impl = evaluator or default_postflop_leaf_evaluator()
-    return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl)
+    packed = _prepare_gpu_solve(spec)
+    if not _should_use_gpu(packed):
+        from .postflop import resolve_postflop_hu
+
+        return resolve_postflop_hu(spec, evaluator=evaluator_impl)
+    return _finish_gpu_solve(packed, evaluator_impl)
 
 
 def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
