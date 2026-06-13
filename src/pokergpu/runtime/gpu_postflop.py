@@ -89,6 +89,7 @@ class GpuSolveTrace:
     packed: PackedGpuSolve
     iterations: int
     elapsed_seconds: float
+    phase_seconds: dict[str, float]
     node_count: int
     leaf_count: int
     root_strategy: np.ndarray
@@ -358,7 +359,7 @@ def _rebuilt_tree_from_template(
         ),
     )
     return BuiltPublicTree(
-        tree=template.as_public_tree(built.tree.children),
+        tree=built.tree,
         template=template,
         flat_view=getattr(template, "flat_view", None) or built.template.flat_view,
         level_schedule=getattr(template, "level_schedule", None) or built.template.level_schedule,
@@ -463,23 +464,37 @@ def _run_gpu_solve(
     backward_p1 = state.backward_p1
 
     iterations = 0
+    phase_seconds = {
+        "strategy": 0.0,
+        "forward": 0.0,
+        "backward": 0.0,
+        "regret": 0.0,
+        "finalize": 0.0,
+    }
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     target_iterations = max(0, int(spec.iterations))
     while (
         (target_iterations > 0 and iterations < target_iterations)
         or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
     ):
+        started_phase = time.monotonic()
         strategy_table = _regret_matching_table(
             regrets,
             state.action_infoset_index,
             state.action_slot_index,
             plan.action_counts,
         )
+        phase_seconds["strategy"] += time.monotonic() - started_phase
+
+        started_phase = time.monotonic()
         forward_reach_p0.zero_()
         forward_reach_p1.zero_()
         forward_reach_p0[0] = 1.0
         forward_reach_p1[0] = 1.0
         _forward_pass_gpu(tree.tree, plan, strategy_table, forward_reach_p0, forward_reach_p1)
+        phase_seconds["forward"] += time.monotonic() - started_phase
+
+        started_phase = time.monotonic()
         backward_p0.zero_()
         backward_p1.zero_()
         _backward_pass_gpu(
@@ -491,6 +506,9 @@ def _run_gpu_solve(
             backward_p0,
             backward_p1,
         )
+        phase_seconds["backward"] += time.monotonic() - started_phase
+
+        started_phase = time.monotonic()
         _update_regrets_gpu(
             tree.tree,
             plan,
@@ -500,12 +518,14 @@ def _run_gpu_solve(
             backward_p0,
             backward_p1,
         )
+        phase_seconds["regret"] += time.monotonic() - started_phase
         iterations += 1
         if target_iterations > 0 and iterations >= target_iterations:
             break
         if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
+    started_phase = time.monotonic()
     strategy_table = _regret_matching_table(
         regrets,
         state.action_infoset_index,
@@ -528,6 +548,7 @@ def _run_gpu_solve(
         backward_p0,
         backward_p1,
     )
+    phase_seconds["finalize"] += time.monotonic() - started_phase
 
     root_strategy = _average_strategy_from_gpu(
         strategy_sums,
@@ -564,6 +585,7 @@ def _run_gpu_solve(
         packed=packed,
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
+        phase_seconds=phase_seconds,
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,

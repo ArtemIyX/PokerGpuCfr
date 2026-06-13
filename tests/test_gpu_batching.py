@@ -269,6 +269,13 @@ def _fake_trace(packed: object) -> GpuSolveTrace:
         packed=packed,  # type: ignore[arg-type]
         iterations=1,
         elapsed_seconds=0.0,
+        phase_seconds={
+            "strategy": 0.0,
+            "forward": 0.0,
+            "backward": 0.0,
+            "regret": 0.0,
+            "finalize": 0.0,
+        },
         node_count=1,
         leaf_count=1,
         root_strategy=np.asarray([1.0], dtype=np.float32),

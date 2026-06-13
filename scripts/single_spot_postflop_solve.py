@@ -62,7 +62,7 @@ def main() -> None:
     evaluator = default_postflop_leaf_evaluator()
     started_at = time.monotonic()
     packed = _prepare_gpu_solve(spec)
-    result = _run_gpu_solve(packed, evaluator)
+    trace = _run_gpu_solve(packed, evaluator)
     total_seconds = time.monotonic() - started_at
 
     print(
@@ -82,18 +82,19 @@ def main() -> None:
                     "frontier_batch_size": int(packed.plan.frontier_nodes.numel()),
                 },
                 "timing": {
-                    "elapsed_seconds": result.elapsed_seconds,
+                    "elapsed_seconds": trace.elapsed_seconds,
                     "total_seconds": total_seconds,
-                    "iterations": result.iterations,
+                    "iterations": trace.iterations,
+                    "phase_seconds": trace.phase_seconds,
                 },
                 "result": {
-                    "root_infoset_id": result.packed.root_infoset,
-                    "root_actions": result.packed.root_actions,
-                    "root_strategy": result.root_strategy.tolist(),
-                    "root_action_ev_player0": result.root_action_ev_player0.tolist(),
-                    "root_action_ev_player1": result.root_action_ev_player1.tolist(),
-                    "root_ev_player0": result.root_ev_player0,
-                    "root_ev_player1": result.root_ev_player1,
+                    "root_infoset_id": trace.packed.root_infoset,
+                    "root_actions": trace.packed.root_actions,
+                    "root_strategy": trace.root_strategy.tolist(),
+                    "root_action_ev_player0": trace.root_action_ev_player0.tolist(),
+                    "root_action_ev_player1": trace.root_action_ev_player1.tolist(),
+                    "root_ev_player0": trace.root_ev_player0,
+                    "root_ev_player1": trace.root_ev_player1,
                 },
             },
             indent=2,
