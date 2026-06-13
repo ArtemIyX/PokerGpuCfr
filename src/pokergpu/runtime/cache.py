@@ -213,6 +213,24 @@ class PackedGpuSubtree:
 
 
 @dataclass(slots=True)
+class PackedGpuSolveState:
+    packed: PackedGpuSubtree
+    regrets: Any
+    strategy_sums: Any
+    strategy_table: Any
+    forward_reach_p0: Any
+    forward_reach_p1: Any
+    backward_p0: Any
+    backward_p1: Any
+    leaf_values_p0: Any
+    leaf_values_p1: Any
+    root_action_ev_p0: Any
+    root_action_ev_p1: Any
+    root_strategy: Any
+    iteration: int = 0
+
+
+@dataclass(slots=True)
 class WarmStartState:
     regret: tuple[float, ...]
     strategy_sum: tuple[float, ...] = ()

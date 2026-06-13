@@ -24,11 +24,14 @@ from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import EvalDeviceConfig, LeafEvaluator
 from pokergpu.eval.gpu_stub import GpuBatchLeafEvaluator
 from pokergpu.runtime.cache import LruCache
+from pokergpu.runtime.cache import PackedGpuSolveState
+from pokergpu.runtime.cache import PackedGpuSubtree
 from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
 from .postflop import PostflopResolveResult, PostflopResolveSpec
 from .postflop import resolve_postflop_hu
+from .gpu_compile import compile_packed_subtree
 from .value_network import default_postflop_leaf_evaluator
 
 
@@ -67,6 +70,8 @@ class PackedGpuSolve:
     layout: InfosetLayout
     root_infoset: int
     root_actions: tuple[str, ...]
+    packed_subtree: PackedGpuSubtree
+    gpu_state: PackedGpuSolveState | None = None
 
 
 _GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
@@ -186,13 +191,20 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
             min_reach_prob=spec.min_reach_prob,
         ),
     )
+    packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
     action_counts = _build_infoset_action_counts(tree.tree, tree.actions_by_node)
     layout = InfosetLayout.from_action_counts(action_counts)
     root_infoset = tree.tree.infoset_ids[0]
     if root_infoset is None:
         raise ValueError("root node must be a player infoset")
     levels = build_tree_levels(tree.tree)
-    plan = _build_batched_gpu_plan(tree.tree, tree.actions_by_node, levels, layout, device=torch.device("cuda"))
+    plan = _build_batched_gpu_plan(
+        tree.tree,
+        tree.actions_by_node,
+        levels,
+        layout,
+        device=torch.device("cuda"),
+    )
     packed = PackedGpuSolve(
         spec=spec,
         tree=tree,
@@ -200,9 +212,59 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
         layout=layout,
         root_infoset=int(root_infoset),
         root_actions=tuple(_format_action(action) for action in tree.actions_by_node[0]),
+        packed_subtree=packed_subtree,
+    )
+    packed = PackedGpuSolve(
+        spec=packed.spec,
+        tree=packed.tree,
+        plan=packed.plan,
+        layout=packed.layout,
+        root_infoset=packed.root_infoset,
+        root_actions=packed.root_actions,
+        packed_subtree=packed.packed_subtree,
+        gpu_state=_make_gpu_state(packed.packed_subtree),
     )
     _GPU_PLAN_CACHE.put(cache_key, packed)
     return packed
+
+
+def _make_gpu_state(packed: PackedGpuSubtree) -> PackedGpuSolveState:
+    device = packed.node_type.device
+    regrets = torch.zeros(
+        packed.infoset_count * max(packed.max_actions, 1),
+        dtype=torch.float32,
+        device=device,
+    )
+    strategy_sums = torch.zeros_like(regrets)
+    strategy_table = torch.zeros(
+        (packed.infoset_count, max(packed.max_actions, 1)),
+        dtype=torch.float32,
+        device=device,
+    )
+    forward_reach_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
+    forward_reach_p1 = torch.zeros_like(forward_reach_p0)
+    backward_p0 = torch.zeros_like(forward_reach_p0)
+    backward_p1 = torch.zeros_like(forward_reach_p0)
+    leaf_values_p0 = torch.zeros(packed.leaf_count, dtype=torch.float32, device=device)
+    leaf_values_p1 = torch.zeros_like(leaf_values_p0)
+    root_action_ev_p0 = torch.zeros(packed.max_actions, dtype=torch.float32, device=device)
+    root_action_ev_p1 = torch.zeros_like(root_action_ev_p0)
+    root_strategy = torch.zeros_like(root_action_ev_p0)
+    return PackedGpuSolveState(
+        packed=packed,
+        regrets=regrets,
+        strategy_sums=strategy_sums,
+        strategy_table=strategy_table,
+        forward_reach_p0=forward_reach_p0,
+        forward_reach_p1=forward_reach_p1,
+        backward_p0=backward_p0,
+        backward_p1=backward_p1,
+        leaf_values_p0=leaf_values_p0,
+        leaf_values_p1=leaf_values_p1,
+        root_action_ev_p0=root_action_ev_p0,
+        root_action_ev_p1=root_action_ev_p1,
+        root_strategy=root_strategy,
+    )
 
 
 def _finish_gpu_solve(
@@ -223,12 +285,25 @@ def _finish_gpu_solve(
     if allow_cpu_fallback and not _should_use_gpu(packed):
         return resolve_postflop_hu(spec, evaluator=evaluator_impl)
 
-    regrets = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
-    strategy_sums = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
-    forward_reach_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
-    forward_reach_p1 = torch.zeros(node_count, dtype=torch.float32, device=device)
-    backward_p0 = torch.zeros(node_count, dtype=torch.float32, device=device)
-    backward_p1 = torch.zeros(node_count, dtype=torch.float32, device=device)
+    state = packed.gpu_state
+    if state is None:
+        state = _make_gpu_state(packed.packed_subtree)
+        packed = PackedGpuSolve(
+            spec=packed.spec,
+            tree=packed.tree,
+            plan=packed.plan,
+            layout=packed.layout,
+            root_infoset=packed.root_infoset,
+            root_actions=packed.root_actions,
+            packed_subtree=packed.packed_subtree,
+            gpu_state=state,
+        )
+    regrets = state.regrets
+    strategy_sums = state.strategy_sums
+    forward_reach_p0 = state.forward_reach_p0
+    forward_reach_p1 = state.forward_reach_p1
+    backward_p0 = state.backward_p0
+    backward_p1 = state.backward_p1
 
     iterations = 0
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)

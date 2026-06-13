@@ -3,6 +3,7 @@ from .cache import CachedLeafResult as CachedLeafResult
 from .cache import CachedTree as CachedTree
 from .cache import LruCache as LruCache
 from .cache import PackedGpuSubtree as PackedGpuSubtree
+from .cache import PackedGpuSolveState as PackedGpuSolveState
 from .cache import PublicStateKey as PublicStateKey
 from .cache import SolveBenchmark as SolveBenchmark
 from .cache import WarmStartState as WarmStartState
@@ -43,6 +44,7 @@ __all__ = [
     "CachedTree",
     "LruCache",
     "PackedGpuSubtree",
+    "PackedGpuSolveState",
     "PostflopResolveResult",
     "PostflopResolveSpec",
     "POSTFLOP_SOLVER_DEFAULT_SEED",
