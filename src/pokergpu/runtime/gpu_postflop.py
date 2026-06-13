@@ -546,7 +546,6 @@ def _run_gpu_solve(
 ) -> GpuSolveTrace:
     spec = packed.spec
     tree = packed.tree
-    plan = packed.plan
     layout = packed.layout
     root_infoset = packed.root_infoset
     started_at = time.monotonic()
