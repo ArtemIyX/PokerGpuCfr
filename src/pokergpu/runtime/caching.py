@@ -7,6 +7,7 @@ from .cache import (
     CacheBundle,
     CachedLeafResult,
     CachedTree,
+    PackedGpuSubtree,
     PublicStateKey,
     SolveBenchmark,
     WarmStartState,
@@ -92,6 +93,22 @@ class SolveCacheState:
     def store_tree(self, key: str, tree: CachedTree, size_bytes: int = 0) -> None:
         self.bundle.tree.put(key, tree, size_bytes=size_bytes)
 
+    def lookup_packed_subtree(self, key: str) -> PackedGpuSubtree | None:
+        packed = self.bundle.packed_subtree.get(key)
+        if packed is None:
+            self.counters.miss()
+        else:
+            self.counters.hit()
+        return packed
+
+    def store_packed_subtree(
+        self,
+        key: str,
+        packed: PackedGpuSubtree,
+        size_bytes: int = 0,
+    ) -> None:
+        self.bundle.packed_subtree.put(key, packed, size_bytes=size_bytes)
+
     def lookup_leaf(self, key: str) -> CachedLeafResult | None:
         leaf = self.bundle.leaf.get(key)
         if leaf is None:
@@ -120,6 +137,7 @@ class SolveCacheState:
     def stats(self) -> dict[str, Any]:
         return {
             "tree": self.bundle.tree.stats(),
+            "packed_subtree": self.bundle.packed_subtree.stats(),
             "leaf": self.bundle.leaf.stats(),
             "warm_start": self.bundle.warm_start.stats(),
             "hits": self.counters.hits,
