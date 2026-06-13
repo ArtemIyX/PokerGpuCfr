@@ -15,9 +15,7 @@ def can_check(state: BettingRoundState) -> bool:
 
 def can_call(state: BettingRoundState) -> bool:
     to_call = amount_to_call_for_acting_player(state)
-    if to_call <= 0:
-        return False
-    return player_stack(state, state.to_act) > 0
+    return to_call > 0 and player_stack(state, state.to_act) > 0
 
 
 def can_fold(state: BettingRoundState) -> bool:

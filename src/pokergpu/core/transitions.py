@@ -34,10 +34,12 @@ def apply_action_with_record(state: GameState, action: Action) -> AppliedTransit
     elif action.action_type is ActionType.CHECK:
         next_state = _advance_without_bet_change(state)
     elif action.action_type is ActionType.CALL:
+        stack = _player_stack(state.betting_round, player)
+        contribution = Chips(min(state.betting_round.amount_to_call(player), stack))
         next_state = _apply_contribution(
             state,
             player,
-            Chips(state.betting_round.amount_to_call(player)),
+            contribution,
             action=action,
         )
     elif action.action_type is ActionType.BET:
@@ -343,6 +345,16 @@ def _next_player_to_act(
 def _player_bet(betting_round: BettingRoundState, player: PlayerIndex) -> PlayerBet:
     match = next(
         (entry for entry in betting_round.bets if entry.player == player),
+        None,
+    )
+    if match is None:
+        raise ValueError("unknown player")
+    return match
+
+
+def _player_stack(betting_round: BettingRoundState, player: PlayerIndex) -> Chips:
+    match = next(
+        (entry.stack for entry in betting_round.stacks if entry.player == player),
         None,
     )
     if match is None:

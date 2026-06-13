@@ -51,6 +51,7 @@ def main() -> int:
 
     rng = random.Random(args.seed)
     state = make_random_postflop_state(rng, player_count=args.players, board_text=args.board or None)
+    print_params(args, state)
     spec = PostflopResolveSpec(
         state=state,
         range_p0=RangeVector.uniform(),
@@ -191,6 +192,26 @@ def print_state(state: GameState) -> None:
                 "committed": int(next(b.committed for b in state.betting_round.bets if b.player == player.player)),
             },
         )
+
+
+def print_params(args: argparse.Namespace, state: GameState) -> None:
+    print("params:")
+    print(f"  seed: {args.seed}")
+    print(f"  players: {args.players}")
+    print(f"  device: {args.device}")
+    print(f"  cuda_batch_size: {args.cuda_batch_size}")
+    print(f"  max_depth: {args.max_depth}")
+    print(f"  max_nodes: {args.max_nodes}")
+    print(f"  time_budget: {args.time_budget}")
+    print(f"  iterations: {args.iterations}")
+    print(f"  min_reach_prob: {args.min_reach_prob}")
+    print(f"  board_arg: {args.board or ''}")
+    print(f"  player_count: {state.player_count}")
+    print(f"  current_street: {state.current_street.value}")
+    print(f"  dealer: {state.dealer}")
+    print(f"  to_act: {state.betting_round.to_act}")
+    print(f"  pot: {int(state.betting_round.pot.amount)}")
+    print(f"  blinds: {int(state.betting_round.blinds.small_blind)}/{int(state.betting_round.blinds.big_blind)}")
 
 
 def print_tree(state: GameState) -> None:
