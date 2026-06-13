@@ -485,6 +485,40 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
     )
 
 
+def _regret_matching_table_inplace(
+    out: torch.Tensor,
+    regrets: torch.Tensor,
+    action_infoset_index: torch.Tensor,
+    action_slot_index: torch.Tensor,
+    action_counts: torch.Tensor,
+) -> torch.Tensor:
+    out.zero_()
+    num_infosets = int(action_counts.numel())
+    if num_infosets == 0 or action_infoset_index.numel() == 0:
+        return out
+    max_actions = int(out.shape[1])
+    valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
+    if not bool(valid.any()):
+        return out
+    infosets = action_infoset_index[valid]
+    slots = action_slot_index[valid]
+    values = torch.clamp(regrets[valid], min=0.0)
+    out.index_put_((infosets, slots), values, accumulate=False)
+    totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
+    totals.scatter_add_(0, infosets, values)
+    nonzero = totals > 0
+    if bool(nonzero.any()):
+        out[nonzero] = out[nonzero] / totals[nonzero].unsqueeze(1)
+    zero_rows = ~nonzero
+    if bool(zero_rows.any()):
+        counts = action_counts[zero_rows].clamp_min(1).to(torch.float32)
+        out[zero_rows] = 0.0
+        idx = torch.nonzero(zero_rows, as_tuple=False).flatten()
+        for i, count in zip(idx.tolist(), counts.tolist(), strict=False):
+            out[i, : int(count)] = 1.0 / float(count)
+    return out
+
+
 def _finish_gpu_solve(
     packed: PackedGpuSolve,
     evaluator_impl: LeafEvaluator,
@@ -533,6 +567,7 @@ def _run_gpu_solve(
         )
     regrets = state.regrets
     strategy_sums = state.strategy_sums
+    strategy_table = state.strategy_table
     forward_reach_p0 = state.forward_reach_p0
     forward_reach_p1 = state.forward_reach_p1
     backward_p0 = state.backward_p0
@@ -553,11 +588,12 @@ def _run_gpu_solve(
         or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
     ):
         started_phase = time.monotonic()
-        strategy_table = _regret_matching_table(
+        _regret_matching_table_inplace(
+            strategy_table,
             regrets,
             state.action_infoset_index,
             state.action_slot_index,
-            plan.action_counts,
+            state.action_counts,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
@@ -598,11 +634,12 @@ def _run_gpu_solve(
             break
 
     started_phase = time.monotonic()
-    strategy_table = _regret_matching_table(
+    _regret_matching_table_inplace(
+        strategy_table,
         regrets,
         state.action_infoset_index,
         state.action_slot_index,
-        plan.action_counts,
+        state.action_counts,
     )
     forward_reach_p0.zero_()
     forward_reach_p1.zero_()
