@@ -137,25 +137,49 @@ def build_public_tree(
 
         child_count[node_index] = added_children
 
+    for node_index in range(len(node_types)):
+        start = first_child[node_index]
+        count = child_count[node_index]
+        if start < 0:
+            first_child[node_index] = 0
+            child_count[node_index] = 0
+            continue
+        if count < 0:
+            child_count[node_index] = 0
+            continue
+        if start > len(children):
+            first_child[node_index] = len(children)
+            child_count[node_index] = 0
+            continue
+        available = len(children) - start
+        if count > available:
+            child_count[node_index] = max(0, available)
+
+    node_types_t = tuple(node_types)
+    is_frontier_t = tuple(is_frontier)
+    first_child_t = tuple(first_child)
+    child_count_t = tuple(child_count)
+    infoset_ids_t = tuple(infoset_ids)
+    terminal_payoffs_t = tuple(terminal_payoffs)
     tree = PublicTree(
-        node_types=tuple(node_types),
-        is_frontier=tuple(is_frontier),
-        first_child=tuple(first_child),
-        child_count=tuple(child_count),
+        node_types=node_types_t,
+        is_frontier=is_frontier_t,
+        first_child=first_child_t,
+        child_count=child_count_t,
         children=tuple(children),
-        infoset_ids=tuple(infoset_ids),
-        terminal_payoffs=tuple(terminal_payoffs),
+        infoset_ids=infoset_ids_t,
+        terminal_payoffs=terminal_payoffs_t,
     )
     flat_view = _build_flat_view(tree, node_states)
     level_schedule = _build_level_schedule(flat_view.node_depth)
     template = PublicTreeTemplate(
-        node_types=tuple(node_types),
-        is_frontier=tuple(is_frontier),
-        first_child=tuple(first_child),
-        child_count=tuple(child_count),
-        infoset_ids=tuple(infoset_ids),
-        terminal_payoffs=tuple(terminal_payoffs),
-        depth=tuple(_node_depths(tree)),
+        node_types=node_types_t,
+        is_frontier=is_frontier_t,
+        first_child=first_child_t,
+        child_count=child_count_t,
+        infoset_ids=infoset_ids_t,
+        terminal_payoffs=terminal_payoffs_t,
+        depth=flat_view.node_depth,
         street=tuple(node_state.current_street.value for node_state in node_states),
         level_schedule=level_schedule,
         flat_view=flat_view,

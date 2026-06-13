@@ -1,4 +1,5 @@
 from pokergpu.abstraction.actions import BaselineActionAbstraction, make_compact_profile
+from pokergpu.abstraction.hands import RangeVector
 from pokergpu.core.betting import (
     BettingRoundState,
     BlindStructure,
@@ -10,6 +11,8 @@ from pokergpu.core.betting import (
 )
 from pokergpu.core.board import Board
 from pokergpu.core.state import GameState, PlayerState
+from pokergpu.runtime.gpu_postflop import _rebuilt_tree_from_template
+from pokergpu.runtime.postflop import PostflopResolveSpec
 from pokergpu.runtime.caching import PublicStateFingerprint
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
 
@@ -93,6 +96,62 @@ def test_public_tree_template_canonical_board_key_matches_isomorphic_boards() ->
     )
 
     assert built_a.template.canonical_board_key == built_b.template.canonical_board_key
+
+
+def test_public_tree_template_round_trip_with_truncation() -> None:
+    built = build_public_tree(
+        _make_state(),
+        abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
+        config=TreeBuildConfig(max_depth=4, max_nodes=2),
+    )
+
+    rebuilt = built.template.as_public_tree(built.tree.children)
+
+    assert rebuilt.node_count == built.tree.node_count
+    assert rebuilt.first_child == built.tree.first_child
+    assert rebuilt.child_count == built.tree.child_count
+    assert rebuilt.children == built.tree.children
+
+
+def test_public_tree_template_round_trip_various_node_caps() -> None:
+    for max_nodes in (2, 3, 4, 5, 8):
+        built = build_public_tree(
+            _make_state(),
+            abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
+            config=TreeBuildConfig(max_depth=4, max_nodes=max_nodes),
+        )
+
+        rebuilt = built.template.as_public_tree(built.tree.children)
+
+        assert rebuilt.node_count == built.tree.node_count
+        assert rebuilt.first_child == built.tree.first_child
+        assert rebuilt.child_count == built.tree.child_count
+        assert rebuilt.children == built.tree.children
+
+
+def test_rebuilt_tree_from_template_matches_original_tree() -> None:
+    state = _make_state("AhKhQd")
+    built = build_public_tree(
+        state,
+        abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
+        config=TreeBuildConfig(max_depth=4, max_nodes=2),
+    )
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+        max_depth=4,
+        max_nodes=2,
+    )
+
+    rebuilt = _rebuilt_tree_from_template(spec, built.template)
+
+    assert rebuilt.tree.node_count == built.tree.node_count
+    assert rebuilt.tree.first_child == built.tree.first_child
+    assert rebuilt.tree.child_count == built.tree.child_count
+    assert rebuilt.tree.children == built.tree.children
+    assert rebuilt.template.depth == built.template.depth
 
 
 def test_public_state_fingerprint_tree_template_key_uses_required_fields() -> None:
