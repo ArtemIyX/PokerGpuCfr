@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from pokergpu.core.board import Board
 from pokergpu.core.canonical import canonicalize_cards_for_board
 from pokergpu.core.cards import Card, make_deck
+from pokergpu.core.state import GameState
 
 PrivateHandIndex = NewType("PrivateHandIndex", int)
 
@@ -217,3 +218,15 @@ def propagate_player_ranges(
             raise ValueError("player range became empty after masking")
         masked.append(masked_vector.normalized())
     return PlayerRangeVectors.from_values(tuple(masked))
+
+
+def propagate_player_ranges_for_state(
+    ranges: PlayerRangeVectors,
+    state: GameState,
+) -> PlayerRangeVectors:
+    dead_cards: list[Card] = []
+    for player in state.players:
+        if player.hole_cards is not None:
+            dead_cards.extend(player.hole_cards)
+    dead_cards.extend(state.board.cards)
+    return propagate_player_ranges(ranges, dead_cards)

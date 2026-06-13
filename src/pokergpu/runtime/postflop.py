@@ -16,6 +16,7 @@ from pokergpu.abstraction.hands import (
     RangeVector,
     apply_board_dead_cards,
     propagate_player_ranges,
+    propagate_player_ranges_for_state,
 )
 from pokergpu.cfr import (
     InfosetLayout,
@@ -151,6 +152,11 @@ def resolve_postflop_multi_mccfr(
     if not action_counts:
         raise ValueError("multiway resolver requires at least one player infoset")
     store = InfosetStore.zeros(InfosetLayout.from_action_counts(action_counts))
+    public_fingerprint = _build_public_fingerprint(spec, tree, evaluator_impl)
+    if spec.cache_state is not None:
+        warm_start = spec.cache_state.lookup_warm_start(public_fingerprint.digest())
+        if warm_start is not None:
+            _apply_warm_start(store, warm_start)
     leaf_count = int(np.count_nonzero(tree.tree.is_frontier))
     rng = np.random.default_rng(seed)
 
@@ -176,6 +182,16 @@ def resolve_postflop_multi_mccfr(
     root_ev = np.zeros(spec.state.player_count, dtype=np.float32)
     limit = min(spec.state.player_count, root_ev_matrix.shape[0])
     root_ev[:limit] = root_ev_matrix[:limit, 0]
+    if spec.cache_state is not None:
+        spec.cache_state.store_warm_start(
+            public_fingerprint.digest(),
+            make_warm_start_state(
+                regret=tuple(float(value) for value in store.regrets),
+                strategy_sum=tuple(float(value) for value in store.strategy_sums),
+                source_key=public_fingerprint.digest(),
+                blend_alpha=1.0,
+            ),
+        )
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
@@ -494,6 +510,21 @@ def _apply_root_ranges(
         tuple(apply_board_dead_cards(range_vector, state.board) for range_vector in ranges)
     )
     return propagate_player_ranges(player_ranges, dead_cards).values
+
+
+def _propagate_ranges_for_tree(
+    tree: BuiltPublicTree,
+    root_ranges: tuple[RangeVector, ...],
+) -> tuple[tuple[RangeVector, ...], ...]:
+    propagated: list[tuple[RangeVector, ...]] = []
+    root_state = tree.node_states[0]
+    root_player_ranges = PlayerRangeVectors.from_values(root_ranges)
+    for node_state in tree.node_states:
+        if node_state.current_street is root_state.current_street and node_state.board.cards == root_state.board.cards:
+            propagated.append(root_player_ranges.values)
+            continue
+        propagated.append(propagate_player_ranges_for_state(root_player_ranges, node_state).values)
+    return tuple(propagated)
 
 
 def _mccfr_sample_update(

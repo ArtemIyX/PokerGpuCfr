@@ -14,6 +14,7 @@ class CpuStubLeafEvaluator(LeafEvaluator):
 
         ev_p0 = np.zeros(batch.size, dtype=np.float32)
         ev_p1 = np.zeros(batch.size, dtype=np.float32)
+        ev_p2 = np.zeros(batch.size, dtype=np.float32)
 
         for index in range(batch.size):
             node_state = None if batch.node_states is None else batch.node_states[index]
@@ -21,14 +22,17 @@ class CpuStubLeafEvaluator(LeafEvaluator):
             if not np.isnan(payoff):
                 ev_p0[index] = payoff
                 ev_p1[index] = -payoff
+                ev_p2[index] = 0.0
                 continue
             if node_state is None:
                 ev_p0[index] = np.float32(0.0)
                 ev_p1[index] = np.float32(0.0)
+                ev_p2[index] = np.float32(0.0)
                 continue
             if node_state.phase not in {HandPhase.SHOWDOWN, HandPhase.TERMINAL}:
                 ev_p0[index] = np.float32(0.0)
                 ev_p1[index] = np.float32(0.0)
+                ev_p2[index] = np.float32(0.0)
                 continue
             payouts = compute_payouts(node_state)
             payout_p0 = next(
@@ -39,12 +43,17 @@ class CpuStubLeafEvaluator(LeafEvaluator):
                 (payout.amount for payout in payouts if payout.player == 1),
                 0,
             )
+            payout_p2 = next(
+                (payout.amount for payout in payouts if payout.player == 2),
+                0,
+            )
             ev_p0[index] = np.float32(payout_p0)
             ev_p1[index] = np.float32(payout_p1)
+            ev_p2[index] = np.float32(payout_p2)
 
         return LeafValueBatch(
-            values=np.stack((ev_p0, ev_p1), axis=1),
+            values=np.stack((ev_p0, ev_p1, ev_p2), axis=1),
             ev_player0=ev_p0,
             ev_player1=ev_p1,
-            ev_player2=-(ev_p0 + ev_p1),
+            ev_player2=ev_p2,
         )

@@ -2,6 +2,17 @@ import numpy as np
 
 from pokergpu.cfr.traversal import build_leaf_feature_batch, scatter_leaf_values
 from pokergpu.eval import CpuStubLeafEvaluator, LeafValueBatch
+from pokergpu.core.betting import (
+    BettingRoundState,
+    BlindStructure,
+    PlayerBet,
+    PlayerIndex,
+    PlayerStack,
+    Pot,
+    chips,
+)
+from pokergpu.core.board import Board
+from pokergpu.core.state import GameState, HandPhase, PlayerState
 from pokergpu.tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
@@ -185,3 +196,128 @@ def test_cpu_leaf_evaluator_uses_terminal_fold_payouts() -> None:
 
     assert values.ev_player0[0] == 300
     assert values.ev_player1[0] == -300
+
+
+def test_leaf_evaluator_returns_three_values() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        phase=HandPhase.IN_PROGRESS,
+    )
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
+        infoset_ids=(InfosetId(0), None, None),
+        terminal_payoffs=(None, None, None),
+    )
+    batch = build_leaf_feature_batch(tree, (1, 2), node_states=(state, state, state))
+
+    values = CpuStubLeafEvaluator().evaluate(batch)
+
+    assert values.ev_player0.shape == (2,)
+    assert values.ev_player1.shape == (2,)
+    assert values.values.shape == (2, 3)
+
+
+def test_terminal_payouts_return_three_player_vector() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.TERMINAL,),
+        is_frontier=(True,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(chips(25),),
+    )
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        phase=HandPhase.TERMINAL,
+    )
+    batch = build_leaf_feature_batch(tree, (0,), node_states=(state,))
+
+    values = CpuStubLeafEvaluator().evaluate(batch)
+
+    assert values.values.shape == (1, 3)
+    assert values.ev_player0.shape == (1,)
+    assert values.ev_player1.shape == (1,)
+
+
+def test_frontier_evaluation_matches_player_count() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
+        infoset_ids=(InfosetId(0), None, None),
+        terminal_payoffs=(None, None, None),
+    )
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        phase=HandPhase.IN_PROGRESS,
+    )
+    batch = build_leaf_feature_batch(tree, (1, 2), node_states=(state, state, state))
+
+    values = CpuStubLeafEvaluator().evaluate(batch)
+
+    assert values.values.shape[0] == batch.size
+    assert values.ev_player0.shape[0] == batch.size
