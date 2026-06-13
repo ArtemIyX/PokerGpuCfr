@@ -74,7 +74,7 @@ Checklist:
 - [x] Generalize regret updates to `N` players.
 - [x] Generalize average strategy storage.
 - [x] Add 3-way action abstraction.
-- [ ] Add 3-way range propagation.
+- [x] Add 3-way range propagation.
 - [x] Add 3-way leaf evaluation format.
 - [x] Add 3-way runtime resolve path.
 - [x] Add 3-way benchmark spots.
@@ -90,7 +90,8 @@ Current status:
 - traversal and storage now have multiway-friendly plumbing
 - 3-way action abstraction is in place
 - 3-way resolve entry point exists
-- range propagation still needs full multiway node-level support
+- root-range masking and normalization are in place for 3-way spots
+- end-to-end 3-way solve quality still needs validation and tuning
 
 ## Phase 3: 3-Player Quality Controls
 

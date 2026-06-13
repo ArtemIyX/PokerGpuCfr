@@ -352,6 +352,63 @@ def test_three_player_traversal_handles_player2_nodes() -> None:
     assert backward.infoset_action_values[1].shape == (2,)
 
 
+def test_cfr_traversal_handles_three_active_players() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.PLAYER1,
+            NodeType.PLAYER2,
+            NodeType.LEAF,
+            NodeType.LEAF,
+        ),
+        is_frontier=(False, False, False, True, True),
+        first_child=(0, 1, 2, 4, 4),
+        child_count=(1, 1, 2, 0, 0),
+        children=(
+            ChildLink(NodeId(1)),
+            ChildLink(NodeId(2)),
+            ChildLink(NodeId(3)),
+            ChildLink(NodeId(4)),
+        ),
+        infoset_ids=(InfosetId(0), InfosetId(1), InfosetId(2), None, None),
+        terminal_payoffs=(None, None, None, None, None),
+    )
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([1, 1, 2]))
+    store.regrets[:] = np.array([0.0, 1.0, 2.0, 1.0], dtype=np.float32)
+
+    forward = compute_reach_probabilities(tree, store)
+
+    assert forward.reach_by_player.shape == (3, 5)
+
+
+def test_regret_update_handles_n_players() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER2, NodeType.LEAF, NodeType.LEAF),
+        is_frontier=(False, True, True),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(ChildLink(NodeId(1)), ChildLink(NodeId(2))),
+        infoset_ids=(InfosetId(0), None, None),
+        terminal_payoffs=(None, None, None),
+    )
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts([2]))
+    backward = compute_counterfactual_values(
+        tree,
+        store,
+        leaf_values_player0=np.array([0.0, 1.0, -1.0], dtype=np.float32),
+        leaf_values_player1=np.array([0.0, -1.0, 1.0], dtype=np.float32),
+    )
+
+    update = update_regrets_from_traversal(
+        tree,
+        store,
+        backward,
+        active_player=2,
+    )
+
+    assert update.updated_infosets == (0,)
+
+
 def test_deterministic_reducers_merge_partial_results_stably() -> None:
     reduced_array = reduce_float32_arrays(
         (

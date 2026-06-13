@@ -82,6 +82,7 @@ class PostflopResolveResult:
 class MultiwayPostflopResolveResult:
     root_infoset_id: int
     root_actions: tuple[str, ...]
+    root_strategy: NDArray[np.float32]
     root_ev: NDArray[np.float32]
     iterations: int
     elapsed_seconds: float
@@ -178,6 +179,7 @@ def resolve_postflop_multi_mccfr(
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
+        root_strategy=store.average_strategy(root_infoset_id),
         root_ev=root_ev,
         iterations=max(1, iterations),
         elapsed_seconds=time.monotonic() - started_at,
@@ -369,6 +371,7 @@ def resolve_postflop_multi(
         return MultiwayPostflopResolveResult(
             root_infoset_id=root_infoset_id,
             root_actions=root_actions,
+            root_strategy=hu.root_strategy,
             root_ev=np.asarray(
                 [hu.root_ev_player0, hu.root_ev_player1], dtype=np.float32
             ),
@@ -449,6 +452,7 @@ def resolve_postflop_multi(
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
+        root_strategy=store.average_strategy(root_infoset_id),
         root_ev=root_ev,
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,

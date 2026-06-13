@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from pokergpu.abstraction.hands import RangeVector
 from pokergpu.core.betting import (
@@ -20,6 +21,7 @@ from pokergpu.runtime import (
     SolveCacheState,
     WarmStartState,
     resolve_postflop_hu,
+    resolve_postflop_multi,
     resolve_postflop_threeway,
 )
 
@@ -263,6 +265,237 @@ def test_postflop_multiway_masks_each_player_range_independently() -> None:
 
     assert len(masked) == 3
     assert all(np.isclose(float(r.total_weight()), 1.0) for r in masked)
+
+
+def test_multiway_postflop_rejects_preflop() -> None:
+    state = GameState(
+        board=Board(cards=()),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        range_p2=RangeVector.uniform(),
+        time_budget_sec=0.0,
+    )
+
+    with pytest.raises(ValueError):
+        resolve_postflop_threeway(spec)
+
+
+def test_multiway_postflop_rejects_two_players_when_3way_path_requested() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    spec = PostflopResolveSpec(
+        state=state,
+        range_p0=RangeVector.uniform(),
+        range_p1=RangeVector.uniform(),
+        time_budget_sec=0.0,
+    )
+
+    with pytest.raises(ValueError):
+        resolve_postflop_threeway(spec)
+
+
+def test_multiway_postflop_builds_3_player_tree() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_multi(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            range_p2=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        ),
+        max_player_count=3,
+    )
+
+    assert result.node_count > 0
+
+
+def test_multiway_postflop_root_strategy_is_normalized() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_threeway(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            range_p2=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert np.isclose(float(result.root_strategy.sum()), 1.0)
+
+
+def test_multiway_postflop_returns_three_root_evs() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_threeway(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            range_p2=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert result.root_ev.shape == (3,)
+
+
+def test_multiway_postflop_respects_time_budget() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+            PlayerState(player=PlayerIndex(2)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(2), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(2), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_threeway(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            range_p2=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert result.iterations == 1
 
 
 def test_postflop_threeway_resolver_returns_three_player_result() -> None:

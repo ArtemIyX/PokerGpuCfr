@@ -20,6 +20,14 @@ def test_infoset_layout_builds_contiguous_offsets() -> None:
     assert layout.action_range(1) == slice(2, 5)
 
 
+def test_infoset_layout_is_stable_for_3way_actions() -> None:
+    layout = InfosetLayout.from_action_counts((3, 2, 4))
+
+    assert layout.infoset_count == 3
+    assert layout.offsets == (0, 3, 5)
+    assert layout.total_actions == 9
+
+
 def test_infoset_store_uses_flat_contiguous_arrays() -> None:
     layout = InfosetLayout.from_action_counts((2, 1, 3))
     store = InfosetStore.zeros(layout)
@@ -64,6 +72,16 @@ def test_strategy_profiles_cover_all_infosets() -> None:
     assert len(average) == 3
     assert np.allclose(current[0], np.array([0.25, 0.75], dtype=np.float32))
     assert np.allclose(average[1], np.array([1.0], dtype=np.float32))
+
+
+def test_average_strategy_storage_handles_n_players() -> None:
+    layout = InfosetLayout.from_action_counts((2, 1, 3))
+    store = InfosetStore.zeros(layout)
+    store.strategy_sums[:] = np.array([1.0, 3.0, 2.0, 0.0, 4.0, 2.0], dtype=np.float32)
+
+    assert np.allclose(store.average_strategy(0), np.array([0.25, 0.75], dtype=np.float32))
+    assert np.allclose(store.average_strategy(1), np.array([1.0], dtype=np.float32))
+    assert np.allclose(store.average_strategy(2), np.array([0.0, 2 / 3, 1 / 3], dtype=np.float32))
 
 
 def test_regret_matching_is_uniform_on_zero_regrets() -> None:
