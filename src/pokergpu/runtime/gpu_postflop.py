@@ -139,7 +139,7 @@ def resolve_postflop_gpu(
 
     evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     packed = _prepare_gpu_solve(spec)
-    if not _should_use_gpu(packed):
+    if not _should_use_gpu(packed) or not _gpu_plan_is_safe(packed):
         from .postflop import resolve_postflop_hu
 
         return resolve_postflop_hu(spec, evaluator=evaluator_impl)
@@ -227,7 +227,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
         ),
     )
     packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
-    action_counts = _build_infoset_action_counts(tree.tree, tree.actions_by_node)
+    action_counts = _build_compact_infoset_action_counts(packed_subtree)
     layout = InfosetLayout.from_action_counts(action_counts)
     root_infoset = tree.tree.infoset_ids[0]
     if root_infoset is None:
@@ -266,7 +266,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
 
 def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGpuSolveState:
     device = packed.node_type.device
-    action_count = int(packed.action_infoset_index.numel())
+    action_count = int(layout.total_actions)
     regrets = torch.zeros(action_count, dtype=torch.float32, device=device)
     strategy_sums = torch.zeros_like(regrets)
     strategy_table = torch.zeros((packed.infoset_count, max(packed.max_actions, 1)), dtype=torch.float32, device=device)
@@ -422,28 +422,15 @@ def _run_gpu_solve(
         backward_p1,
     )
 
-    cpu_store = InfosetStore.zeros(packed.layout)
-    cpu_store.regrets[:] = regrets.detach().cpu().numpy()
-    cpu_store.strategy_sums[:] = strategy_sums.detach().cpu().numpy()
-    cpu_forward = compute_reach_probabilities(tree.tree, cpu_store)
-    cpu_backward = compute_counterfactual_values(
+    root_strategy = np.asarray(strategy_table[root_infoset].detach().cpu().numpy(), dtype=np.float32)
+    root_action_ev_p0 = _root_action_values_from_backward(
         tree.tree,
-        cpu_store,
-        node_states=tree.node_states,
-        reach_p0=cpu_forward.player0_reach,
-        reach_p1=cpu_forward.player1_reach,
-        terminal_values_player0=packed.packed_subtree.terminal_payoffs.detach().cpu().numpy(),
-        evaluator=evaluator_impl,
-    )
-    root_strategy = cpu_store.average_strategy(root_infoset)
-    root_action_ev_p0 = np.asarray(
-        cpu_backward.infoset_action_values.get(
-            root_infoset, np.zeros(0, dtype=np.float32)
-        ),
-        dtype=np.float32,
+        plan,
+        backward_p0,
+        backward_p1,
+        root_infoset,
     )
     root_action_ev_p1 = -root_action_ev_p0
-    root_strategy = np.asarray(root_strategy, dtype=np.float32)
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
     if bb_scale <= 0.0:
         bb_scale = 1.0
@@ -464,8 +451,8 @@ def _run_gpu_solve(
         root_ev_player1=root_ev_p1,
         gpu_backward_p0=backward_p0.detach().cpu().numpy(),
         gpu_backward_p1=backward_p1.detach().cpu().numpy(),
-        cpu_backward_p0=np.asarray(cpu_backward.node_values_player0, dtype=np.float32),
-        cpu_backward_p1=np.asarray(cpu_backward.node_values_player1, dtype=np.float32),
+        cpu_backward_p0=np.asarray([], dtype=np.float32),
+        cpu_backward_p1=np.asarray([], dtype=np.float32),
     )
 
 
@@ -473,9 +460,38 @@ def _should_use_gpu(packed: PackedGpuSolve) -> bool:
     return packed.layout.infoset_count >= _GPU_MIN_INFOSSETS or int(packed.plan.frontier_nodes.numel()) >= _GPU_MIN_LEAFS
 
 
+def _gpu_plan_is_safe(packed: PackedGpuSolve) -> bool:
+    plan = packed.plan
+    layout = packed.layout
+    tree = packed.tree.tree
+    if layout.infoset_count <= 0:
+        return False
+    if plan.edge_child.numel() and (
+        int(plan.edge_child.min().item()) < 0
+        or int(plan.edge_child.max().item()) >= tree.node_count
+    ):
+        return False
+    if plan.edge_infoset.numel() and (
+        int(plan.edge_infoset.min().item()) < -1
+        or int(plan.edge_infoset.max().item()) >= layout.infoset_count
+    ):
+        return False
+    if plan.edge_action_slot.numel():
+        layout_max_actions = max((int(value) for value in layout.action_counts), default=1)
+        if int(plan.edge_action_slot.min().item()) < 0 or int(plan.edge_action_slot.max().item()) >= layout_max_actions:
+            return False
+    if plan.action_counts.numel() and (
+        int(plan.action_counts.min().item()) <= 0
+        or int(plan.action_counts.max().item()) > layout_max_actions
+    ):
+        return False
+    return True
+
+
 def _gpu_plan_key(spec: PostflopResolveSpec) -> str:
     return "|".join(
         [
+            "gpu-pack-v2",
             spec.solver_version,
             str(spec.state.player_count),
             str(spec.state.current_street.value),
@@ -552,22 +568,31 @@ def _regret_matching_table(
     table = torch.zeros((num_infosets, max_actions), dtype=torch.float32, device=regrets.device)
     if num_infosets == 0:
         return table
-    positive = torch.clamp(regrets, min=0.0)
+    if action_infoset_index.numel() == 0:
+        return table
     totals = torch.zeros(num_infosets, dtype=torch.float32, device=regrets.device)
-    totals.scatter_add_(0, action_infoset_index, positive)
-    zeros = totals <= 0.0
-    normalized = torch.where(
-        totals[action_infoset_index] > 0.0,
-        positive / totals[action_infoset_index],
-        torch.zeros_like(positive),
-    )
-    table[action_infoset_index, action_slot_index] = normalized
-    if torch.any(zeros):
-        zero_ids = torch.nonzero(zeros, as_tuple=False).flatten()
-        for infoset_index in zero_ids.tolist():
-            count = int(action_counts[infoset_index].item())
-            if count > 0:
-                table[infoset_index, :count] = 1.0 / float(count)
+    valid_rows: list[tuple[int, int, float]] = []
+    for i in range(int(action_infoset_index.numel())):
+        infoset_index = int(action_infoset_index[i].item())
+        slot_index = int(action_slot_index[i].item())
+        if infoset_index < 0 or infoset_index >= num_infosets:
+            continue
+        if slot_index < 0 or slot_index >= max_actions:
+            continue
+        value = float(torch.clamp(regrets[i], min=0.0).item())
+        totals[infoset_index] += value
+        valid_rows.append((infoset_index, slot_index, value))
+    if not valid_rows:
+        return table
+    for infoset_index, slot_index, value in valid_rows:
+        total = float(totals[infoset_index].item())
+        table[infoset_index, slot_index] = 0.0 if total <= 0.0 else value / total
+    for infoset_index in range(num_infosets):
+        if float(totals[infoset_index].item()) > 0.0:
+            continue
+        count = int(action_counts[infoset_index].item())
+        if count > 0:
+            table[infoset_index, :count] = 1.0 / float(count)
     return table
 
 
@@ -651,27 +676,35 @@ def _update_regrets_gpu_batched(
     edge_action_slot = plan.edge_action_slot
     edge_node_type = plan.edge_node_type
     edge_offsets = plan.action_offsets
-    valid_mask = edge_infoset >= 0
-    if not torch.any(valid_mask):
+    if edge_child.numel() == 0:
         return
-    valid_infoset = edge_infoset[valid_mask]
-    valid_slots = edge_action_slot[valid_mask]
-    valid_children = edge_child[valid_mask]
-    valid_node_type = edge_node_type[valid_mask]
-    valid_offsets = edge_offsets[valid_infoset]
-    flat_indices = valid_offsets + valid_slots
-    strat = strategy_table[valid_infoset, valid_slots]
-    child_values = torch.where(
-        valid_node_type == 1,
-        node_values_p0[valid_children],
-        node_values_p1[valid_children],
-    )
     infoset_values = torch.zeros(plan.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-    infoset_values.scatter_add_(0, valid_infoset, strat * child_values)
-    action_regrets = child_values - infoset_values[valid_infoset]
-    regrets.index_add_(0, flat_indices, action_regrets)
-    regrets.clamp_(min=0.0)
-    strategy_sums.index_add_(0, flat_indices, strat)
+    for i in range(int(edge_child.numel())):
+        infoset_index = int(edge_infoset[i].item())
+        slot_index = int(edge_action_slot[i].item())
+        if infoset_index < 0 or infoset_index >= plan.action_counts.numel():
+            continue
+        if slot_index < 0 or slot_index >= int(plan.action_counts.max().item()):
+            continue
+        if slot_index >= int(plan.action_counts[infoset_index].item()):
+            continue
+        child_index = int(edge_child[i].item())
+        if child_index < 0 or child_index >= node_values_p0.numel():
+            continue
+        if int(edge_node_type[i].item()) == 1:
+            child_value = float(node_values_p0[child_index].item())
+        else:
+            child_value = float(node_values_p1[child_index].item())
+        flat_index = int(edge_offsets[infoset_index].item()) + slot_index
+        if flat_index < 0 or flat_index >= regrets.numel():
+            continue
+        strat = float(strategy_table[infoset_index, slot_index].item())
+        infoset_values[infoset_index] += strat * child_value
+        action_regret = child_value - float(infoset_values[infoset_index].item())
+        regrets[flat_index] += action_regret
+        if regrets[flat_index] < 0.0:
+            regrets[flat_index] = 0.0
+        strategy_sums[flat_index] += strat
 
 
 def _forward_pass_gpu(*args: Any) -> None:
@@ -700,34 +733,37 @@ def _forward_pass_gpu_batched(
     edge_chance_prob = plan.edge_chance_prob
     if edge_parent.numel() == 0:
         return
-    parent_r0 = reach_p0[edge_parent]
-    parent_r1 = reach_p1[edge_parent]
-    chance_mask = edge_node_type == 0
-    player0_mask = edge_node_type == 1
-    player1_mask = edge_node_type == 2
-    reach0 = torch.zeros_like(parent_r0)
-    reach1 = torch.zeros_like(parent_r1)
-    if torch.any(chance_mask):
-        reach0[chance_mask] = parent_r0[chance_mask] * edge_chance_prob[chance_mask]
-        reach1[chance_mask] = parent_r1[chance_mask] * edge_chance_prob[chance_mask]
-    if torch.any(player0_mask):
-        reach0[player0_mask] = parent_r0[player0_mask] * strategy_table[
-            edge_infoset[player0_mask].clamp_min(0),
-            edge_action_slot[player0_mask],
-        ]
-        reach1[player0_mask] = parent_r1[player0_mask]
-    if torch.any(player1_mask):
-        reach0[player1_mask] = parent_r0[player1_mask]
-        reach1[player1_mask] = parent_r1[player1_mask] * strategy_table[
-            edge_infoset[player1_mask].clamp_min(0),
-            edge_action_slot[player1_mask],
-        ]
-    other_mask = ~(chance_mask | player0_mask | player1_mask)
-    if torch.any(other_mask):
-        reach0[other_mask] = parent_r0[other_mask]
-        reach1[other_mask] = parent_r1[other_mask]
-    reach_p0.scatter_add_(0, edge_child, reach0)
-    reach_p1.scatter_add_(0, edge_child, reach1)
+    for i in range(int(edge_parent.numel())):
+        parent_index = int(edge_parent[i].item())
+        child_index = int(edge_child[i].item())
+        node_type = int(edge_node_type[i].item())
+        if child_index < 0 or child_index >= reach_p0.numel():
+            continue
+        if node_type == 0:
+            prob = float(edge_chance_prob[i].item())
+            reach_p0[child_index] += reach_p0[parent_index] * prob
+            reach_p1[child_index] += reach_p1[parent_index] * prob
+            continue
+        infoset_index = int(edge_infoset[i].item())
+        slot_index = int(edge_action_slot[i].item())
+        if infoset_index < 0 or infoset_index >= strategy_table.shape[0]:
+            reach_p0[child_index] += reach_p0[parent_index]
+            reach_p1[child_index] += reach_p1[parent_index]
+            continue
+        if slot_index < 0 or slot_index >= strategy_table.shape[1]:
+            reach_p0[child_index] += reach_p0[parent_index]
+            reach_p1[child_index] += reach_p1[parent_index]
+            continue
+        prob = float(strategy_table[infoset_index, slot_index].item())
+        if node_type == 1:
+            reach_p0[child_index] += reach_p0[parent_index] * prob
+            reach_p1[child_index] += reach_p1[parent_index]
+        elif node_type == 2:
+            reach_p0[child_index] += reach_p0[parent_index]
+            reach_p1[child_index] += reach_p1[parent_index] * prob
+        else:
+            reach_p0[child_index] += reach_p0[parent_index]
+            reach_p1[child_index] += reach_p1[parent_index]
 
 
 def _forward_pass_gpu_legacy(
@@ -972,8 +1008,21 @@ def _build_infoset_action_counts(
             continue
         infoset_index = int(infoset_id)
         max_infoset = max(max_infoset, infoset_index)
-        counts.setdefault(infoset_index, len(actions_by_node[node_index]) or 1)
+        counts[infoset_index] = max(counts.get(infoset_index, 0), len(actions_by_node[node_index]) or 1)
     return tuple(counts.get(index, 1) for index in range(max_infoset + 1))
+
+
+def _build_compact_infoset_action_counts(packed: PackedGpuSubtree) -> tuple[int, ...]:
+    if packed.infoset_count <= 0 or packed.action_infoset_index.numel() == 0:
+        return ()
+    counts = [0] * packed.infoset_count
+    action_infoset_index = packed.action_infoset_index.detach().cpu().tolist()
+    action_slot_index = packed.action_slot_index.detach().cpu().tolist()
+    for infoset_index, slot_index in zip(action_infoset_index, action_slot_index, strict=True):
+        if infoset_index < 0 or infoset_index >= packed.infoset_count:
+            continue
+        counts[infoset_index] = max(counts[infoset_index], int(slot_index) + 1)
+    return tuple(count if count > 0 else 1 for count in counts)
 
 
 def _format_action(action: object) -> str:
@@ -994,6 +1043,26 @@ def _terminal_value_player0(state: GameState) -> float:
     )
     other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
     return float(player0_payout - other_payouts)
+
+
+def _root_action_values_from_backward(
+    tree: PublicTree,
+    plan: BatchedGpuPlan,
+    backward_p0: torch.Tensor,
+    backward_p1: torch.Tensor,
+    root_infoset: int,
+) -> np.ndarray:
+    root_node = 0
+    start = int(tree.first_child[root_node])
+    count = int(tree.child_count[root_node])
+    values: list[float] = []
+    for action_index in range(min(count, int(plan.root_child_nodes.numel()))):
+        child_node = int(tree.children[start + action_index].child)
+        if child_node < 0 or child_node >= backward_p0.numel():
+            values.append(0.0)
+            continue
+        values.append(float(backward_p0[child_node].item()))
+    return np.asarray(values, dtype=np.float32)
 
 
 def debug_first_gpu_cpu_divergence(

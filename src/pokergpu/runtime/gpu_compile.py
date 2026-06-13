@@ -26,6 +26,15 @@ def compile_packed_subtree(
     spot_key: str,
     device: str = "cuda",
 ) -> PackedGpuSubtree:
+    infoset_remap: dict[int, int] = {}
+    compact_infoset_ids: list[int] = []
+    for infoset in tree.tree.infoset_ids:
+        if infoset is None:
+            compact_infoset_ids.append(-1)
+            continue
+        infoset_int = int(infoset)
+        compact_index = infoset_remap.setdefault(infoset_int, len(infoset_remap))
+        compact_infoset_ids.append(compact_index)
     node_count = tree.tree.node_count
     node_type = torch.as_tensor(
         [_node_type_code(node_type) for node_type in tree.tree.node_types],
@@ -35,11 +44,7 @@ def compile_packed_subtree(
     is_frontier = torch.as_tensor(tree.tree.is_frontier, dtype=torch.bool, device=device)
     first_child = torch.as_tensor(tree.tree.first_child, dtype=torch.int64, device=device)
     child_count = torch.as_tensor(tree.tree.child_count, dtype=torch.int64, device=device)
-    infoset_ids = torch.as_tensor(
-        [int(infoset) if infoset is not None else -1 for infoset in tree.tree.infoset_ids],
-        dtype=torch.int64,
-        device=device,
-    )
+    infoset_ids = torch.as_tensor(compact_infoset_ids, dtype=torch.int64, device=device)
     terminal_payoffs = torch.as_tensor(
         [float(payoff or 0.0) for payoff in tree.tree.terminal_payoffs],
         dtype=torch.float32,
@@ -60,10 +65,12 @@ def compile_packed_subtree(
         device=device,
     )
     leaf_feature_batch = build_leaf_feature_batch(tree.tree, tuple(int(index) for index in frontier_nodes.tolist()), node_states=tree.node_states)
-    action_infoset_index, action_slot_index = _action_maps(tree, device=device)
-    root_infoset = int(tree.tree.infoset_ids[0] or -1)
+    action_infoset_index, action_slot_index = _action_maps(tree, infoset_remap, device=device)
+    if action_infoset_index.numel() != action_slot_index.numel():
+        raise ValueError("packed action maps must have matching lengths")
+    root_infoset = int(infoset_ids[0].item()) if infoset_ids.numel() else -1
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
-    infoset_count = max((int(infoset) for infoset in tree.tree.infoset_ids if infoset is not None), default=-1) + 1
+    infoset_count = len(infoset_remap)
     return PackedGpuSubtree(
         spot_key=spot_key,
         node_type=node_type,
@@ -135,14 +142,11 @@ def _street_ids(tree: BuiltPublicTree) -> list[int]:
 def _action_slots(tree: BuiltPublicTree) -> list[int]:
     slots: list[int] = []
     for node_index, actions in enumerate(tree.actions_by_node):
-        count = len(actions)
-        if count == 0:
+        if len(actions) == 0:
             slots.append(-1)
-            continue
-        slots.extend(range(count))
-    if len(slots) < tree.tree.node_count:
-        slots.extend([-1] * (tree.tree.node_count - len(slots)))
-    return slots[: tree.tree.node_count]
+        else:
+            slots.append(0)
+    return slots
 
 
 def _chance_probs(tree: BuiltPublicTree) -> list[float]:
@@ -152,15 +156,25 @@ def _chance_probs(tree: BuiltPublicTree) -> list[float]:
     return probs
 
 
-def _action_maps(tree: BuiltPublicTree, *, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+def _action_maps(
+    tree: BuiltPublicTree,
+    infoset_remap: dict[int, int],
+    *,
+    device: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
     infoset_index: list[int] = []
     action_slot: list[int] = []
+    max_by_infoset: dict[int, int] = {}
     for node_index, infoset in enumerate(tree.tree.infoset_ids):
         if infoset is None:
             continue
         actions = tree.actions_by_node[node_index]
-        for slot in range(len(actions)):
-            infoset_index.append(int(infoset))
+        infoset_int = int(infoset)
+        compact_index = infoset_remap[infoset_int]
+        max_by_infoset[compact_index] = max(max_by_infoset.get(compact_index, 0), len(actions))
+    for infoset_int in sorted(max_by_infoset):
+        for slot in range(max_by_infoset[infoset_int]):
+            infoset_index.append(infoset_int)
             action_slot.append(slot)
     return (
         torch.as_tensor(infoset_index, dtype=torch.int64, device=device),
