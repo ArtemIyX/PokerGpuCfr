@@ -14,8 +14,6 @@ from .iteration import (
     run_cfr_iteration,
     run_cfr_training_loop,
 )
-from .mccfr import train_kuhn_mccfr, train_leduc_mccfr
-from .toy_mccfr import ToyMCCFRResult, new_toy_store, toy_expected_value, train_toy_mccfr
 from .kuhn import (
     KuhnAction,
     KuhnCard,
@@ -46,6 +44,13 @@ from .leduc import (
     leduc_infosets,
     new_leduc_infoset_store,
     train_leduc_cfr,
+)
+from .mccfr import train_kuhn_mccfr, train_leduc_mccfr
+from .toy_mccfr import (
+    ToyMCCFRResult,
+    new_toy_store,
+    toy_expected_value,
+    train_toy_mccfr,
 )
 from .traversal import (
     BackwardPassResult,

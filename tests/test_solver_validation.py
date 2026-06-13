@@ -3,6 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from pokergpu.abstraction.actions import (
+    BaselineActionAbstraction,
+    make_postflop_mvp_profile,
+)
 from pokergpu.abstraction.hands import RangeVector, private_hand_index
 from pokergpu.core.betting import (
     BettingRoundState,
@@ -16,7 +20,6 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board
 from pokergpu.core.cards import card_from_str
 from pokergpu.core.state import GameState, PlayerState
-from pokergpu.abstraction.actions import BaselineActionAbstraction, make_postflop_mvp_profile
 from pokergpu.runtime import PostflopResolveSpec, SolveCacheState, resolve_postflop_hu
 from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree

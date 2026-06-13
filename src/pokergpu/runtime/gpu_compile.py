@@ -7,9 +7,9 @@ try:
 except Exception as exc:  # pragma: no cover
     raise RuntimeError(f"torch is required for GPU subtree compilation: {exc}") from exc
 
+from pokergpu.cfr.traversal import build_leaf_feature_batch
 from pokergpu.tree import NodeType
 from pokergpu.tree.builder import BuiltPublicTree
-from pokergpu.cfr.traversal import build_leaf_feature_batch
 
 from .cache import PackedGpuSubtree
 

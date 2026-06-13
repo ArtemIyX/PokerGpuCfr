@@ -10,7 +10,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pokergpu.abstraction.hands import PlayerRangeVectors
-from pokergpu.core.betting import BettingRoundState, BlindStructure, PlayerBet, PlayerIndex, PlayerStack, Pot, chips
+from pokergpu.core.betting import (
+    BettingRoundState,
+    BlindStructure,
+    PlayerBet,
+    PlayerIndex,
+    PlayerStack,
+    Pot,
+    chips,
+)
 from pokergpu.core.board import Board
 from pokergpu.core.state import GameState, PlayerState
 

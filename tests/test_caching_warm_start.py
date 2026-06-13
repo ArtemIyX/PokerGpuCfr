@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from pokergpu.cfr import InfosetLayout
 from pokergpu.runtime import (
     CachedLeafResult,
     CachedTree,
@@ -9,14 +10,13 @@ from pokergpu.runtime import (
     SolveCacheState,
     blend_regret,
     build_benchmark,
+    gpu_postflop,
     make_leaf_key,
     make_warm_start_state,
     normalize_sequence,
 )
-from pokergpu.cfr import InfosetLayout
-from pokergpu.tree import NodeType
-from pokergpu.runtime import gpu_postflop
 from pokergpu.runtime.cache import PackedGpuSubtree
+from pokergpu.tree import NodeType
 
 
 def test_public_state_key_is_deterministic() -> None:

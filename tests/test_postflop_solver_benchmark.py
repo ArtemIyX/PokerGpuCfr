@@ -18,12 +18,13 @@ from pokergpu.core.betting import (
     Pot,
     chips,
 )
-from pokergpu.core.board import Board, Street
+from pokergpu.core.board import Board
 from pokergpu.core.cards import Card, make_deck
 from pokergpu.core.state import GameState, HandPhase, PlayerState
 from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_hu
-from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu, resolve_postflop_gpu_many
-
+from pokergpu.runtime.gpu_postflop import (
+    resolve_postflop_gpu_many,
+)
 
 pytestmark = pytest.mark.benchmark_suite
 

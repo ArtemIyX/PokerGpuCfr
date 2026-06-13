@@ -12,7 +12,6 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import numpy as np
 
 try:
     import torch
@@ -30,7 +29,7 @@ from pokergpu.core.betting import (
     chips,
 )
 from pokergpu.core.board import Board
-from pokergpu.core.cards import Card, make_deck
+from pokergpu.core.cards import make_deck
 from pokergpu.core.state import GameState, PlayerState
 from pokergpu.runtime import PostflopResolveSpec, resolve_postflop_hu
 from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu_many

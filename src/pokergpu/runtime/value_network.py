@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
-import os
 
 import numpy as np
 
-from pokergpu.eval import CpuStubLeafEvaluator, LeafEvaluator, LeafFeatureBatch, LeafValueBatch
-from pokergpu.value_network.dataset import FeatureNormalizer, normalize_feature_batch
+from pokergpu.eval import (
+    CpuStubLeafEvaluator,
+    LeafEvaluator,
+    LeafFeatureBatch,
+    LeafValueBatch,
+)
 from pokergpu.value_network.checkpoint import load_checkpoint
-from pokergpu.value_network.dataset import ValueFeatureBatch
+from pokergpu.value_network.dataset import (
+    FeatureNormalizer,
+    ValueFeatureBatch,
+    normalize_feature_batch,
+)
 from pokergpu.value_network.model import ValueMLP, build_value_model, infer_value
 from pokergpu.value_network.target import ValueFeatureSpec, ValueTargetKind
 

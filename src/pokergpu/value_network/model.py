@@ -107,7 +107,7 @@ def build_value_model(config: ValueNetworkConfig,
     return model
 
 
-def model_device(model: ValueMLP) -> "torch.device":
+def model_device(model: ValueMLP) -> torch.device:
     return next(model.parameters()).device
 
 

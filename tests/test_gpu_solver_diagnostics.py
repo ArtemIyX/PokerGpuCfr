@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+from random import Random
+
 import numpy as np
 import pytest
 
-from pokergpu.abstraction.actions import BaselineActionAbstraction, make_postflop_mvp_profile
+from pokergpu.abstraction.actions import (
+    BaselineActionAbstraction,
+    make_postflop_mvp_profile,
+)
 from pokergpu.abstraction.hands import RangeVector
+from pokergpu.cfr import (
+    InfosetLayout,
+    InfosetStore,
+    compute_counterfactual_values,
+    compute_reach_probabilities,
+)
+from pokergpu.cfr.traversal import build_tree_levels
 from pokergpu.core.betting import (
     BettingRoundState,
     BlindStructure,
@@ -15,28 +27,23 @@ from pokergpu.core.betting import (
     chips,
 )
 from pokergpu.core.board import Board
-from pokergpu.core.cards import Card, card_from_str
+from pokergpu.core.cards import Card, card_from_str, make_deck
 from pokergpu.core.state import GameState, HandPhase, PlayerState
-from pokergpu.cfr import InfosetLayout, InfosetStore, build_leaf_feature_batch, compute_counterfactual_values, compute_reach_probabilities
 from pokergpu.eval import EvalDeviceConfig, make_leaf_evaluator
 from pokergpu.runtime.gpu_postflop import (
     _backward_pass_gpu,
     _build_infoset_action_counts,
     _forward_pass_gpu,
     _gpu_plan_key,
-    debug_first_gpu_cpu_divergence,
     _prepare_gpu_solve,
-    _should_use_gpu,
     _root_child_nodes,
+    _should_use_gpu,
+    debug_first_gpu_cpu_divergence,
     resolve_postflop_gpu,
     resolve_postflop_gpu_many,
 )
 from pokergpu.runtime.postflop import PostflopResolveSpec, resolve_postflop_hu
-from pokergpu.cfr.traversal import build_tree_levels
-from pokergpu.tree import NodeType
 from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
-from pokergpu.core.cards import make_deck
-from random import Random
 
 
 def _make_state(board_text: str = "AhKdTc") -> GameState:

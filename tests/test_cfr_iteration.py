@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from pokergpu.cfr import (
-    CFRVariant,
     CFRTrainingConfig,
+    CFRVariant,
     InfosetLayout,
     InfosetStore,
     run_cfr_iteration,

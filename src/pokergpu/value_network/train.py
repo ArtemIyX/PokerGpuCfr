@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, TypeVar
-import time
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,8 +30,8 @@ from .dataset import (
     fit_feature_normalizer,
     fit_label_normalizer,
     load_dataset_manifest,
-    load_value_sample_pack,
     load_value_sample,
+    load_value_sample_pack,
     normalize_feature_batch,
 )
 from .model import (

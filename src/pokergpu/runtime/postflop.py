@@ -34,8 +34,7 @@ from pokergpu.runtime.caching import (
 )
 from pokergpu.runtime.value_network import default_postflop_leaf_evaluator
 from pokergpu.tree import NodeId, NodeType, PublicTree
-from pokergpu.tree.builder import BuiltPublicTree
-from pokergpu.tree.builder import TreeBuildConfig, build_public_tree
+from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
 
 POSTFLOP_SOLVER_VERSION = "mvp-postflop-v1"
 POSTFLOP_SOLVER_DEFAULT_SEED = 0

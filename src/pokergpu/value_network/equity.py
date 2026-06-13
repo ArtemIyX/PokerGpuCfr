@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
 from functools import lru_cache
+from itertools import combinations
 from random import Random
 
 import numpy as np

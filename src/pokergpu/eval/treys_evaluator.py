@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from itertools import combinations
 from dataclasses import dataclass
+from itertools import combinations
 from typing import cast
 
 from treys import Card as TreysCard

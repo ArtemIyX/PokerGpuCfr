@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from pokergpu.core.state import HandPhase
+
 from .cpu_stub import CpuStubLeafEvaluator
 from .device import EvalDeviceConfig, resolve_eval_device
 from .interface import LeafEvaluator
