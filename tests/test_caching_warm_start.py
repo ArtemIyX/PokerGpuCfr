@@ -1,4 +1,5 @@
 import pytest
+import torch
 
 from pokergpu.runtime import (
     CachedLeafResult,
@@ -226,21 +227,21 @@ def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPat
         calls["compile"] += 1
         return PackedGpuSubtree(
             spot_key=spot_key,
-            node_type=(),
-            is_frontier=(),
-            first_child=(),
-            child_count=(),
-            children=(),
-            infoset_ids=(),
-            terminal_payoffs=(),
-            node_depth=(),
-            street=(),
-            action_slot=(),
-            chance_prob=(),
-            frontier_nodes=(),
+            node_type=torch.zeros(1, dtype=torch.int64),
+            is_frontier=torch.zeros(1, dtype=torch.bool),
+            first_child=torch.zeros(1, dtype=torch.int64),
+            child_count=torch.zeros(1, dtype=torch.int64),
+            children=torch.zeros(0, dtype=torch.int64),
+            infoset_ids=torch.zeros(1, dtype=torch.int64),
+            terminal_payoffs=torch.zeros(1, dtype=torch.float32),
+            node_depth=torch.zeros(1, dtype=torch.int64),
+            street=torch.zeros(1, dtype=torch.int64),
+            action_slot=torch.zeros(0, dtype=torch.int64),
+            chance_prob=torch.zeros(0, dtype=torch.float32),
+            frontier_nodes=torch.zeros(0, dtype=torch.int64),
             leaf_feature_batch=type("B", (), {"size": 0})(),
-            action_infoset_index=(),
-            action_slot_index=(),
+            action_infoset_index=torch.zeros(0, dtype=torch.int64),
+            action_slot_index=torch.zeros(0, dtype=torch.int64),
             root_node=0,
             root_infoset=0,
             node_count=1,
@@ -265,6 +266,8 @@ def test_packed_subtree_cache_reuses_compiled_tree(monkeypatch: pytest.MonkeyPat
         state=SimpleNamespace(
             player_count=2,
             current_street=SimpleNamespace(value="flop"),
+            board=SimpleNamespace(cards=("As", "Kh", "7d")),
+            active_players=(SimpleNamespace(player=0), SimpleNamespace(player=1)),
             betting_round=SimpleNamespace(
                 pot=SimpleNamespace(amount=300),
                 to_act=0,
