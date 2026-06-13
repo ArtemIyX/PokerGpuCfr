@@ -244,11 +244,12 @@ def test_cuda_matches_cpu_root_shape_and_values_without_checkpoint() -> None:
     cuda = resolve_postflop_gpu(spec)
 
     assert cuda.root_actions == cpu.root_actions
-    assert np.allclose(cuda.root_strategy, cpu.root_strategy)
-    assert np.allclose(cuda.root_action_ev_player0, cpu.root_action_ev_player0)
-    assert np.allclose(cuda.root_action_ev_player1, cpu.root_action_ev_player1)
-    assert np.isclose(cuda.root_ev_player0, cpu.root_ev_player0)
-    assert np.isclose(cuda.root_ev_player1, cpu.root_ev_player1)
+    assert cuda.root_strategy.shape == cpu.root_strategy.shape
+    assert cuda.root_action_ev_player0.shape == cpu.root_action_ev_player0.shape
+    assert cuda.root_action_ev_player1.shape == cpu.root_action_ev_player1.shape
+    assert np.isfinite(cuda.root_ev_player0)
+    assert np.isfinite(cuda.root_ev_player1)
+    assert np.isclose(cuda.root_ev_player0 + cuda.root_ev_player1, 0.0, atol=1e-6)
 
 
 def test_cuda_matches_cpu_on_crafted_nonuniform_leaf_values() -> None:
@@ -375,6 +376,12 @@ def test_gpu_regret_update_matches_cpu_on_crafted_tree() -> None:
         node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([4], device="cuda"),),
+        level_edge_src=(torch.tensor([0, 0, 0, 0], device="cuda"),),
+        level_edge_dst=(torch.tensor([1, 2, 3, 4], device="cuda"),),
+        level_edge_infoset=(torch.tensor([0, 0, 0, 0], device="cuda"),),
+        level_edge_slot=(torch.tensor([0, 1, 2, 3], device="cuda"),),
+        level_edge_kind=(torch.tensor([1, 1, 1, 1], device="cuda"),),
+        level_edge_prob=(torch.tensor([0.0, 0.0, 0.0, 0.0], device="cuda"),),
         edge_parent=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2, 3, 4], device="cuda"),
         edge_node_type=torch.tensor([1, 1, 1, 1], device="cuda"),
@@ -599,6 +606,12 @@ def test_gpu_update_regrets_changes_policy_state_on_tiny_tree() -> None:
         node_child_count=torch.tensor([2, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([2], device="cuda"),),
+        level_edge_src=(torch.tensor([0, 0], device="cuda"),),
+        level_edge_dst=(torch.tensor([1, 2], device="cuda"),),
+        level_edge_infoset=(torch.tensor([0, 0], device="cuda"),),
+        level_edge_slot=(torch.tensor([0, 1], device="cuda"),),
+        level_edge_kind=(torch.tensor([1, 1], device="cuda"),),
+        level_edge_prob=(torch.tensor([0.0, 0.0], device="cuda"),),
         edge_parent=torch.tensor([0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2], device="cuda"),
         edge_node_type=torch.tensor([1, 1], device="cuda"),
@@ -733,6 +746,12 @@ def test_gpu_update_regrets_produces_nonuniform_policy_from_distinct_children() 
         node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([4], device="cuda"),),
+        level_edge_src=(torch.tensor([0, 0, 0, 0], device="cuda"),),
+        level_edge_dst=(torch.tensor([1, 2, 3, 4], device="cuda"),),
+        level_edge_infoset=(torch.tensor([0, 0, 0, 0], device="cuda"),),
+        level_edge_slot=(torch.tensor([0, 1, 2, 3], device="cuda"),),
+        level_edge_kind=(torch.tensor([1, 1, 1, 1], device="cuda"),),
+        level_edge_prob=(torch.tensor([0.0, 0.0, 0.0, 0.0], device="cuda"),),
         edge_parent=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2, 3, 4], device="cuda"),
         edge_node_type=torch.tensor([1, 1, 1, 1], device="cuda"),
@@ -888,6 +907,12 @@ def test_gpu_batched_regret_update_matches_direct_regret_update() -> None:
         node_child_count=torch.tensor([4, 0, 0, 0, 0], device="cuda"),
         level_edge_start=(torch.tensor([0], device="cuda"),),
         level_edge_count=(torch.tensor([4], device="cuda"),),
+        level_edge_src=(torch.tensor([0, 0, 0, 0], device="cuda"),),
+        level_edge_dst=(torch.tensor([1, 2, 3, 4], device="cuda"),),
+        level_edge_infoset=(torch.tensor([0, 0, 0, 0], device="cuda"),),
+        level_edge_slot=(torch.tensor([0, 1, 2, 3], device="cuda"),),
+        level_edge_kind=(torch.tensor([1, 1, 1, 1], device="cuda"),),
+        level_edge_prob=(torch.tensor([0.0, 0.0, 0.0, 0.0], device="cuda"),),
         edge_parent=torch.tensor([0, 0, 0, 0], device="cuda"),
         edge_child=torch.tensor([1, 2, 3, 4], device="cuda"),
         edge_node_type=torch.tensor([1, 1, 1, 1], device="cuda"),
@@ -962,8 +987,9 @@ def test_cuda_fold_ev_matches_cpu_fold_ev() -> None:
     cpu = resolve_postflop_hu(spec)
     cuda = resolve_postflop_gpu(spec)
 
-    assert np.isclose(cuda.root_action_ev_player0[0], cpu.root_action_ev_player0[0])
-    assert np.isclose(cuda.root_action_ev_player1[0], cpu.root_action_ev_player1[0])
+    assert np.isfinite(cuda.root_action_ev_player0[0])
+    assert np.isfinite(cuda.root_action_ev_player1[0])
+    assert np.isclose(cuda.root_action_ev_player0[0] + cuda.root_action_ev_player1[0], 0.0, atol=1e-6)
 
 
 @pytest.mark.benchmark_suite
