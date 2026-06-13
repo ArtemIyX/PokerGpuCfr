@@ -127,6 +127,7 @@ def resolve_postflop_gpu(
     spec: PostflopResolveSpec,
     *,
     evaluator: LeafEvaluator | None = None,
+    strict_gpu: bool = False,
 ) -> PostflopResolveResult:
     if spec.state.player_count != 2:
         raise ValueError("GPU postflop solver currently supports heads-up only")
@@ -137,11 +138,14 @@ def resolve_postflop_gpu(
 
     evaluator_impl = evaluator or default_postflop_leaf_evaluator()
     packed = _prepare_gpu_solve(spec)
-    if not _should_use_gpu(packed) or not _gpu_plan_is_safe(packed):
-        from .postflop import resolve_postflop_hu
-
-        return resolve_postflop_hu(spec, evaluator=evaluator_impl)
     return _finish_gpu_solve(packed, evaluator_impl)
+
+
+def _should_use_gpu(packed: PackedGpuSolve) -> bool:
+    return (
+        packed.tree.tree.node_count >= _GPU_MIN_INFOSSETS
+        and int(packed.packed_subtree.leaf_count) >= _GPU_MIN_LEAFS
+    )
 
 
 def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
@@ -180,14 +184,15 @@ def _build_batched_gpu_plan(
     for node_index in range(tree.node_count):
         code = _node_type_code(tree.node_types[node_index])
         node_type.append(code)
-        node_infoset.append(int(tree.infoset_ids[node_index] or -1))
+        infoset_id = tree.infoset_ids[node_index]
+        node_infoset.append(int(infoset_id) if infoset_id is not None else -1)
         start = tree.first_child[node_index]
         count = tree.child_count[node_index]
         for action_index, link in enumerate(tree.children[start : start + count]):
             edge_parent.append(node_index)
             edge_child.append(int(link.child))
             edge_node_type.append(code)
-            edge_infoset.append(int(tree.infoset_ids[node_index] or -1))
+            edge_infoset.append(int(infoset_id) if infoset_id is not None else -1)
             edge_action_slot.append(action_index)
             edge_chance_prob.append(float(link.chance_prob or 0.0))
     return BatchedGpuPlan(
@@ -214,7 +219,16 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
     cache_key = _gpu_plan_key(spec)
     cached = _GPU_PLAN_CACHE.get(cache_key)
     if cached is not None:
-        return cached
+        return PackedGpuSolve(
+            spec=spec,
+            tree=cached.tree,
+            plan=cached.plan,
+            layout=cached.layout,
+            root_infoset=cached.root_infoset,
+            root_actions=cached.root_actions,
+            packed_subtree=cached.packed_subtree,
+            gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout),
+        )
     tree = build_public_tree(
         spec.state,
         abstraction=BaselineActionAbstraction(profile=make_postflop_mvp_profile()),
@@ -420,10 +434,11 @@ def _run_gpu_solve(
         backward_p1,
     )
 
-    root_action_count = int(tree.tree.child_count[0])
-    root_strategy = np.asarray(
-        strategy_table[root_infoset, :root_action_count].detach().cpu().numpy(),
-        dtype=np.float32,
+    root_strategy = _average_strategy_from_gpu(
+        strategy_sums,
+        plan.action_counts,
+        plan.action_offsets,
+        root_infoset,
     )
     root_action_ev_p0 = _root_action_values_from_backward(
         tree.tree,
@@ -456,38 +471,6 @@ def _run_gpu_solve(
         cpu_backward_p0=backward_p0.detach().cpu().numpy(),
         cpu_backward_p1=backward_p1.detach().cpu().numpy(),
     )
-
-
-def _should_use_gpu(packed: PackedGpuSolve) -> bool:
-    return packed.layout.infoset_count >= _GPU_MIN_INFOSSETS or int(packed.plan.frontier_nodes.numel()) >= _GPU_MIN_LEAFS
-
-
-def _gpu_plan_is_safe(packed: PackedGpuSolve) -> bool:
-    plan = packed.plan
-    layout = packed.layout
-    tree = packed.tree.tree
-    if layout.infoset_count <= 0:
-        return False
-    if plan.edge_child.numel() and (
-        int(plan.edge_child.min().item()) < 0
-        or int(plan.edge_child.max().item()) >= tree.node_count
-    ):
-        return False
-    if plan.edge_infoset.numel() and (
-        int(plan.edge_infoset.min().item()) < -1
-        or int(plan.edge_infoset.max().item()) >= layout.infoset_count
-    ):
-        return False
-    if plan.edge_action_slot.numel():
-        layout_max_actions = max((int(value) for value in layout.action_counts), default=1)
-        if int(plan.edge_action_slot.min().item()) < 0 or int(plan.edge_action_slot.max().item()) >= layout_max_actions:
-            return False
-    if plan.action_counts.numel() and (
-        int(plan.action_counts.min().item()) <= 0
-        or int(plan.action_counts.max().item()) > layout_max_actions
-    ):
-        return False
-    return True
 
 
 def _gpu_plan_key(spec: PostflopResolveSpec) -> str:
@@ -530,11 +513,12 @@ def _build_level_plan(
         if count <= 0:
             continue
         links = tree.children[start : start + count]
+        infoset_id = tree.infoset_ids[node_index]
         for action_index, link in enumerate(links):
             parents.append(node_index)
             children.append(int(link.child))
             node_types.append(0 if node_type is NodeType.CHANCE else 1 if node_type is NodeType.PLAYER0 else 2 if node_type is NodeType.PLAYER1 else 3)
-            infosets.append(int(tree.infoset_ids[node_index] or -1))
+            infosets.append(int(infoset_id) if infoset_id is not None else -1)
             action_slots.append(action_index)
             chance_probs.append(float(link.chance_prob or 0.0))
     return {
@@ -667,7 +651,6 @@ def _update_regrets_gpu(
         strat = strategy_table[infoset_index, :limit]
         infoset_value = torch.sum(strat * child_values)
         regrets[start : start + limit] += child_values - infoset_value
-        regrets[start : start + limit].clamp_(min=0.0)
         strategy_sums[start : start + limit] += strat
 
 
@@ -731,8 +714,6 @@ def _update_regrets_gpu_batched(
             child_value = float(node_values_p1[child_index].item())
         action_regret = child_value - float(infoset_values[infoset_index].item())
         regrets[flat_index] += action_regret
-        if regrets[flat_index] < 0.0:
-            regrets[flat_index] = 0.0
 
 
 def _forward_pass_gpu(*args: Any) -> None:

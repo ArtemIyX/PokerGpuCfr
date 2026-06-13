@@ -24,6 +24,8 @@ from pokergpu.runtime import (
     resolve_postflop_multi,
     resolve_postflop_threeway,
 )
+from pokergpu.eval import LeafFeatureBatch, LeafValueBatch
+from pokergpu.cfr import InfosetLayout, InfosetStore
 
 
 def test_postflop_resolver_returns_root_strategy() -> None:
@@ -109,6 +111,273 @@ def test_postflop_resolver_root_ev_matches_action_ev_weighting() -> None:
     )
     assert np.isclose(result.root_ev_player0, expected / 100.0)
     assert np.isclose(result.root_ev_player1, -result.root_ev_player0)
+
+
+def test_postflop_resolver_root_action_evs_remain_action_specific() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert np.isclose(float(result.root_strategy.sum()), 1.0)
+    assert result.root_action_ev_player0.shape == result.root_strategy.shape
+    assert result.root_action_ev_player1.shape == result.root_strategy.shape
+    assert np.isclose(result.root_ev_player1, -result.root_ev_player0)
+    assert np.isclose(
+        result.root_ev_player0,
+        float(np.sum(result.root_strategy * result.root_action_ev_player0, dtype=np.float64)) / 100.0,
+    )
+
+
+def test_postflop_resolver_keeps_uniform_root_policy_when_evs_are_flat() -> None:
+    class FlatLeafEvaluator:
+        def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
+            values = np.zeros((batch.size, 3), dtype=np.float32)
+            ev = np.zeros(batch.size, dtype=np.float32)
+            return LeafValueBatch(
+                values=values,
+                ev_player0=ev,
+                ev_player1=ev,
+                ev_player2=ev,
+            )
+
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            max_depth=1,
+            max_nodes=16,
+        ),
+        evaluator=FlatLeafEvaluator(),
+    )
+
+    assert np.isclose(float(result.root_strategy.sum()), 1.0)
+    assert np.allclose(
+        result.root_strategy,
+        np.full(result.root_strategy.shape[0], 1.0 / result.root_strategy.shape[0], dtype=np.float32),
+    )
+
+
+def test_postflop_resolver_moves_off_uniform_when_actions_have_distinct_values() -> None:
+    class PotScaledLeafEvaluator:
+        def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
+            values = np.zeros((batch.size, 3), dtype=np.float32)
+            ev = np.asarray(batch.pot, dtype=np.float32) / np.float32(100.0)
+            values[:, 0] = ev
+            values[:, 1] = -ev
+            return LeafValueBatch(
+                values=values,
+                ev_player0=ev,
+                ev_player1=-ev,
+                ev_player2=None,
+            )
+
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            iterations=16,
+            max_depth=1,
+            max_nodes=16,
+        ),
+        evaluator=PotScaledLeafEvaluator(),
+    )
+
+    uniform = np.full(result.root_strategy.shape[0], 1.0 / result.root_strategy.shape[0], dtype=np.float32)
+    assert not np.allclose(result.root_strategy, uniform)
+    assert int(np.argmax(result.root_strategy)) == int(np.argmax(result.root_action_ev_player0))
+
+
+def test_postflop_resolver_returns_root_infoset_average_strategy() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    result = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            iterations=4,
+            max_depth=1,
+            max_nodes=16,
+        )
+    )
+
+    assert result.root_strategy.shape == result.root_action_ev_player0.shape
+    assert np.isclose(float(result.root_strategy.sum()), 1.0)
+
+
+def test_postflop_resolver_changes_policy_with_more_iterations() -> None:
+    class PotScaledLeafEvaluator:
+        def evaluate(self, batch: LeafFeatureBatch) -> LeafValueBatch:
+            values = np.zeros((batch.size, 3), dtype=np.float32)
+            ev = np.asarray(batch.pot, dtype=np.float32) / np.float32(100.0)
+            values[:, 0] = ev
+            values[:, 1] = -ev
+            return LeafValueBatch(
+                values=values,
+                ev_player0=ev,
+                ev_player1=-ev,
+                ev_player2=None,
+            )
+
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+    one = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            iterations=1,
+            max_depth=1,
+            max_nodes=16,
+        ),
+        evaluator=PotScaledLeafEvaluator(),
+    )
+    many = resolve_postflop_hu(
+        PostflopResolveSpec(
+            state=state,
+            range_p0=RangeVector.uniform(),
+            range_p1=RangeVector.uniform(),
+            time_budget_sec=0.0,
+            iterations=64,
+            max_depth=1,
+            max_nodes=16,
+        ),
+        evaluator=PotScaledLeafEvaluator(),
+    )
+
+    assert np.isclose(float(one.root_strategy.sum()), 1.0)
+    assert np.isclose(float(many.root_strategy.sum()), 1.0)
+    assert not np.allclose(one.root_strategy, many.root_strategy)
+    assert np.linalg.norm(many.root_strategy - one.root_strategy) > 0.0
+
+
+def test_gpu_regret_updates_allow_negative_regrets() -> None:
+    store = InfosetStore.zeros(InfosetLayout.from_action_counts((3,)))
+    regrets = store.regrets_for_infoset(0)
+    regrets[:] = np.asarray((1.0, -2.0, 0.5), dtype=np.float32)
+
+    strategy = store.current_strategy(0)
+
+    assert np.isclose(float(strategy.sum()), 1.0)
+    assert strategy[1] == 0.0
+    assert strategy[0] > 0.0
+    assert strategy[2] > 0.0
+
+
 
 
 def test_postflop_resolve_spec_has_stable_defaults() -> None:
@@ -618,7 +887,7 @@ def test_resolve_postflop_multi_uses_warm_start_if_available() -> None:
         )
     )
 
-    assert cache.stats()["warm_start"]["max_entries"] == 128
+    assert cache.bundle.warm_start.stats()["max_entries"] == 128
 
 
 def test_postflop_threeway_resolver_returns_three_player_result() -> None:

@@ -25,28 +25,39 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board, Street
 from pokergpu.core.cards import Card, make_deck
 from pokergpu.core.state import GameState, PlayerState
-from pokergpu.runtime import PostflopResolveSpec, SolveCacheState, resolve_postflop_hu
+from pokergpu.runtime import (
+    PostflopResolveSpec,
+    SolveCacheState,
+    resolve_postflop_gpu_batch,
+    resolve_postflop_hu,
+    resolve_postflop_threeway,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--players", type=int, choices=(2, 3), default=2)
     parser.add_argument("--max-depth", type=int, default=2)
     parser.add_argument("--max-nodes", type=int, default=256)
     parser.add_argument("--time-budget", type=float, default=0.0)
+    parser.add_argument("--iterations", type=int, default=64)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    parser.add_argument("--cuda-batch-size", type=int, default=1)
     parser.add_argument("--min-reach-prob", type=float, default=0.0)
     parser.add_argument("--board", type=str, default="")
     parser.add_argument("--print-tree", action="store_true")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
-    state = make_random_postflop_state(rng, board_text=args.board or None)
+    state = make_random_postflop_state(rng, player_count=args.players, board_text=args.board or None)
     spec = PostflopResolveSpec(
         state=state,
         range_p0=RangeVector.uniform(),
         range_p1=RangeVector.uniform(),
+        range_p2=RangeVector.uniform() if args.players == 3 else None,
         time_budget_sec=args.time_budget,
+        iterations=args.iterations,
         seed=args.seed,
         max_depth=args.max_depth,
         max_nodes=args.max_nodes,
@@ -56,10 +67,16 @@ def main() -> int:
 
     if args.print_tree:
         print_tree(state)
-    if args.device == "cuda":
-        from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
+    if args.players == 3:
+        result = resolve_postflop_threeway(spec)
+    elif args.device == "cuda":
+        batch_size = max(1, int(args.cuda_batch_size))
+        if batch_size == 1:
+            from pokergpu.runtime.gpu_postflop import resolve_postflop_gpu
 
-        result = resolve_postflop_gpu(spec)
+            result = resolve_postflop_gpu(spec)
+        else:
+            result = resolve_postflop_gpu_batch(tuple(spec for _ in range(batch_size))).results[0]
     else:
         result = resolve_postflop_hu(spec)
 
@@ -71,6 +88,7 @@ def main() -> int:
 def make_random_postflop_state(
     rng: random.Random,
     *,
+    player_count: int = 2,
     board_text: str | None = None,
 ) -> GameState:
     deck = list(make_deck())
@@ -86,33 +104,61 @@ def make_random_postflop_state(
 
     hole_0 = take_two_unique(deck, board.cards)
     hole_1 = take_two_unique(deck, board.cards, hole_0)
+    hole_2 = take_two_unique(deck, board.cards, hole_0 + hole_1) if player_count == 3 else None
 
-    sb = 50
-    bb = 100
-    pot = 300
-    to_act = PlayerIndex(rng.choice((0, 1)))
+    sb = max(1, int(rng.choice((25, 50, 100))))
+    bb = max(sb, int(sb * rng.choice((2, 2, 3, 4))))
+    stacks_raw = [int(bb * rng.randint(2, 25)) for _ in range(player_count)]
+    commitments = _make_random_commitments(rng, stacks_raw, bb, player_count)
+    base_pot = int(bb * rng.randint(1, 10))
+    pot = max(0, base_pot + sum(commitments))
+    to_act = PlayerIndex(int(np.argmax(stacks_raw)))
+    dealer = PlayerIndex(rng.randrange(player_count))
 
     return GameState(
         board=board,
-        players=(
-            PlayerState(player=PlayerIndex(0), hole_cards=hole_0),
-            PlayerState(player=PlayerIndex(1), hole_cards=hole_1),
+        players=tuple(
+            [
+                PlayerState(player=PlayerIndex(0), hole_cards=hole_0),
+                PlayerState(player=PlayerIndex(1), hole_cards=hole_1),
+            ]
+            + ([PlayerState(player=PlayerIndex(2), hole_cards=hole_2)] if player_count == 3 else [])
         ),
         betting_round=BettingRoundState(
             pot=Pot(amount=chips(pot)),
-            stacks=(
-            PlayerStack(player=PlayerIndex(0), stack=chips(1700)),
-            PlayerStack(player=PlayerIndex(1), stack=chips(1700)),
-        ),
-            bets=(
-                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
-                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            stacks=tuple(
+                PlayerStack(player=PlayerIndex(index), stack=chips(stack))
+                for index, stack in enumerate(stacks_raw)
+            ),
+            bets=tuple(
+                PlayerBet(player=PlayerIndex(index), committed=chips(commitment))
+                for index, commitment in enumerate(commitments)
             ),
             blinds=BlindStructure(small_blind=chips(sb), big_blind=chips(bb)),
             to_act=to_act,
         ),
-        dealer=PlayerIndex(0),
+        dealer=dealer,
     )
+
+
+def _make_random_commitments(
+    rng: random.Random,
+    stacks: list[int],
+    big_blind: int,
+    player_count: int,
+) -> list[int]:
+    commitments = [0 for _ in range(player_count)]
+    highest = int(rng.randint(0, max(1, min(stacks) // 4)))
+    for index in range(player_count):
+        room = max(0, min(int(stacks[index]), highest))
+        commitments[index] = int(rng.randint(0, room)) if room > 0 else 0
+    if player_count > 1 and len(set(commitments)) == 1:
+        idx = int(rng.randrange(player_count))
+        room = max(0, int(stacks[idx]))
+        commitments[idx] = min(room, commitments[idx] + max(1, big_blind // 2))
+    acting_player = int(np.argmax(stacks))
+    commitments[acting_player] = min(commitments[acting_player], max(0, stacks[acting_player] - big_blind))
+    return [max(0, int(value)) for value in commitments]
 
 
 def take_two_unique(

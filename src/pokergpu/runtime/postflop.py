@@ -195,7 +195,7 @@ def resolve_postflop_multi_mccfr(
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
-        root_strategy=store.average_strategy(root_infoset_id),
+        root_strategy=np.asarray(store.average_strategy(root_infoset_id), dtype=np.float32),
         root_ev=root_ev,
         iterations=max(1, iterations),
         elapsed_seconds=time.monotonic() - started_at,
@@ -254,9 +254,13 @@ def resolve_postflop_hu(
     )
 
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
+    target_iterations = max(0, int(spec.iterations))
     iterations = 0
     leaf_count = int(np.count_nonzero(tree.tree.is_frontier))
-    while time.monotonic() < deadline or iterations == 0:
+    while (
+        (target_iterations > 0 and iterations < target_iterations)
+        or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
+    ):
         forward = compute_reach_probabilities(
             tree.tree,
             store,
@@ -288,7 +292,9 @@ def resolve_postflop_hu(
             strategy_weight=root_ranges[1].total_weight(),
         )
         iterations += 1
-        if spec.time_budget_sec <= 0.0:
+        if target_iterations > 0 and iterations >= target_iterations:
+            break
+        if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
     final_backward = compute_counterfactual_values(
@@ -312,7 +318,6 @@ def resolve_postflop_hu(
             ),
         )
 
-    root_strategy = store.average_strategy(0)
     root_action_ev_player0 = np.asarray(
         final_backward.infoset_action_values.get(
             root_infoset_id, np.zeros(0, dtype=np.float32)
@@ -325,6 +330,7 @@ def resolve_postflop_hu(
         bb_scale = 1.0
     root_action_ev_player0 = np.asarray(root_action_ev_player0 / bb_scale, dtype=np.float32)
     root_action_ev_player1 = np.asarray(root_action_ev_player1 / bb_scale, dtype=np.float32)
+    root_strategy = np.asarray(store.average_strategy(root_infoset_id), dtype=np.float32)
     root_ev_player0 = _summarize_root_ev(root_strategy, root_action_ev_player0)
     root_ev_player1 = -root_ev_player0
     return PostflopResolveResult(
@@ -387,7 +393,7 @@ def resolve_postflop_multi(
         return MultiwayPostflopResolveResult(
             root_infoset_id=root_infoset_id,
             root_actions=root_actions,
-            root_strategy=hu.root_strategy,
+            root_strategy=np.asarray(hu.root_strategy, dtype=np.float32),
             root_ev=np.asarray(
                 [hu.root_ev_player0, hu.root_ev_player1], dtype=np.float32
             ),
@@ -468,7 +474,7 @@ def resolve_postflop_multi(
     return MultiwayPostflopResolveResult(
         root_infoset_id=root_infoset_id,
         root_actions=root_actions,
-        root_strategy=store.average_strategy(root_infoset_id),
+        root_strategy=np.asarray(store.average_strategy(root_infoset_id), dtype=np.float32),
         root_ev=root_ev,
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
