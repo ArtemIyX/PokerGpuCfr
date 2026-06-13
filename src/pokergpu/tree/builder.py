@@ -6,17 +6,25 @@ from dataclasses import dataclass
 from pokergpu.abstraction.actions import ActionAbstraction, BaselineActionAbstraction
 from pokergpu.core.actions import Action
 from pokergpu.core.betting import Chips
-from pokergpu.core.canonical import canonical_board_key
+from pokergpu.core.canonical import canonical_board_key, canonicalize_board
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.core.transitions import apply_action
 
-from .public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
+from .public_tree import (
+    ChildLink,
+    InfosetId,
+    NodeId,
+    NodeType,
+    PublicTree,
+    PublicTreeTemplate,
+)
 
 
 @dataclass(slots=True, frozen=True)
 class BuiltPublicTree:
     tree: PublicTree
+    template: PublicTreeTemplate
     node_states: tuple[GameState, ...]
     actions_by_node: tuple[tuple[Action, ...], ...]
     action_abstraction_id: str
@@ -52,6 +60,8 @@ def build_public_tree(
 ) -> BuiltPublicTree:
     abstraction_impl = abstraction or BaselineActionAbstraction()
     build_config = config or TreeBuildConfig()
+    canonicalization = canonicalize_board(state.board)
+    canonical_board = canonicalization.board
 
     node_types: list[NodeType] = [
         _node_type_for_state(state, depth=0, max_depth=build_config.max_depth)
@@ -131,12 +141,30 @@ def build_public_tree(
         infoset_ids=tuple(infoset_ids),
         terminal_payoffs=tuple(terminal_payoffs),
     )
+    template = PublicTreeTemplate(
+        node_types=tuple(node_types),
+        is_frontier=tuple(is_frontier),
+        first_child=tuple(first_child),
+        child_count=tuple(child_count),
+        infoset_ids=tuple(infoset_ids),
+        terminal_payoffs=tuple(terminal_payoffs),
+        depth=tuple(_node_depths(tree)),
+        street=tuple(node_state.current_street.value for node_state in node_states),
+        canonical_board_key=canonical_board_key(canonical_board),
+        action_abstraction_id=abstraction_impl.abstraction_id(state),
+        tree_key=_tree_cache_key(
+            state=state,
+            abstraction_id=abstraction_impl.abstraction_id(state),
+            config=build_config,
+        ),
+    )
     return BuiltPublicTree(
         tree=tree,
+        template=template,
         node_states=tuple(node_states),
         actions_by_node=tuple(actions_by_node),
         action_abstraction_id=abstraction_impl.abstraction_id(state),
-        canonical_board_key=canonical_board_key(state.board),
+        canonical_board_key=canonical_board_key(canonical_board),
         player_count=state.player_count,
         active_players=tuple(int(player.player) for player in state.active_players),
     )
@@ -207,3 +235,36 @@ def _node_type_for_player(player: int) -> NodeType:
     if player == 5:
         return NodeType.PLAYER5
     raise ValueError("unsupported player seat")
+
+
+def _node_depths(tree: PublicTree) -> tuple[int, ...]:
+    depths = [0 for _ in range(tree.node_count)]
+    for node_index in range(tree.node_count):
+        start = tree.first_child[node_index]
+        count = tree.child_count[node_index]
+        for child_offset in range(count):
+            child_index = int(tree.children[start + child_offset].child)
+            depths[child_index] = depths[node_index] + 1
+    return tuple(depths)
+
+
+def _tree_cache_key(
+    *,
+    state: GameState,
+    abstraction_id: str,
+    config: TreeBuildConfig,
+) -> str:
+    stacks = ",".join(str(int(stack.stack)) for stack in state.betting_round.stacks)
+    return "|".join(
+        (
+            state.current_street.value,
+            canonical_board_key(state.board),
+            str(int(state.betting_round.pot.amount)),
+            stacks,
+            str(int(state.betting_round.to_act)),
+            abstraction_id,
+            str(config.max_depth),
+            str(config.max_nodes),
+            f"{config.min_reach_prob:.8f}",
+        )
+    )

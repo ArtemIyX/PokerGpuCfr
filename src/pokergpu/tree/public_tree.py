@@ -123,3 +123,33 @@ class PublicTree:
         start = self.first_child[node]
         count = self.child_count[node]
         return self.children[start : start + count]
+
+
+@dataclass(slots=True, frozen=True)
+class PublicTreeTemplate:
+    node_types: tuple[NodeType, ...]
+    is_frontier: tuple[bool, ...]
+    first_child: tuple[int, ...]
+    child_count: tuple[int, ...]
+    infoset_ids: tuple[InfosetId | None, ...]
+    terminal_payoffs: tuple[Chips | None, ...]
+    depth: tuple[int, ...]
+    street: tuple[str, ...]
+    canonical_board_key: str
+    action_abstraction_id: str
+    tree_key: str
+
+    @property
+    def node_count(self) -> int:
+        return len(self.node_types)
+
+    def as_public_tree(self, children: tuple[ChildLink, ...]) -> PublicTree:
+        return PublicTree(
+            node_types=self.node_types,
+            is_frontier=self.is_frontier,
+            first_child=self.first_child,
+            child_count=self.child_count,
+            children=children,
+            infoset_ids=self.infoset_ids,
+            terminal_payoffs=self.terminal_payoffs,
+        )

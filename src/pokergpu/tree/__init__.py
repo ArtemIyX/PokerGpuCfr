@@ -1,4 +1,11 @@
-from .public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
+from .public_tree import (
+    ChildLink,
+    InfosetId,
+    NodeId,
+    NodeType,
+    PublicTree,
+    PublicTreeTemplate,
+)
 
 __all__ = [
     "ChildLink",
@@ -6,4 +13,5 @@ __all__ = [
     "NodeId",
     "NodeType",
     "PublicTree",
+    "PublicTreeTemplate",
 ]

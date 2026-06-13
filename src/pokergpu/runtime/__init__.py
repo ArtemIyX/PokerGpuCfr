@@ -11,6 +11,7 @@ from .cache import entropy_from_probs as entropy_from_probs
 from .cache import stable_hash as stable_hash
 from .caching import CacheHitMiss as CacheHitMiss
 from .caching import PublicStateFingerprint as PublicStateFingerprint
+from .caching import TreeTemplateKey as TreeTemplateKey
 from .caching import SolveCacheState as SolveCacheState
 from .caching import blend_regret as blend_regret
 from .caching import build_benchmark as build_benchmark
@@ -55,6 +56,7 @@ __all__ = [
     "PostflopRuntimeValueNetworkEvaluator",
     "PublicStateFingerprint",
     "PublicStateKey",
+    "TreeTemplateKey",
     "SolveBenchmark",
     "SolveCacheState",
     "WarmStartState",

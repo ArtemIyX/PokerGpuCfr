@@ -16,6 +16,28 @@ from .cache import (
 
 
 @dataclass(frozen=True, slots=True)
+class TreeTemplateKey:
+    street: str
+    canonical_board: str
+    pot: int
+    stacks: tuple[int, ...]
+    to_act: int
+    action_abstraction_id: str
+
+    def digest(self) -> str:
+        return "|".join(
+            (
+                self.street,
+                self.canonical_board,
+                str(self.pot),
+                ",".join(str(stack) for stack in self.stacks),
+                str(self.to_act),
+                self.action_abstraction_id,
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PublicStateFingerprint:
     variant: str
     street: str
@@ -60,6 +82,16 @@ class PublicStateFingerprint:
 
     def digest(self) -> str:
         return self.key().digest()
+
+    def tree_template_key(self) -> TreeTemplateKey:
+        return TreeTemplateKey(
+            street=self.street,
+            canonical_board=self.canonical_board,
+            pot=self.pot,
+            stacks=self.stacks,
+            to_act=self.acting_player,
+            action_abstraction_id=self.action_abstraction_id,
+        )
 
 
 @dataclass(slots=True)
