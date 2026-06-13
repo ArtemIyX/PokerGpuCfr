@@ -439,6 +439,11 @@ def _run_gpu_solve(
     )
     root_action_ev_p1 = -root_action_ev_p0
     root_strategy = np.asarray(root_strategy, dtype=np.float32)
+    bb_scale = float(spec.state.betting_round.blinds.big_blind)
+    if bb_scale <= 0.0:
+        bb_scale = 1.0
+    root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
+    root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
     root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
     root_ev_p1 = -root_ev_p0
     return GpuSolveTrace(
