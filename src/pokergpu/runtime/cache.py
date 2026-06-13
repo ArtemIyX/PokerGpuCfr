@@ -5,6 +5,11 @@ from dataclasses import dataclass, field
 from hashlib import blake2b
 from typing import Any
 
+try:
+    import torch
+except Exception:  # pragma: no cover
+    torch = Any  # type: ignore[assignment]
+
 
 def _stable_bytes(value: Any) -> bytes:
     if value is None:
@@ -172,6 +177,42 @@ class CachedLeafResult:
 
 
 @dataclass(slots=True)
+class PackedGpuSubtree:
+    spot_key: str
+    node_type: Any
+    is_frontier: Any
+    first_child: Any
+    child_count: Any
+    children: Any
+    infoset_ids: Any
+    terminal_payoffs: Any
+    node_depth: Any
+    street: Any
+    action_slot: Any
+    chance_prob: Any
+    frontier_nodes: Any
+    root_node: int = 0
+    root_infoset: int = -1
+    node_count: int = 0
+    edge_count: int = 0
+    infoset_count: int = 0
+    leaf_count: int = 0
+    max_actions: int = 0
+    device: str = "cpu"
+    tree_version: str = "1"
+
+    def __post_init__(self) -> None:
+        if self.node_count < 0 or self.edge_count < 0 or self.infoset_count < 0:
+            raise ValueError("packed subtree counts must be non-negative")
+        if self.leaf_count < 0 or self.max_actions < 0:
+            raise ValueError("packed subtree sizes must be non-negative")
+        if self.root_node < 0:
+            raise ValueError("root node must be non-negative")
+        if self.node_count and self.root_node >= self.node_count:
+            raise ValueError("root node must be within node range")
+
+
+@dataclass(slots=True)
 class WarmStartState:
     regret: tuple[float, ...]
     strategy_sum: tuple[float, ...] = ()
@@ -181,6 +222,9 @@ class WarmStartState:
 @dataclass(slots=True)
 class CacheBundle:
     tree: LruCache[CachedTree] = field(
+        default_factory=lambda: LruCache(max_entries=64)
+    )
+    packed_subtree: LruCache[PackedGpuSubtree] = field(
         default_factory=lambda: LruCache(max_entries=64)
     )
     leaf: LruCache[CachedLeafResult] = field(

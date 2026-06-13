@@ -2,11 +2,13 @@ from .cache import CacheBundle as CacheBundle
 from .cache import CachedLeafResult as CachedLeafResult
 from .cache import CachedTree as CachedTree
 from .cache import LruCache as LruCache
+from .cache import PackedGpuSubtree as PackedGpuSubtree
 from .cache import PublicStateKey as PublicStateKey
 from .cache import SolveBenchmark as SolveBenchmark
 from .cache import WarmStartState as WarmStartState
 from .cache import entropy_from_probs as entropy_from_probs
 from .cache import stable_hash as stable_hash
+from .gpu_compile import compile_packed_subtree as compile_packed_subtree
 from .caching import CacheHitMiss as CacheHitMiss
 from .caching import PublicStateFingerprint as PublicStateFingerprint
 from .caching import SolveCacheState as SolveCacheState
@@ -40,6 +42,7 @@ __all__ = [
     "CachedLeafResult",
     "CachedTree",
     "LruCache",
+    "PackedGpuSubtree",
     "PostflopResolveResult",
     "PostflopResolveSpec",
     "POSTFLOP_SOLVER_DEFAULT_SEED",
@@ -53,6 +56,7 @@ __all__ = [
     "WarmStartState",
     "blend_regret",
     "build_benchmark",
+    "compile_packed_subtree",
     "entropy_from_probs",
     "make_leaf_key",
     "make_warm_start_state",
