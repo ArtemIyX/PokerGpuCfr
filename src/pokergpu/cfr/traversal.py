@@ -15,7 +15,14 @@ from .infosets import InfosetStore
 
 
 def _is_player_node(node_type: NodeType) -> bool:
-    return node_type in {NodeType.PLAYER0, NodeType.PLAYER1, NodeType.PLAYER2}
+    return node_type in {
+        NodeType.PLAYER0,
+        NodeType.PLAYER1,
+        NodeType.PLAYER2,
+        NodeType.PLAYER3,
+        NodeType.PLAYER4,
+        NodeType.PLAYER5,
+    }
 
 
 def _player_index_for_node_type(node_type: NodeType) -> int | None:
@@ -25,11 +32,27 @@ def _player_index_for_node_type(node_type: NodeType) -> int | None:
         return 1
     if node_type is NodeType.PLAYER2:
         return 2
+    if node_type is NodeType.PLAYER3:
+        return 3
+    if node_type is NodeType.PLAYER4:
+        return 4
+    if node_type is NodeType.PLAYER5:
+        return 5
     return None
+
+
+def _tree_player_count(tree: PublicTree) -> int:
+    max_player = -1
+    for node_type in tree.node_types:
+        player_index = _player_index_for_node_type(node_type)
+        if player_index is not None:
+            max_player = max(max_player, player_index)
+    return max_player + 1 if max_player >= 0 else 0
 
 
 @dataclass(frozen=True, slots=True)
 class ForwardPassResult:
+    reach_by_player: NDArray[np.float32]
     player0_reach: NDArray[np.float32]
     player1_reach: NDArray[np.float32]
     player2_reach: NDArray[np.float32] | None = None
@@ -37,6 +60,7 @@ class ForwardPassResult:
 
 @dataclass(frozen=True, slots=True)
 class BackwardPassResult:
+    node_values_by_player: NDArray[np.float32]
     node_values_player0: NDArray[np.float32]
     node_values_player1: NDArray[np.float32]
     node_values_player2: NDArray[np.float32] | None = None
@@ -44,16 +68,7 @@ class BackwardPassResult:
 
     @property
     def node_values(self) -> NDArray[np.float32]:
-        return np.stack(
-            (
-                self.node_values_player0,
-                self.node_values_player1,
-                self.node_values_player2
-                if self.node_values_player2 is not None
-                else np.zeros_like(self.node_values_player0),
-            ),
-            axis=0,
-        )
+        return self.node_values_by_player
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +211,7 @@ def compute_reach_probabilities(
     root_player2_reach: float = 1.0,
     min_reach_prob: float = 0.0,
 ) -> ForwardPassResult:
+    player_count = _tree_player_count(tree)
     player0_reach = np.zeros(tree.node_count, dtype=np.float32)
     player1_reach = np.zeros(tree.node_count, dtype=np.float32)
     player2_reach = np.zeros(tree.node_count, dtype=np.float32)
@@ -250,6 +266,10 @@ def compute_reach_probabilities(
                 player2_reach[child_index] += player2_reach[node_index]
 
     return ForwardPassResult(
+        reach_by_player=np.stack(
+            (player0_reach, player1_reach, player2_reach),
+            axis=0,
+        ),
         player0_reach=player0_reach,
         player1_reach=player1_reach,
         player2_reach=player2_reach,
@@ -281,6 +301,7 @@ def compute_reach_probabilities_parallel(
     levels = build_tree_levels(tree)
     player0_reach = np.zeros(tree.node_count, dtype=np.float32)
     player1_reach = np.zeros(tree.node_count, dtype=np.float32)
+    player2_reach = np.zeros(tree.node_count, dtype=np.float32)
     player0_reach[0] = np.float32(root_player0_reach)
     player1_reach[0] = np.float32(root_player1_reach)
 
@@ -311,6 +332,8 @@ def compute_reach_probabilities_parallel(
     return ForwardPassResult(
         player0_reach=player0_reach,
         player1_reach=player1_reach,
+        player2_reach=player2_reach,
+        reach_by_player=np.stack((player0_reach, player1_reach, player2_reach), axis=0),
     )
 
 
@@ -326,6 +349,7 @@ def compute_counterfactual_values(
     terminal_values_player0: NDArray[np.float32] | None = None,
     evaluator: LeafEvaluator | None = None,
 ) -> BackwardPassResult:
+    player_count = _tree_player_count(tree)
     node_values_player0 = np.zeros(tree.node_count, dtype=np.float32)
     node_values_player1 = np.zeros(tree.node_count, dtype=np.float32)
     node_values_player2 = np.zeros(tree.node_count, dtype=np.float32)
@@ -451,6 +475,10 @@ def compute_counterfactual_values(
             )
 
     return BackwardPassResult(
+        node_values_by_player=np.stack(
+            (node_values_player0, node_values_player1, node_values_player2),
+            axis=0,
+        ),
         node_values_player0=node_values_player0,
         node_values_player1=node_values_player1,
         node_values_player2=node_values_player2,
@@ -549,6 +577,19 @@ def compute_counterfactual_values_parallel(
             )
 
     return BackwardPassResult(
+        node_values_by_player=np.stack(
+            tuple(
+                node_values_player0
+                if index == 0
+                else node_values_player1
+                if index == 1
+                else node_values_player2
+                if node_values_player2 is not None
+                else np.zeros_like(node_values_player0)
+                for index in range(3)
+            ),
+            axis=0,
+        ),
         node_values_player0=node_values_player0,
         node_values_player1=node_values_player1,
         node_values_player2=node_values_player2,
@@ -565,7 +606,7 @@ def update_regrets_from_traversal(
     strategy_weight: float = 1.0,
 ) -> RegretUpdateResult:
     if active_player not in {0, 1, 2}:
-        raise ValueError("active_player must be 0, 1, or 2")
+        raise ValueError("active_player must be between 0 and 5")
 
     infoset_values = np.zeros(store.layout.infoset_count, dtype=np.float32)
     updated_infosets: list[int] = []
@@ -675,7 +716,7 @@ def update_regrets_from_traversal_parallel(
 
 def _active_infoset_indices(tree: PublicTree, active_player: int) -> tuple[int, ...]:
     if active_player not in {0, 1}:
-        raise ValueError("active_player must be 0 or 1")
+        raise ValueError("active_player must be between 0 and 5")
 
     infoset_indices: list[int] = []
     for node_index, infoset_id in enumerate(tree.infoset_ids):
@@ -687,6 +728,12 @@ def _active_infoset_indices(tree: PublicTree, active_player: int) -> tuple[int, 
         if active_player == 1 and node_type is not NodeType.PLAYER1:
             continue
         if active_player == 2 and node_type is not NodeType.PLAYER2:
+            continue
+        if active_player == 3 and node_type is not NodeType.PLAYER3:
+            continue
+        if active_player == 4 and node_type is not NodeType.PLAYER4:
+            continue
+        if active_player == 5 and node_type is not NodeType.PLAYER5:
             continue
         infoset_indices.append(int(infoset_id))
     return tuple(infoset_indices)

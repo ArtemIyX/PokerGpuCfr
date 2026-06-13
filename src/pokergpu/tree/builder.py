@@ -164,7 +164,15 @@ def _infoset_id_for_state(
     node_type: NodeType,
 ) -> InfosetId | None:
     if (
-        node_type in {NodeType.PLAYER0, NodeType.PLAYER1, NodeType.PLAYER2}
+        node_type
+        in {
+            NodeType.PLAYER0,
+            NodeType.PLAYER1,
+            NodeType.PLAYER2,
+            NodeType.PLAYER3,
+            NodeType.PLAYER4,
+            NodeType.PLAYER5,
+        }
         and state.phase is HandPhase.IN_PROGRESS
     ):
         return InfosetId(node_index)
@@ -192,4 +200,10 @@ def _node_type_for_player(player: int) -> NodeType:
         return NodeType.PLAYER1
     if player == 2:
         return NodeType.PLAYER2
+    if player == 3:
+        return NodeType.PLAYER3
+    if player == 4:
+        return NodeType.PLAYER4
+    if player == 5:
+        return NodeType.PLAYER5
     raise ValueError("unsupported player seat")

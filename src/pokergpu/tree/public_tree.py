@@ -14,6 +14,9 @@ class NodeType(StrEnum):
     PLAYER0 = "player0"
     PLAYER1 = "player1"
     PLAYER2 = "player2"
+    PLAYER3 = "player3"
+    PLAYER4 = "player4"
+    PLAYER5 = "player5"
     CHANCE = "chance"
     TERMINAL = "terminal"
     LEAF = "leaf"
@@ -60,7 +63,14 @@ class PublicTree:
             infoset_id = self.infoset_ids[node_index]
             payoff = self.terminal_payoffs[node_index]
 
-            if node_type in {NodeType.PLAYER0, NodeType.PLAYER1, NodeType.PLAYER2}:
+            if node_type in {
+                NodeType.PLAYER0,
+                NodeType.PLAYER1,
+                NodeType.PLAYER2,
+                NodeType.PLAYER3,
+                NodeType.PLAYER4,
+                NodeType.PLAYER5,
+            }:
                 if infoset_id is None:
                     raise ValueError("player nodes must have infoset ids")
                 if payoff is not None:

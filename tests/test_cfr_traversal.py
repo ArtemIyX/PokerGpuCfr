@@ -71,6 +71,13 @@ def test_regret_update_writes_flat_store_in_place() -> None:
     tree = _make_simple_tree()
     store = InfosetStore.zeros(InfosetLayout.from_action_counts([2]))
     backward = BackwardPassResult(
+        node_values_by_player=np.stack(
+            (
+                np.zeros(3, dtype=np.float32),
+                np.zeros(3, dtype=np.float32),
+            ),
+            axis=0,
+        ),
         node_values_player0=np.zeros(3, dtype=np.float32),
         node_values_player1=np.zeros(3, dtype=np.float32),
         infoset_action_values={0: np.array([3.0, -1.0], dtype=np.float32)},

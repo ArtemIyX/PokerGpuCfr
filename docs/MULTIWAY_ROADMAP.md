@@ -26,36 +26,36 @@ It is a staged roadmap for usable approximation.
 
 Goal: make the current HU postflop code ready for extension.
 
-- [ ] Identify all hardcoded 2-player assumptions.
-- [ ] List all data structures that assume one opponent.
-- [ ] Confirm tree builder supports variable player count.
-- [ ] Confirm evaluator API can return values for multiple active players.
-- [ ] Confirm runtime resolver can carry multiple range vectors.
-- [ ] Confirm tests cover HU postflop end to end.
+- [x] Identify all hardcoded 2-player assumptions.
+- [x] List all data structures that assume one opponent.
+- [x] Confirm tree builder supports variable player count.
+- [x] Confirm evaluator API can return values for multiple active players.
+- [x] Confirm runtime resolver can carry multiple range vectors.
+- [x] Confirm tests cover HU postflop end to end.
 
 Done when:
 
 - [ ] all 2-player assumptions are isolated
-- [ ] the extension points are explicit
+- [x] the extension points are explicit
 - [ ] HU behavior still matches current output
 
 ## Phase 1: Core Multiway Data Model
 
 Goal: make the solver data structures player-count aware.
 
-- [ ] Replace single-opponent reach/value logic with per-player arrays.
-- [ ] Represent active players as a compact list in each node.
-- [ ] Store one range vector per active player.
-- [ ] Store one counterfactual value vector per active player.
-- [ ] Keep flat arrays, not pointer graphs.
-- [ ] Update terminal payoff handling for `N` players.
+- [x] Replace single-opponent reach/value logic with per-player arrays.
+- [x] Represent active players as a compact list in each node.
+- [x] Store one range vector per active player.
+- [x] Store one counterfactual value vector per active player.
+- [x] Keep flat arrays, not pointer graphs.
+- [x] Update terminal payoff handling for `N` players.
 - [ ] Update card removal for every active player.
 
 Done when:
 
-- [ ] a public tree can be built for 2, 3, 4, 5, and 6 active players
-- [ ] a leaf evaluation call can return `N` values
-- [ ] ranges stay normalized after board changes
+- [x] a public tree can be built for 2, 3, 4, 5, and 6 active players
+- [x] a leaf evaluation call can return `N` values
+- [x] ranges stay normalized after board changes
 
 ## Phase 2: 3-Player Postflop
 
