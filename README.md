@@ -68,6 +68,41 @@ This repo is a practical implementation path toward a fast CFR-based poker solve
 
 The current codebase is planned as a Python project with a clear progression from simple, testable poker logic to larger CFR systems and GPU-backed evaluation.
 
+## Current benchmark snapshot
+
+Benchmark target: `scripts/benchmark_postflop.py`
+
+Observed on the current setup:
+
+| Device | Depth | Nodes | Batch | Spots/sec |
+|---|---:|---:|---:|---:|
+| CPU | 2 | 128 | - | 151.650 |
+| CPU | 2 | 512 | - | 148.701 |
+| CPU | 3 | 128 | - | 30.271 |
+| CPU | 3 | 512 | - | 29.354 |
+| CPU | 5 | 128 | - | 60.995 |
+| CPU | 5 | 512 | - | 4.494 |
+| CUDA | 2 | 512 | 512 | 86.151 |
+| CUDA | 2 | 512 | 4096 | 738.167 |
+| CUDA | 2 | 512 | 16384 | 3057.496 |
+| CUDA | 2 | 512 | 32768 | 6426.016 |
+| CUDA | 2 | 512 | 65536 | 11953.981 |
+| CUDA | 2 | 1024 | 512 | 91.828 |
+| CUDA | 2 | 1024 | 4096 | 763.855 |
+| CUDA | 2 | 1024 | 16384 | 3122.830 |
+| CUDA | 2 | 1024 | 32768 | 6474.621 |
+| CUDA | 2 | 1024 | 65536 | 12062.880 |
+| CUDA | 3 | 512 | 512 | 26.238 |
+| CUDA | 3 | 512 | 4096 | 203.675 |
+| CUDA | 3 | 512 | 16384 | 837.981 |
+| CUDA | 3 | 512 | 32768 | 1648.636 |
+
+Practical batch choice:
+
+- default: `32768`
+- test range: `16384` to `65536`
+- use `4096` only for latency-sensitive paths or small VRAM
+
 ## Why GPU acceleration matters
 
 CFR repeatedly traverses a game tree, computes counterfactual values, updates regrets, derives strategies through regret matching, and accumulates average strategies. The expensive parts are repeated tree evaluation and regret updates.

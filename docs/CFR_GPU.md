@@ -257,7 +257,7 @@ CPU orchestrates tree traversal (sampling). GPU accelerates:
 
 GPU work in MCCFR is strictly: leaf node EV inference via VNet, batched across many trajectories. Nothing else in the MCCFR inner loop belongs on the GPU.
 
-Parallelism: run many independent MCCFR trajectories in parallel CPU threads. Collect leaf eval requests, dispatch to GPU in batches of 4096+. See §5.8 for thread safety on shared regret tables.
+Parallelism: run many independent MCCFR trajectories in parallel CPU threads. Collect leaf eval requests, dispatch to GPU in batches of 16384 to 65536. Current benchmark data shows the best throughput around 32768 to 65536. See §5.8 for thread safety on shared regret tables.
 
 ### 5.4 Strategy B — Matrix-Op CFR (Maximum GPU Throughput)
 
@@ -300,6 +300,12 @@ S += t_weight * regret_matching_cuda(R, infoset_offsets)
 - Regret table: `num_infosets * max_actions * 4 bytes`
 - Reach/value arrays: `num_nodes * num_buckets * 4 bytes`
 - If this exceeds VRAM, fall back to MCCFR + GPU eval (Strategy A)
+
+**Practical benchmark note:**
+- `depth=2` is the best throughput baseline for solver plumbing and batch tuning.
+- `depth=3` is the first useful stress test for real solve cost.
+- `depth=5` is a good "actually hard" depth for CPU-only checks, but it becomes expensive quickly.
+- For batch tuning, `16384` is the first strong GPU batch size, `32768` is a good default, and `65536` was the fastest measured batch in the current benchmark.
 
 
 ### 5.6 Exploitability Estimation via Sampled Best Response
