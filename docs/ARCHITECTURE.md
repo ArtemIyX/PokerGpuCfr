@@ -1,136 +1,144 @@
-# PokerGPU Architecture Overview
+# PokerGPU Architecture
 
-This document provides a high-level architectural guide for the GPU-Accelerated Counterfactual Regret Minimization (CFR) Poker Solver project, designed to help new contributors understand the codebase structure and core concepts.
+This repository is a Python poker solver research project with four main layers:
 
-## 🎯 Project Goal
-The primary objective is to build a scalable framework for solving poker game states using CFR algorithms, with a long-term focus on leveraging GPU acceleration for performance-critical tasks like leaf evaluation. The system focuses on *abstraction* (e.g., fixed bet sizes, limited depth) rather than solving full, complex games exactly.
+1. `core` for game rules and state.
+2. `abstraction` for hand and action compression.
+3. `cfr` and `tree` for solving logic.
+4. `eval`, `runtime`, and `value_network` for batched leaf evaluation and re-solving.
 
-## 📁 Core Packages Structure
-The codebase is organized into several specialized modules:
+## Entry points
 
-### `src/pokergpu/` (Main Package Entry Point)
-*   **`app.py`**: Initializes the application environment (`create_app`). It loads settings and sets up logging.
-    *   *Usage:* The main initialization point for the solver logic.
-*   **`config.py`**: Handles configuration loading using `Settings` dataclass, reading from environment variables (e.g., `POKERGPU_LOG_LEVEL`, `POKERGPU_DEVICE`, depth and pruning limits).
-*   **`logging_utils.py`**: Provides standardized logging configuration (`configure_logging`).
-*   **`__init__.py`**: Exposes the primary application factory function: `create_app`.
+- `src/pokergpu/__main__.py`: module entry point.
+- `src/pokergpu/app.py`: creates the app settings and configures logging.
+- `src/pokergpu/benchmarks.py`: benchmark helper.
+- `scripts/benchmark_postflop.py`: postflop throughput benchmark.
+- `scripts/random_postflop_solve.py`: spot sampling and solve runner.
 
-### `src/pokergpu/core/` (Game Rules and State Management)
-This package contains the fundamental game mechanics, independent of solver logic.
-*   **`cards.py`**: Defines the core representation for poker cards (`Card`, `Suit`, `Rank`). Provides utility functions to create decks, shuffle, and format card strings.
-    *   *Key Classes:* `Card`.
-*   **`state.py`**: Manages the entire game state across a single hand. It is the central data structure linking all components.
-    *   *Key Classes:* `GameState`, `PlayerState`.
-    *   *Functionality:* Tracks board cards, player hole cards, folding status, and betting round progression. Ensures card uniqueness and structural integrity.
-*   **`betting.py`**: Manages the monetary aspects of the game (chips, pots, etc.).
-*   **`board.py`**: Models the community cards (`Board`) and tracks the current betting street (e.g., Flop, Turn, River).
-*   **`rules.py`, `payouts.py`, `legality.py`, `transitions.py`**: Enforce game rules: calculating payouts, checking action legality given a state, defining valid transitions between states, and enforcing the betting structure.
+## Package layout
 
-### `src/pokergpu/abstraction/` (Game Simplification)
-This package abstracts complex poker reality into solvable formats for CFR.
-*   **`hands.py`**: Handles the representation of hand strengths (e.g., 5-card, 7-card).
-*   **`buckets.py`**: Implements card or range bucketing techniques to reduce game complexity while maintaining accuracy approximation.
-*   **`actions.py`**: Defines and manages action space abstraction (e.g., standard bet sizes rather than continuous betting ranges).
+### `src/pokergpu/core/`
+Game mechanics and state.
 
-### `src/pokergpu/tree/` (Search Structure)
-Responsible for mapping the sequence of decisions into a searchable graph structure.
-*   **`public_tree.py`**: Implements the representation of the game tree used during solving, linking states and actions together (`NodeId`, `InfosetId`).
-*   **`builder.py`**: Builds depth-limited public trees and marks frontier nodes for evaluation.
+- `cards.py`: cards and deck helpers.
+- `board.py`: board representation.
+- `betting.py`: pot, stacks, blinds, and betting round state.
+- `actions.py`: legal action model.
+- `state.py`: full game state.
+- `rules.py`: game rules.
+- `legality.py`: action legality checks.
+- `transitions.py`: state transitions.
+- `terminal.py`: terminal detection.
+- `payouts.py`: showdown and payout logic.
+- `canonical.py`: canonicalization helpers.
+- `signatures.py`: state or hand signature helpers.
 
-### `src/pokergpu/eval/` (Leaf Evaluation)
-Handles batched leaf-value evaluation for frontier nodes.
-*   **`types.py`**: Defines leaf feature and value batch containers.
-*   **`cpu_stub.py`**: Deterministic CPU evaluator used for local development and parity checks.
-*   **`gpu_stub.py`**: CUDA-backed evaluator stub using PyTorch.
-*   **`device.py`**: Resolves CPU or CUDA execution mode.
-*   **`tensor_builder.py`**: Converts leaf batches into device tensors.
-*   **`async_exec.py`**: Async-ready wrapper for overlapped batch execution.
-*   **`benchmark.py`**: Measures leaf batch throughput.
+### `src/pokergpu/abstraction/`
+Game simplification.
 
-### `src/pokergpu/runtime/` (Runtime Reuse and Warm Start)
-Provides reusable runtime solve state for repeated spots.
-*   **`cache.py`**: Stable public-state keys, LRU cache containers, cached tree/leaf/warm-start data, and benchmark result structs.
-*   **`caching.py`**: Higher-level cache helpers, regret blending, benchmark builder, and leaf key helpers.
-*   **`postflop.py`**: Runtime postflop re-solving entry point.
+- `hands.py`: hand range and hand abstractions.
+- `buckets.py`: bucketing utilities.
+- `actions.py`: action abstraction helpers.
 
-### `src/pokergpu/benchmarks/` (Performance Checks)
-Contains standalone benchmark entrypoints.
-*   **`caching_warm_start.py`**: Deterministic cache and warm-start benchmark with printed output.
+### `src/pokergpu/tree/`
+Public tree representation.
 
-## 🔄 Data Flow: Solver Lifecycle
-The typical solve process follows this flow:
+- `public_tree.py`: tree node and infoset structures.
+- `builder.py`: builds depth-limited public trees.
 
-1.  **Setup/Configuration (`cli.py`):** The command line interface calls the system, loading settings and defining the target game (e.g., Kuhn Poker, Leduc Poker).
-2.  **State Initialization:** A starting `GameState` is created using the rules defined in `core/`.
-3.  **Tree Traversal (CFR Loop):** The solver traverses the public tree structure (`tree/public_tree.py`) based on current probabilities and action legality checks from `core/rules.py`.
-4.  **Leaf Evaluation:** When a leaf node (terminal state or depth limit) is reached, the system must determine the expected value. This uses:
-    *   `tree/builder.py` frontier flags to mark nodes that need evaluation.
-    *   `eval/` batch builders and evaluator backends.
-    *   CPU or CUDA execution depending on device selection.
-5.  **Cache Lookup and Warm Start:** Before building or solving, the runtime checks `runtime/cache.py` and `runtime/caching.py` for:
-    *   public-state key hits
-    *   subtree structure reuse
-    *   reusable leaf results
-    *   regret warm-start state
-6.  **Backpropagation & Update:** The calculated values are back-propagated up the tree to update regrets and average strategies, following standard CFR algorithms implemented in `cli.py` and runtime re-solving code.
+### `src/pokergpu/cfr/`
+Solver logic for toy and abstracted games.
 
-## ✨ Novice Getting Started Guide
+- `infosets.py`: infoset bookkeeping.
+- `iteration.py`: CFR iteration helpers.
+- `traversal.py`: tree traversal.
+- `mccfr.py`: sampling-based CFR.
+- `kuhn.py`: Kuhn poker solver.
+- `leduc.py`: Leduc poker solver.
+- `toy_mccfr.py`: toy MCCFR experiments.
+- `compare.py`: strategy or solver comparison tools.
 
-### 1. Prerequisites
-*   Python 3.10+
-*   Required dependencies: Check `requirements.txt`. Key libraries include `numpy`, `scipy`, `numba`, `torch` (for GPU path), and `treys`.
+### `src/pokergpu/eval/`
+Leaf evaluation and batching.
 
-### 2. Setup & Environment
-```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\Activate.ps1 on Windows
-pip install -r requirements.txt
-```
-*Note: The project uses a modular structure; ensure all dependencies listed in `requirements.txt` are installed.*
+- `interface.py`: evaluator interface.
+- `backend.py`: backend selection.
+- `types.py`: batch and value types.
+- `cpu_stub.py`: CPU reference evaluator.
+- `gpu_stub.py`: CUDA stub evaluator.
+- `treys_evaluator.py`: hand strength evaluation.
+- `tensor_builder.py`: tensor conversion helpers.
+- `async_exec.py`: async batch execution wrapper.
+- `benchmark.py`: evaluator throughput benchmark.
+- `device.py`: device resolution.
 
-### 3. Running Initial Tests (Recommended)
-The system relies heavily on testing. Start by running the built-in test suite to confirm component isolation and correctness.
-```bash
-pytest
-```
-*Self-correction: If a specific feature is being worked on, e.g., Leduc Poker, use `pytest tests/test_leduc.py`.*
+### `src/pokergpu/runtime/`
+Runtime solve orchestration.
 
-### 4. Running Solver Benchmarks (Quick Test)
-To run a basic performance benchmark of the current solver iteration:
-```bash
-python src/pokergpu/cli.py benchmark
-# Output format example: benchmark=noop iterations=1000 seconds=X.XXXXXX per_iter=Y.YYYYYY
-```
+- `postflop.py`: postflop resolving entry point.
+- `gpu_postflop.py`: GPU-backed postflop execution.
+- `gpu_compile.py`: GPU compilation helpers.
+- `cache.py`: cached state and benchmark data.
+- `caching.py`: cache and warm-start helpers.
+- `value_network.py`: runtime value-network integration.
 
-For caching and warm-start reuse:
-```bash
-python -m pokergpu.benchmark_caching
-```
-This prints cache hit/miss counts, cold vs warm timing, and a benchmark summary row.
+### `src/pokergpu/value_network/`
+Value-network training and inference support.
 
-For leaf-evaluation comparisons:
-```bash
-pytest --run-benchmarks -s tests/test_leaf_evaluation_benchmark.py
-```
-This prints CPU single-thread, CPU multi-thread, and CUDA timings.
+- `model.py`: network definition.
+- `dataset.py`: dataset creation.
+- `target.py`: target generation.
+- `equity.py`: equity helpers.
+- `train.py`: training loop.
+- `checkpoint.py`: checkpoint save and load.
 
-### 5. Solving Toy Games (First Major Implementation)
-The most stable and recommended entry point is solving toy poker games, which validate the core CFR logic on simple, bounded spaces.
+### `src/pokergpu/benchmarks/`
+Reusable benchmark modules.
 
-**A. Kuhn Poker:** Trains the solver for a specific set of iterations and variants.
-```bash
-# Usage: python src/pokergpu/cli.py kuhn <iterations> --variant <VANILLA|CFR_PLUS|DCFR> [VARIANTS...]
-python src/pokergpu/cli.py kuhn 2000 --variant VANILLA
-```
+- `caching_warm_start.py`: cache and warm-start benchmark.
+- `cfr_threading.py`: CFR threading benchmark.
 
-**B. Leduc Poker:** Trains the solver for a specific set of iterations and variants.
-```bash
-# Usage: python src/pokergpu/cli.py leduc <iterations> --variant <VANILLA|CFR_PLUS|DCFR> [VARIANTS...]
-python src/pokergpu/cli.py leduc 800 --variant CFR_PLUS
-```
+## Data flow
 
-## ⚠️ Critical Rules for Development
-1.  **Performance:** Avoid hash maps and pointer-heavy structures in the hot paths (CFR loop). Use flat arrays wherever possible.
-2.  **Abstraction:** Always work with the abstracted, simplified game model until validation on real-world complexity is achieved.
-3.  **Verification:** Every optimization or feature implementation *must* be accompanied by a unit test and performance benchmark before integration.
+1. Build or load game state in `core`.
+2. Apply abstraction in `abstraction`.
+3. Build a public tree in `tree`.
+4. Traverse with `cfr`.
+5. Evaluate leaf nodes with `eval`.
+6. Use `runtime` for caching, warm start, and postflop re-solving.
+7. Train or query a value model from `value_network` when needed.
+
+## Current benchmark reference
+
+`scripts/benchmark_postflop.py` currently shows:
+
+| Device | Depth | Nodes | Batch | Spots/sec |
+|---|---:|---:|---:|---:|
+| CPU | 2 | 128 | - | 151.650 |
+| CPU | 2 | 512 | - | 148.701 |
+| CPU | 3 | 128 | - | 30.271 |
+| CPU | 3 | 512 | - | 29.354 |
+| CPU | 5 | 128 | - | 60.995 |
+| CPU | 5 | 512 | - | 4.494 |
+| CUDA | 2 | 512 | 512 | 86.151 |
+| CUDA | 2 | 512 | 4096 | 738.167 |
+| CUDA | 2 | 512 | 16384 | 3057.496 |
+| CUDA | 2 | 512 | 32768 | 6426.016 |
+| CUDA | 2 | 512 | 65536 | 11953.981 |
+| CUDA | 2 | 1024 | 512 | 91.828 |
+| CUDA | 2 | 1024 | 4096 | 763.855 |
+| CUDA | 2 | 1024 | 16384 | 3122.830 |
+| CUDA | 2 | 1024 | 32768 | 6474.621 |
+| CUDA | 2 | 1024 | 65536 | 12062.880 |
+| CUDA | 3 | 512 | 512 | 26.238 |
+| CUDA | 3 | 512 | 4096 | 203.675 |
+| CUDA | 3 | 512 | 16384 | 837.981 |
+| CUDA | 3 | 512 | 32768 | 1648.636 |
+
+Recommended batch default: `32768`.
+
+## Notes
+
+- The project is still research code.
+- The current solver is built around flat data, batched evaluation, and depth-limited re-solving.
+- The `docs/CFR_GPU.md` file contains the longer technical guide for the GPU path.
