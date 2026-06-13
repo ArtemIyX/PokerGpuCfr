@@ -33,16 +33,17 @@ def test_postflop_cpu_cuda_average_solve_time() -> None:
         pytest.skip("CUDA is required for this benchmark")
 
     seeds = tuple(range(1, 5))
-    batch_size = 32
-    max_depth = 1
-    max_nodes = 32
-    iterations = 4
+    batch_size = 16
+    max_depth = 2
+    max_nodes = 128
+    iterations = 3
 
     cpu_times: list[float] = []
     cuda_times: list[float] = []
     total_runs = len(seeds) * iterations
 
     for seed in tqdm(seeds, desc="cpu seeds", total=len(seeds)):
+        print(f"cpu seed={seed}")
         state = _make_spot(seed)
         spec = PostflopResolveSpec(
             state=state,
@@ -56,20 +57,21 @@ def test_postflop_cpu_cuda_average_solve_time() -> None:
 
         resolve_postflop_hu(spec)
         started = perf_counter()
-        for _ in tqdm(range(iterations), desc=f"cpu seed {seed}", leave=False, total=iterations):
+        for _ in range(iterations):
             resolve_postflop_hu(spec)
         cpu_times.append(perf_counter() - started)
 
     for seed in tqdm(seeds, desc="cuda seeds", total=len(seeds)):
+        print(f"cuda seed={seed}")
         specs = tuple(
             _make_spec(seed + offset, max_depth=max_depth, max_nodes=max_nodes)
             for offset in range(batch_size)
         )
-        resolve_postflop_gpu_many(specs)
+        resolve_postflop_gpu_many(specs, allow_cpu_fallback=False)
         torch.cuda.synchronize()
         started = perf_counter()
         for _ in range(iterations):
-            resolve_postflop_gpu_many(specs)
+            resolve_postflop_gpu_many(specs, allow_cpu_fallback=False)
         torch.cuda.synchronize()
         cuda_times.append((perf_counter() - started) / iterations)
 
@@ -89,6 +91,7 @@ def test_postflop_cpu_cuda_average_solve_time() -> None:
     print(f"speedup={cpu_avg / cuda_avg:.3f}")
     print(f"cpu_throughput_sps={1.0 / cpu_avg:.3f}")
     print(f"cuda_throughput_sps={1.0 / cuda_avg:.3f}")
+    print(f"batch_work={batch_size}x depth={max_depth} nodes={max_nodes}")
 
 
 def _make_spot(seed: int) -> GameState:

@@ -71,28 +71,31 @@ class PackedGpuSolve:
 
 _GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
 _GPU_BATCH_MIN_SOLVES = 4
-_GPU_MIN_LEAFS = 256
-_GPU_MIN_INFOSSETS = 512
+_GPU_MIN_LEAFS = 1024
+_GPU_MIN_INFOSSETS = 1024
 
 
 def resolve_postflop_gpu_many(
     specs: tuple[PostflopResolveSpec, ...],
     *,
     evaluator: LeafEvaluator | None = None,
+    allow_cpu_fallback: bool = True,
 ) -> tuple[PostflopResolveResult, ...]:
     if not specs:
         return ()
     evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
     packed = tuple(_prepare_gpu_solve(spec) for spec in specs)
     if len(packed) < _GPU_BATCH_MIN_SOLVES:
-        return tuple(resolve_postflop_gpu(spec, evaluator=evaluator_impl) for spec in specs)
-    return tuple(_finish_gpu_solve(item, evaluator_impl) for item in packed)
+        if allow_cpu_fallback:
+            return tuple(resolve_postflop_gpu(spec, evaluator=evaluator_impl) for spec in specs)
+    return tuple(_finish_gpu_solve(item, evaluator_impl, allow_cpu_fallback=allow_cpu_fallback) for item in packed)
 
 
 def resolve_postflop_gpu(
     spec: PostflopResolveSpec,
     *,
     evaluator: LeafEvaluator | None = None,
+    allow_cpu_fallback: bool = True,
 ) -> PostflopResolveResult:
     if spec.state.player_count != 2:
         raise ValueError("GPU postflop solver currently supports heads-up only")
@@ -102,7 +105,7 @@ def resolve_postflop_gpu(
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
     evaluator_impl = evaluator or GpuBatchLeafEvaluator(EvalDeviceConfig(mode="cuda"))
-    return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl)
+    return _finish_gpu_solve(_prepare_gpu_solve(spec), evaluator_impl, allow_cpu_fallback=allow_cpu_fallback)
 
 
 def _root_child_nodes(tree: PublicTree) -> tuple[int, ...]:
@@ -205,6 +208,8 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec) -> PackedGpuSolve:
 def _finish_gpu_solve(
     packed: PackedGpuSolve,
     evaluator_impl: LeafEvaluator,
+    *,
+    allow_cpu_fallback: bool = True,
 ) -> PostflopResolveResult:
     spec = packed.spec
     tree = packed.tree
@@ -215,7 +220,7 @@ def _finish_gpu_solve(
     device = torch.device("cuda")
     node_count = tree.tree.node_count
     leaf_count = int(plan.frontier_nodes.numel())
-    if not _should_use_gpu(packed):
+    if allow_cpu_fallback and not _should_use_gpu(packed):
         return resolve_postflop_hu(spec, evaluator=evaluator_impl)
 
     regrets = torch.zeros(layout.total_actions, dtype=torch.float32, device=device)
@@ -249,7 +254,7 @@ def _finish_gpu_solve(
             backward_p0,
             backward_p1,
         )
-        _update_regrets_gpu(
+        _update_regrets_gpu_batched(
             tree.tree,
             plan,
             regrets,
@@ -443,7 +448,7 @@ def _update_regrets_gpu(
     strategy_table: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
-) -> None:
+    ) -> None:
     action_offsets = plan.action_offsets
     for node_index, infoset_id in enumerate(tree.infoset_ids):
         if infoset_id is None:
@@ -467,6 +472,56 @@ def _update_regrets_gpu(
         regrets[start : start + limit] += vals - infoset_value
         regrets[start : start + limit].clamp_(min=0.0)
         strategy_sums[start : start + limit] += strat
+
+
+def _update_regrets_gpu_batched(
+    tree: PublicTree,
+    plan: BatchedGpuPlan,
+    regrets: torch.Tensor,
+    strategy_sums: torch.Tensor,
+    strategy_table: torch.Tensor,
+    node_values_p0: torch.Tensor,
+    node_values_p1: torch.Tensor,
+) -> None:
+    edge_child = plan.edge_child
+    edge_infoset = plan.edge_infoset
+    edge_action_slot = plan.edge_action_slot
+    edge_node_type = plan.edge_node_type
+    valid_mask = edge_infoset >= 0
+    if not torch.any(valid_mask):
+        return
+    valid_infoset = edge_infoset[valid_mask]
+    unique_infosets = torch.unique(valid_infoset, sorted=True)
+    for infoset_tensor in unique_infosets:
+        infoset_index = int(infoset_tensor.item())
+        edge_mask = valid_mask & (edge_infoset == infoset_index)
+        slots = edge_action_slot[edge_mask]
+        children = edge_child[edge_mask]
+        if children.numel() == 0:
+            continue
+        row = strategy_table[infoset_index]
+        action_count = int((slots.max().item() + 1) if slots.numel() else 0)
+        if action_count <= 0:
+            continue
+        values = torch.where(
+            edge_node_type[edge_mask] == 1,
+            node_values_p0[children],
+            node_values_p1[children],
+        )
+        ordered = torch.argsort(slots)
+        slots = slots[ordered]
+        values = values[ordered]
+        limit = min(int(row.shape[0]), int(slots.numel()))
+        if limit <= 0:
+            continue
+        use_slots = slots[:limit]
+        use_values = values[:limit]
+        infoset_value = torch.sum(row[use_slots] * use_values)
+        action_regrets = use_values - infoset_value
+        base = int(plan.action_offsets[infoset_index].item())
+        regrets[base + use_slots] += action_regrets
+        regrets[base + use_slots].clamp_(min=0.0)
+        strategy_sums[base + use_slots] += row[use_slots]
 
 
 def _forward_pass_gpu(*args: Any) -> None:
