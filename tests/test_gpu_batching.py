@@ -281,6 +281,7 @@ def _fake_trace(packed: object) -> GpuSolveTrace:
         level_frontier_counts=(0,),
         compact_forward_level_sizes=(1,),
         compact_backward_level_sizes=(1,),
+        infoset_block_sizes=(1,),
         compact_phase_seconds={
             "forward": (0.0,),
             "backward": (0.0,),

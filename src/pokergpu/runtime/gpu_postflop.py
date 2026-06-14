@@ -96,6 +96,7 @@ class BatchedGpuPlan:
     level_edge_prob: tuple[torch.Tensor, ...]
     compact_forward_levels: tuple[tuple[int, ...], ...]
     compact_backward_levels: tuple[tuple[int, ...], ...]
+    infoset_blocks: tuple[torch.Tensor, ...]
     frontier_nodes: torch.Tensor
     frontier_leaf_batch: LeafFeatureBatch
     root_child_nodes: torch.Tensor
@@ -115,6 +116,7 @@ class GpuSolveTrace:
     level_frontier_counts: tuple[int, ...]
     compact_forward_level_sizes: tuple[int, ...]
     compact_backward_level_sizes: tuple[int, ...]
+    infoset_block_sizes: tuple[int, ...]
     compact_phase_seconds: dict[str, tuple[float, ...]]
     node_count: int
     leaf_count: int
@@ -263,6 +265,7 @@ def _build_batched_gpu_plan(
     level_edge_prob: list[torch.Tensor] = []
     compact_forward_levels = _compact_level_schedule(levels.forward_levels)
     compact_backward_levels = _compact_level_schedule(levels.backward_levels)
+    infoset_blocks = _build_infoset_blocks(layout, device=device)
     for level in levels.forward_levels:
         forward_levels.append(_build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
@@ -329,6 +332,7 @@ def _build_batched_gpu_plan(
         level_edge_prob=tuple(level_edge_prob),
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
+        infoset_blocks=infoset_blocks,
         frontier_nodes=torch.as_tensor(frontier_nodes, dtype=torch.int64, device=device),
         frontier_leaf_batch=frontier_leaf_batch,
         root_child_nodes=torch.as_tensor(root_children, dtype=torch.int64, device=device),
@@ -505,6 +509,7 @@ def _make_gpu_state(
     level_edge_slot = plan.level_edge_slot if plan is not None else tuple()
     level_edge_kind = plan.level_edge_kind if plan is not None else tuple()
     level_edge_prob = plan.level_edge_prob if plan is not None else tuple()
+    infoset_blocks = plan.infoset_blocks if plan is not None else tuple()
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -551,6 +556,7 @@ def _make_gpu_state(
         level_edge_prob=level_edge_prob,
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
+        infoset_blocks=infoset_blocks,
         root_child_nodes=tuple(),
     )
 
@@ -562,32 +568,54 @@ def _regret_matching_table_inplace(
     action_slot_index: torch.Tensor,
     action_counts: torch.Tensor,
     legal_action_mask: torch.Tensor | None = None,
+    infoset_blocks: tuple[torch.Tensor, ...] = (),
 ) -> torch.Tensor:
     out.zero_()
     num_infosets = int(action_counts.numel())
-    limit = min(
-        int(regrets.numel()),
-        int(action_infoset_index.numel()),
-        int(action_slot_index.numel()),
-        int(legal_action_mask.numel()) if legal_action_mask is not None else int(action_infoset_index.numel()),
-    )
-    if num_infosets == 0 or limit == 0:
-        return out
     max_actions = int(out.shape[1])
-    action_infoset_index = action_infoset_index[:limit]
-    action_slot_index = action_slot_index[:limit]
-    regrets = regrets[:limit]
-    valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
-    if legal_action_mask is not None and legal_action_mask.numel() >= limit:
-        valid = valid & legal_action_mask[:limit]
-    if not bool(valid.any()):
+    if num_infosets == 0:
         return out
-    infosets = action_infoset_index[valid]
-    slots = action_slot_index[valid]
-    values = torch.clamp(regrets[valid], min=0.0)
-    out.index_put_((infosets, slots), values, accumulate=False)
     totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
-    totals.scatter_add_(0, infosets, values)
+    if infoset_blocks:
+        for block in infoset_blocks:
+            block = block[(block >= 0) & (block < regrets.numel())]
+            if block.numel() == 0:
+                continue
+            infosets = action_infoset_index[block]
+            slots = action_slot_index[block]
+            values = torch.clamp(regrets[block], min=0.0)
+            valid = (infosets >= 0) & (infosets < num_infosets) & (slots >= 0) & (slots < max_actions)
+            if legal_action_mask is not None and legal_action_mask.numel() >= int(block.max().item()) + 1:
+                valid = valid & legal_action_mask[block]
+            if not bool(valid.any()):
+                continue
+            infosets = infosets[valid]
+            slots = slots[valid]
+            values = values[valid]
+            out.index_put_((infosets, slots), values, accumulate=False)
+            totals.scatter_add_(0, infosets, values)
+    else:
+        limit = min(
+            int(regrets.numel()),
+            int(action_infoset_index.numel()),
+            int(action_slot_index.numel()),
+            int(legal_action_mask.numel()) if legal_action_mask is not None else int(action_infoset_index.numel()),
+        )
+        if limit == 0:
+            return out
+        action_infoset_index = action_infoset_index[:limit]
+        action_slot_index = action_slot_index[:limit]
+        regrets = regrets[:limit]
+        valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
+        if legal_action_mask is not None and legal_action_mask.numel() >= limit:
+            valid = valid & legal_action_mask[:limit]
+        if not bool(valid.any()):
+            return out
+        infosets = action_infoset_index[valid]
+        slots = action_slot_index[valid]
+        values = torch.clamp(regrets[valid], min=0.0)
+        out.index_put_((infosets, slots), values, accumulate=False)
+        totals.scatter_add_(0, infosets, values)
     nonzero = totals > 0
     if bool(nonzero.any()):
         out[nonzero] = out[nonzero] / totals[nonzero].unsqueeze(1)
@@ -672,6 +700,7 @@ def _run_gpu_solve(
     level_frontier_counts = tuple(int(mask.sum().item()) for mask in packed.plan.level_frontier_mask)
     compact_forward_level_sizes = tuple(len(level) for level in packed.plan.compact_forward_levels)
     compact_backward_level_sizes = tuple(len(level) for level in packed.plan.compact_backward_levels)
+    infoset_block_sizes = tuple(int(block.numel()) for block in packed.plan.infoset_blocks)
     compact_forward_phase_seconds = [0.0 for _ in packed.plan.compact_forward_levels]
     compact_backward_phase_seconds = [0.0 for _ in packed.plan.compact_backward_levels]
     compact_regret_phase_seconds = [0.0 for _ in packed.plan.compact_backward_levels]
@@ -689,6 +718,7 @@ def _run_gpu_solve(
             state.action_slot_index,
             state.action_counts,
             state.packed.legal_action_mask,
+            state.infoset_blocks,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
@@ -741,6 +771,7 @@ def _run_gpu_solve(
         state.action_slot_index,
         state.action_counts,
         state.packed.legal_action_mask,
+        state.infoset_blocks,
     )
     _propagate_node_ranges(state)
     _forward_pass_gpu(
@@ -803,6 +834,7 @@ def _run_gpu_solve(
         level_frontier_counts=level_frontier_counts,
         compact_forward_level_sizes=compact_forward_level_sizes,
         compact_backward_level_sizes=compact_backward_level_sizes,
+        infoset_block_sizes=infoset_block_sizes,
         compact_phase_seconds={
             "forward": tuple(compact_forward_phase_seconds),
             "backward": tuple(compact_backward_phase_seconds),
@@ -1257,6 +1289,18 @@ def _merge_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[in
 
 def _compact_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
     return _merge_level_schedule(levels)
+
+
+def _build_infoset_blocks(
+    layout: InfosetLayout,
+    *,
+    device: torch.device,
+) -> tuple[torch.Tensor, ...]:
+    blocks: list[torch.Tensor] = []
+    for infoset_index, action_count in enumerate(layout.action_counts):
+        start = int(layout.offsets[infoset_index])
+        blocks.append(torch.arange(start, start + int(action_count), dtype=torch.int64, device=device))
+    return tuple(blocks)
 
 
 def _concat_level_edges(

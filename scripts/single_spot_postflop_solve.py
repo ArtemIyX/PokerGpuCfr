@@ -91,6 +91,7 @@ def main() -> None:
                     "level_frontier_counts": list(trace.level_frontier_counts),
                     "compact_forward_level_sizes": list(trace.compact_forward_level_sizes),
                     "compact_backward_level_sizes": list(trace.compact_backward_level_sizes),
+                    "infoset_block_sizes": list(trace.infoset_block_sizes),
                     "frontier_batch_size": int(packed.plan.frontier_nodes.numel()),
                 },
                 "timing": {

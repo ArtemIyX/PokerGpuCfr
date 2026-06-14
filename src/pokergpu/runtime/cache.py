@@ -265,6 +265,7 @@ class PackedGpuSolveState:
     level_edge_prob: Any
     compact_forward_levels: Any
     compact_backward_levels: Any
+    infoset_blocks: Any
     root_child_nodes: Any
     root_child_parent_infoset: int = -1
     iteration: int = 0
