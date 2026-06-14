@@ -162,6 +162,20 @@ def _compiled_regret_matching_impl() -> Any:
 _REGRET_MATCHING_IMPL: Any = _compiled_regret_matching_impl()
 
 
+def _compiled_iteration_core() -> Any:
+    if not _COMPACT_COMPILE_ENABLED:
+        return _run_compact_iteration_core
+    if not hasattr(torch, "compile"):
+        return _run_compact_iteration_core
+    try:
+        return torch.compile(_run_compact_iteration_core, fullgraph=False, dynamic=True)
+    except Exception:
+        return _run_compact_iteration_core
+
+
+_COMPACT_ITERATION_CORE: Any = _compiled_iteration_core()
+
+
 def average_strategy_from_gpu(
     strategy_sums: torch.Tensor,
     action_counts: torch.Tensor,
@@ -210,6 +224,27 @@ def update_regrets_gpu(
             timings[index] += time.monotonic() - started
 
 
+def _run_compact_iteration_core(
+    state: PackedGpuSolveState,
+    strategy_table: torch.Tensor,
+    *,
+    node_range_p0: torch.Tensor,
+    node_range_p1: torch.Tensor,
+    out_p0: torch.Tensor,
+    out_p1: torch.Tensor,
+    regrets: torch.Tensor,
+    strategy_sums: torch.Tensor,
+    node_values_p0: torch.Tensor,
+    node_values_p1: torch.Tensor,
+) -> None:
+    for index, _level_indices in enumerate(state.compact_forward_levels):
+        forward_pass_compact_group(state, index, strategy_table, node_range_p0, node_range_p1)
+    for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
+        backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
+    for index, _level_indices in enumerate(state.compact_backward_levels):
+        update_regrets_compact_group(state, index, regrets, strategy_sums, strategy_table, node_values_p0, node_values_p1)
+
+
 def run_compact_iteration_gpu(
     state: PackedGpuSolveState,
     strategy_table: torch.Tensor,
@@ -237,21 +272,18 @@ def run_compact_iteration_gpu(
         leaf_values = evaluate_frontier_leaves(state, evaluator)
         out_p0[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
-    for index, _level_indices in enumerate(state.compact_forward_levels):
-        started = time.monotonic()
-        forward_pass_compact_group(state, index, strategy_table, node_range_p0, node_range_p1)
-        if timings is not None and "forward" in timings and index < len(timings["forward"]):
-            timings["forward"][index] += time.monotonic() - started
-    for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
-        started = time.monotonic()
-        backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
-        if timings is not None and "backward" in timings and index < len(timings["backward"]):
-            timings["backward"][index] += time.monotonic() - started
-    for index, _level_indices in enumerate(state.compact_backward_levels):
-        started = time.monotonic()
-        update_regrets_compact_group(state, index, regrets, strategy_sums, strategy_table, node_values_p0, node_values_p1)
-        if timings is not None and "regret" in timings and index < len(timings["regret"]):
-            timings["regret"][index] += time.monotonic() - started
+    _COMPACT_ITERATION_CORE(
+        state,
+        strategy_table,
+        node_range_p0=node_range_p0,
+        node_range_p1=node_range_p1,
+        out_p0=out_p0,
+        out_p1=out_p1,
+        regrets=regrets,
+        strategy_sums=strategy_sums,
+        node_values_p0=node_values_p0,
+        node_values_p1=node_values_p1,
+    )
 
 
 def propagate_node_ranges_compact(

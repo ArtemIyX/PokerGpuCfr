@@ -33,13 +33,8 @@ from pokergpu.tree.public_tree import PublicTreeTemplate
 from .gpu_compile import compile_packed_subtree
 from .gpu_passes import (
     average_strategy_from_gpu,
-    backward_pass_gpu,
-    evaluate_frontier_leaves,
-    forward_pass_gpu,
     make_cpu_store,
-    regret_matching_table_inplace,
     run_compact_iteration_gpu,
-    update_regrets_gpu,
 )
 from .gpu_plan import build_batched_gpu_plan, init_gpu_ranges
 from .gpu_types import (
