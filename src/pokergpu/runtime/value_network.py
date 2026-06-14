@@ -59,25 +59,39 @@ class PostflopRuntimeValueNetworkEvaluator(LeafEvaluator):
             if hasattr(value, "detach"):
                 value = value.detach().cpu().numpy()
             return np.asarray(value, dtype=dtype)
+        features = np.zeros((int(to_np("street", np.int32).shape[0]), self._input_dim), dtype=np.float32)
+        offset = 0
 
-        batch = LeafFeatureBatch(
-            node_indices=tuple(range(int(to_np("street", np.int32).shape[0]))),
-            node_states=None,
-            terminal_payoff=to_np("terminal_payoff", np.float32),
-            player_to_act=to_np("player_to_act", np.int32),
-            street=to_np("street", np.int32),
-            pot=to_np("pot", np.float32),
-            stack_p0=to_np("stack_p0", np.float32),
-            stack_p1=to_np("stack_p1", np.float32),
-            board_size=to_np("board_size", np.int32),
-            reach_p0=to_np("reach_p0", np.float32),
-            reach_p1=to_np("reach_p1", np.float32),
-            reach_p2=to_np("reach_p2", np.float32),
-            is_terminal=to_np("is_terminal", np.bool_),
-            is_frontier=to_np("is_frontier", np.bool_),
-            infoset_id=to_np("infoset_id", np.int32),
+        def put(column: np.ndarray) -> None:
+            nonlocal offset
+            if offset >= self._input_dim:
+                return
+            features[:, offset] = column
+            offset += 1
+
+        put(to_np("street", np.int32))
+        put(to_np("pot", np.float32))
+        put(to_np("stack_p0", np.float32))
+        put(to_np("stack_p1", np.float32))
+        put(to_np("board_size", np.int32))
+        put(to_np("player_to_act", np.int32))
+        put(to_np("terminal_payoff", np.float32))
+        put(to_np("is_terminal", np.bool_).astype(np.float32))
+        put(to_np("is_frontier", np.bool_).astype(np.float32))
+        put(np.clip(to_np("infoset_id", np.int32), -1, 1_000_000))
+        put(to_np("reach_p0", np.float32))
+        put(to_np("reach_p1", np.float32))
+        put(to_np("reach_p2", np.float32))
+        normalized = normalize_feature_batch(ValueFeatureBatch(features), self._normalizer).values
+        values = infer_value(self._model, normalized)
+        return LeafValueBatch(
+            values=np.asarray(values, dtype=np.float32),
+            ev_player0=np.asarray(values[:, 0], dtype=np.float32),
+            ev_player1=np.asarray(values[:, 1], dtype=np.float32),
+            ev_player2=np.asarray(values[:, 2], dtype=np.float32)
+            if values.shape[1] > 2
+            else None,
         )
-        return self.evaluate(batch)
 
 
 def default_postflop_leaf_evaluator(
