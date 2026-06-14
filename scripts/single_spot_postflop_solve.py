@@ -77,17 +77,20 @@ def main() -> None:
 
     evaluator = CpuStubLeafEvaluator()
     started_at = time.monotonic()
-    packed = _prepare_gpu_solve(spec)
-    warmup_trace = _run_gpu_solve(packed, evaluator, debug=args.debug)
+    with record_function("solve::prepare_gpu_solve"):
+        packed = _prepare_gpu_solve(spec)
+    with record_function("solve::warmup_gpu_solve"):
+        warmup_trace = _run_gpu_solve(packed, evaluator, debug=args.debug)
     if args.profile:
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             record_shapes=True,
+            with_stack=True,
             profile_memory=False,
         ) as prof:
-            with record_function("solve::run_gpu_solve"):
+            with record_function("solve::profiled_gpu_solve"):
                 trace = _run_gpu_solve(packed, evaluator, debug=args.debug)
-        _print_profiler_tables(prof)
+        _print_profiler_tables(prof, args.profile_row_limit)
     else:
         trace = warmup_trace
     total_seconds = time.monotonic() - started_at
@@ -152,6 +155,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-nodes", type=int, default=256)
     parser.add_argument("--min-reach-prob", type=float, default=0.0)
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--profile-row-limit", type=int, default=40)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--cuda-blocking", action="store_true")
     parser.add_argument("--cuda-dsa", action="store_true")
@@ -167,11 +171,15 @@ def _parse_hole_cards(value: str) -> tuple[Card, ...] | None:
     return (card_from_str(text[:2]), card_from_str(text[2:]))
 
 
-def _print_profiler_tables(prof: object) -> None:
+def _print_profiler_tables(prof: object, row_limit: int) -> None:
     print("== CPU ops ==")
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=row_limit))
+    print("== CPU self ==")
+    print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=row_limit))
     print("== CUDA kernels ==")
-    print(_format_cuda_kernel_table(prof))
+    print(_format_cuda_kernel_table(prof, row_limit=row_limit))
+    print("== Stage totals ==")
+    print(_format_record_function_table(prof, row_limit=row_limit))
 
 
 def _format_cuda_kernel_table(prof: object, row_limit: int = 50) -> str:
@@ -196,6 +204,30 @@ def _format_cuda_kernel_table(prof: object, row_limit: int = 50) -> str:
     for name, data in rows:
         lines.append(
             f"{name[:60]:60}  {int(data['count']):7d}  {float(data['cuda_time_total_us']):15.3f}  {float(data['cpu_time_total_us']):14.3f}"
+        )
+    return "\n".join(lines)
+
+
+def _format_record_function_table(prof: object, row_limit: int = 40) -> str:
+    key_averages = getattr(prof, "key_averages", lambda **kwargs: [])()
+    rows = sorted(
+        key_averages,
+        key=lambda evt: float(getattr(evt, "self_cpu_time_total", 0.0)),
+        reverse=True,
+    )[:row_limit]
+    if not rows:
+        return "No profiler rows recorded."
+    lines = [
+        f"{'Name':48}  {'CPU self (us)':>14}  {'CPU total (us)':>14}  {'CUDA total (us)':>15}  {'Calls':>7}",
+        "-" * 108,
+    ]
+    for evt in rows:
+        lines.append(
+            f"{str(getattr(evt, 'key', 'unknown'))[:48]:48}  "
+            f"{float(getattr(evt, 'self_cpu_time_total', 0.0)):14.3f}  "
+            f"{float(getattr(evt, 'cpu_time_total', 0.0)):14.3f}  "
+            f"{float(getattr(evt, 'cuda_time_total', 0.0)):15.3f}  "
+            f"{int(getattr(evt, 'count', 0)):7d}"
         )
     return "\n".join(lines)
 

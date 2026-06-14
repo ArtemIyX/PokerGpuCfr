@@ -99,19 +99,26 @@ def _regret_matching_table_inplace_impl(
     limit = min(int(regrets.numel()), int(action_infoset_index.numel()), int(action_slot_index.numel()))
     if limit == 0:
         return out
-    action_infoset_index = action_infoset_index[:limit]
-    action_slot_index = action_slot_index[:limit]
-    regrets = regrets[:limit]
-    valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
-    if legal_action_mask is not None and legal_action_mask.numel() >= limit:
-        valid = valid & legal_action_mask[:limit]
-    infosets = action_infoset_index.clamp(0, num_infosets - 1)
-    slots = action_slot_index.clamp(0, max_actions - 1)
-    values = torch.clamp(regrets, min=0.0) * valid.to(regrets.dtype)
-    out.index_put_((infosets, slots), values, accumulate=False)
-    totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
-    totals.scatter_add_(0, infosets, values)
-    totals_safe = totals.clamp_min(1.0).unsqueeze(1)
+    with record_function("solve::rm::slice"):
+        action_infoset_index = action_infoset_index[:limit]
+        action_slot_index = action_slot_index[:limit]
+        regrets = regrets[:limit]
+    with record_function("solve::rm::valid_mask"):
+        valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
+        if legal_action_mask is not None and legal_action_mask.numel() >= limit:
+            valid = valid & legal_action_mask[:limit]
+    with record_function("solve::rm::clamp_indices"):
+        infosets = action_infoset_index.clamp(0, num_infosets - 1)
+        slots = action_slot_index.clamp(0, max_actions - 1)
+    with record_function("solve::rm::clamp_regrets"):
+        values = torch.clamp(regrets, min=0.0) * valid.to(regrets.dtype)
+    with record_function("solve::rm::scatter_write"):
+        out.index_put_((infosets, slots), values, accumulate=False)
+    with record_function("solve::rm::scatter_totals"):
+        totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
+        totals.scatter_add_(0, infosets, values)
+    with record_function("solve::rm::clamp_totals"):
+        totals_safe = totals.clamp_min(1.0).unsqueeze(1)
     out /= totals_safe
     zero_rows = totals <= 0
     if zero_rows.numel() > 0:
@@ -410,32 +417,52 @@ def _compact_pass_impl(
     if mode == _COMPACT_MODE_FORWARD:
         if node_range_p0 is None or node_range_p1 is None:
             return
-        edge_src = edge_src.clamp(0, node_range_p0.numel() - 1)
-        edge_dst = edge_dst.clamp(0, node_range_p0.numel() - 1)
+        with record_function("solve::forward::clamp_src_dst"):
+            edge_src = edge_src.clamp(0, node_range_p0.numel() - 1)
+            edge_dst = edge_dst.clamp(0, node_range_p0.numel() - 1)
         if edge_flat is None:
-            probs = edge_prob.unsqueeze(1)
-            node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * probs)
-            node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * probs)
+            with record_function("solve::forward::unsqueeze_prob"):
+                probs = edge_prob.unsqueeze(1)
+            with record_function("solve::forward::index_add_p0"):
+                node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * probs)
+            with record_function("solve::forward::index_add_p1"):
+                node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * probs)
             return
-        probs = strategy_table.view(-1).index_select(0, edge_flat.clamp(0, strategy_table.numel() - 1))
-        weights = probs.unsqueeze(1)
-        node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * weights)
-        node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * weights)
+        with record_function("solve::forward::clamp_flat"):
+            edge_flat = edge_flat.clamp(0, strategy_table.numel() - 1)
+        with record_function("solve::forward::index_select"):
+            probs = strategy_table.view(-1).index_select(0, edge_flat)
+        with record_function("solve::forward::unsqueeze_weights"):
+            weights = probs.unsqueeze(1)
+        with record_function("solve::forward::index_add_p0"):
+            node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * weights)
+        with record_function("solve::forward::index_add_p1"):
+            node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * weights)
         return
     if mode == _COMPACT_MODE_BACKWARD:
         if out_p0 is None or out_p1 is None:
             return
-        edge_src = edge_src.clamp(0, out_p0.numel() - 1)
-        edge_dst = edge_dst.clamp(0, out_p0.numel() - 1)
-        child_p0 = out_p0[edge_dst]
-        child_p1 = out_p1[edge_dst]
+        with record_function("solve::backward::clamp_src_dst"):
+            edge_src = edge_src.clamp(0, out_p0.numel() - 1)
+            edge_dst = edge_dst.clamp(0, out_p0.numel() - 1)
+        with record_function("solve::backward::index_children_p0"):
+            child_p0 = out_p0[edge_dst]
+        with record_function("solve::backward::index_children_p1"):
+            child_p1 = out_p1[edge_dst]
         if edge_flat is None:
-            out_p0.index_add_(0, edge_src, edge_prob * child_p0)
-            out_p1.index_add_(0, edge_src, edge_prob * child_p1)
+            with record_function("solve::backward::index_add_p0"):
+                out_p0.index_add_(0, edge_src, edge_prob * child_p0)
+            with record_function("solve::backward::index_add_p1"):
+                out_p1.index_add_(0, edge_src, edge_prob * child_p1)
             return
-        probs = strategy_table.view(-1).index_select(0, edge_flat.clamp(0, strategy_table.numel() - 1))
-        out_p0.index_add_(0, edge_src, probs * child_p0)
-        out_p1.index_add_(0, edge_src, probs * child_p1)
+        with record_function("solve::backward::clamp_flat"):
+            edge_flat = edge_flat.clamp(0, strategy_table.numel() - 1)
+        with record_function("solve::backward::index_select"):
+            probs = strategy_table.view(-1).index_select(0, edge_flat)
+        with record_function("solve::backward::index_add_p0"):
+            out_p0.index_add_(0, edge_src, probs * child_p0)
+        with record_function("solve::backward::index_add_p1"):
+            out_p1.index_add_(0, edge_src, probs * child_p1)
         return
     if mode == _COMPACT_MODE_REGRET:
         if (
@@ -455,18 +482,26 @@ def _compact_pass_impl(
         action_limit = int(action_counts.numel())
         if infoset_limit <= 0 or action_limit <= 0:
             return
-        edge_infoset_safe = edge_infoset.clamp(0, infoset_limit - 1)
-        edge_dst = edge_dst.clamp(0, node_values_p0.numel() - 1)
-        child_values = node_values_p0[edge_dst]
-        slot_max = action_counts[edge_infoset_safe].clamp_min(1) - 1
-        edge_slot_safe = torch.minimum(edge_slot, slot_max)
-        edge_slot_safe = torch.maximum(edge_slot_safe, torch.zeros_like(edge_slot_safe))
-        flat = action_offsets[edge_infoset_safe] + edge_slot_safe
-        strat = strategy_table.view(-1).index_select(0, flat)
-        infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
-        infoset_values.scatter_add_(0, edge_infoset_safe, strat * child_values)
-        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset_safe])
-        strategy_sums.index_add_(0, flat, strat)
+        with record_function("solve::regret::clamp_infoset_dst"):
+            edge_infoset_safe = edge_infoset.clamp(0, infoset_limit - 1)
+            edge_dst = edge_dst.clamp(0, node_values_p0.numel() - 1)
+        with record_function("solve::regret::index_child_values"):
+            child_values = node_values_p0[edge_dst]
+        with record_function("solve::regret::clamp_slots"):
+            slot_max = action_counts[edge_infoset_safe].clamp_min(1) - 1
+            edge_slot_safe = torch.minimum(edge_slot, slot_max)
+            edge_slot_safe = torch.maximum(edge_slot_safe, torch.zeros_like(edge_slot_safe))
+        with record_function("solve::regret::build_flat"):
+            flat = action_offsets[edge_infoset_safe] + edge_slot_safe
+        with record_function("solve::regret::index_select_strategy"):
+            strat = strategy_table.view(-1).index_select(0, flat)
+        with record_function("solve::regret::scatter_infoset_values"):
+            infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
+            infoset_values.scatter_add_(0, edge_infoset_safe, strat * child_values)
+        with record_function("solve::regret::index_add_regrets"):
+            regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset_safe])
+        with record_function("solve::regret::index_add_strategy_sums"):
+            strategy_sums.index_add_(0, flat, strat)
 
 
 def _compiled_compact_pass_impl() -> Any:
