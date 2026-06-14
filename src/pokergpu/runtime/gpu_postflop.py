@@ -1018,8 +1018,8 @@ def _update_regrets_gpu_batched(
 
 def _forward_pass_gpu(*args: Any) -> None:
     if len(args) == 4 and isinstance(args[0], PackedGpuSolveState):
-        state, strategy_table, reach_p0, reach_p1 = args
-        _forward_pass_gpu_batched(state, strategy_table, reach_p0, reach_p1)
+        state, strategy_table, node_range_p0, node_range_p1 = args
+        _forward_pass_gpu_batched(state, strategy_table, node_range_p0, node_range_p1)
         return
     raise TypeError("_forward_pass_gpu received unsupported arguments")
 
@@ -1027,9 +1027,10 @@ def _forward_pass_gpu(*args: Any) -> None:
 def _forward_pass_gpu_batched(
     state: PackedGpuSolveState,
     strategy_table: torch.Tensor,
-    reach_p0: torch.Tensor,
-    reach_p1: torch.Tensor,
+    node_range_p0: torch.Tensor,
+    node_range_p1: torch.Tensor,
 ) -> None:
+    _propagate_node_ranges(state)
     for level_index in range(len(state.level_edge_dst)):
         edge_src = state.level_edge_src[level_index]
         edge_dst = state.level_edge_dst[level_index]
@@ -1056,8 +1057,8 @@ def _forward_pass_gpu_batched(
             src = edge_src[chance_mask]
             dst = edge_dst[chance_mask]
             probs = edge_prob[chance_mask]
-            reach_p0.index_add_(0, dst, reach_p0[src] * probs)
-            reach_p1.index_add_(0, dst, reach_p1[src] * probs)
+            node_range_p0.index_add_(0, dst, node_range_p0[src] * probs)
+            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs)
         player_mask = edge_kind == 1
         if bool(player_mask.any()):
             src = edge_src[player_mask]
@@ -1065,8 +1066,8 @@ def _forward_pass_gpu_batched(
             infosets = edge_infoset[player_mask]
             slots = edge_slot[player_mask]
             probs = strategy_table[infosets, slots]
-            reach_p0.index_add_(0, dst, reach_p0[src] * probs)
-            reach_p1.index_add_(0, dst, reach_p1[src])
+            node_range_p0.index_add_(0, dst, node_range_p0[src] * probs)
+            node_range_p1.index_add_(0, dst, node_range_p1[src])
         player_mask = edge_kind == 2
         if bool(player_mask.any()):
             src = edge_src[player_mask]
@@ -1074,8 +1075,8 @@ def _forward_pass_gpu_batched(
             infosets = edge_infoset[player_mask]
             slots = edge_slot[player_mask]
             probs = strategy_table[infosets, slots]
-            reach_p0.index_add_(0, dst, reach_p0[src])
-            reach_p1.index_add_(0, dst, reach_p1[src] * probs)
+            node_range_p0.index_add_(0, dst, node_range_p0[src])
+            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs)
 
 
 def _backward_pass_gpu(*args: Any) -> None:
