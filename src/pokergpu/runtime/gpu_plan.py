@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import torch
+
 from pokergpu.cfr import InfosetLayout, TreeLevels
 from pokergpu.eval.types import LeafFeatureBatch
 from pokergpu.tree import NodeType
@@ -216,12 +218,12 @@ def build_batched_gpu_plan(
         forward_levels.append(build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
         backward_levels.append(build_level_plan(tree, level, actions_by_node, device=device))
-    compact_level_edge_src = [torch.cat([level_edge_src[index] for index in level_indices], dim=0) for level_indices in compact_forward_levels]
-    compact_level_edge_dst = [torch.cat([level_edge_dst[index] for index in level_indices], dim=0) for level_indices in compact_forward_levels]
-    compact_level_edge_infoset = [torch.cat([level_edge_infoset[index] for index in level_indices], dim=0) for level_indices in compact_forward_levels]
-    compact_level_edge_slot = [torch.cat([level_edge_slot[index] for index in level_indices], dim=0) for level_indices in compact_forward_levels]
-    compact_level_edge_kind = [torch.cat([level_edge_kind[index] for index in level_indices], dim=0) for level_indices in compact_forward_levels]
-    compact_level_edge_prob = [torch.cat([level_edge_prob[index] for index in level_indices], dim=0) for level_indices in compact_forward_levels]
+    compact_level_edge_src = [_concat_level_tensors(level_edge_src, level_indices, device=device) for level_indices in compact_forward_levels]
+    compact_level_edge_dst = [_concat_level_tensors(level_edge_dst, level_indices, device=device) for level_indices in compact_forward_levels]
+    compact_level_edge_infoset = [_concat_level_tensors(level_edge_infoset, level_indices, device=device) for level_indices in compact_forward_levels]
+    compact_level_edge_slot = [_concat_level_tensors(level_edge_slot, level_indices, device=device) for level_indices in compact_forward_levels]
+    compact_level_edge_kind = [_concat_level_tensors(level_edge_kind, level_indices, device=device) for level_indices in compact_forward_levels]
+    compact_level_edge_prob = [_concat_level_tensors(level_edge_prob, level_indices, device=device) for level_indices in compact_forward_levels]
     for level_tensor in level_nodes:
         level_set = set(int(i) for i in level_tensor.tolist())
         level_frontier_mask.append(torch.as_tensor([flat_view.is_frontier[int(i)] for i in level_tensor.tolist()], dtype=torch.bool, device=device))
@@ -290,3 +292,19 @@ def build_batched_gpu_plan(
         action_counts=action_counts,
         action_offsets=action_offsets,
     )
+
+
+def _concat_level_tensors(
+    tensors: list[torch.Tensor],
+    indices: tuple[int, ...],
+    *,
+    device: torch.device,
+) -> torch.Tensor:
+    import torch
+
+    selected = [tensors[index] for index in indices if 0 <= index < len(tensors)]
+    if not selected:
+        if not tensors:
+            return torch.empty(0, dtype=torch.int64, device=device)
+        return torch.empty(0, dtype=tensors[0].dtype, device=device)
+    return torch.cat(selected, dim=0)

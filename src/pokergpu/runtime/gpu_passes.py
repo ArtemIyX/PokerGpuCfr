@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, cast
 
@@ -190,25 +191,30 @@ def _process_compact_edges(
 _COMPACT_MODE_FORWARD = 0
 _COMPACT_MODE_BACKWARD = 1
 _COMPACT_MODE_REGRET = 2
+_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _compact_pass(
-    state: PackedGpuSolveState,
-    compact_level_index: int,
+def _compact_pass_impl(
+    edge_src: torch.Tensor,
+    edge_dst: torch.Tensor,
+    edge_infoset: torch.Tensor,
+    edge_slot: torch.Tensor,
+    edge_kind: torch.Tensor,
+    edge_prob: torch.Tensor,
     strategy_table: torch.Tensor,
     mode: int,
+    *,
     node_range_p0: torch.Tensor | None = None,
     node_range_p1: torch.Tensor | None = None,
     out_p0: torch.Tensor | None = None,
     out_p1: torch.Tensor | None = None,
+    action_offsets: torch.Tensor | None = None,
+    action_counts: torch.Tensor | None = None,
     regrets: torch.Tensor | None = None,
     strategy_sums: torch.Tensor | None = None,
     node_values_p0: torch.Tensor | None = None,
     node_values_p1: torch.Tensor | None = None,
 ) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _process_compact_edges(
-        state, compact_level_index, strategy_table
-    )
     if edge_src.numel() == 0:
         return
     if mode == _COMPACT_MODE_FORWARD:
@@ -262,15 +268,75 @@ def _compact_pass(
             out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
         return
     if mode == _COMPACT_MODE_REGRET:
-        if regrets is None or strategy_sums is None or node_values_p0 is None or node_values_p1 is None:
+        if (
+            regrets is None
+            or strategy_sums is None
+            or node_values_p0 is None
+            or node_values_p1 is None
+            or action_offsets is None
+            or action_counts is None
+        ):
             return
-        flat = state.action_offsets[edge_infoset] + edge_slot
+        flat = action_offsets[edge_infoset] + edge_slot
         child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
         strat = strategy_table[edge_infoset, edge_slot]
-        infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+        infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
         infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
         regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
         strategy_sums.index_add_(0, flat, strat)
+
+
+def _compiled_compact_pass_impl() -> Any:
+    if not _COMPACT_COMPILE_ENABLED:
+        return _compact_pass_impl
+    if not hasattr(torch, "compile"):
+        return _compact_pass_impl
+    try:
+        return torch.compile(_compact_pass_impl, fullgraph=False, dynamic=True)
+    except Exception:
+        return _compact_pass_impl
+
+
+_COMPACT_PASS_IMPL = _compiled_compact_pass_impl()
+
+
+def _compact_pass(
+    state: PackedGpuSolveState,
+    compact_level_index: int,
+    strategy_table: torch.Tensor,
+    mode: int,
+    node_range_p0: torch.Tensor | None = None,
+    node_range_p1: torch.Tensor | None = None,
+    out_p0: torch.Tensor | None = None,
+    out_p1: torch.Tensor | None = None,
+    regrets: torch.Tensor | None = None,
+    strategy_sums: torch.Tensor | None = None,
+    node_values_p0: torch.Tensor | None = None,
+    node_values_p1: torch.Tensor | None = None,
+) -> None:
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _process_compact_edges(
+        state, compact_level_index, strategy_table
+    )
+    _COMPACT_PASS_IMPL(
+        edge_src,
+        edge_dst,
+        edge_infoset,
+        edge_slot,
+        edge_kind,
+        edge_prob,
+        strategy_table,
+        mode,
+        node_range_p0=node_range_p0,
+        node_range_p1=node_range_p1,
+        out_p0=out_p0,
+        out_p1=out_p1,
+        action_offsets=state.action_offsets,
+        action_counts=state.action_counts,
+        regrets=regrets,
+        strategy_sums=strategy_sums,
+        node_values_p0=node_values_p0,
+        node_values_p1=node_values_p1,
+    )
 
 
 def update_regrets_compact_group(
