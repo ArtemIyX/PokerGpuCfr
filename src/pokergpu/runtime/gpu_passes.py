@@ -246,14 +246,10 @@ def run_compact_iteration_gpu(
         if frontier_count > 0:
             leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
             leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
-            ev0 = leaf_values.ev_player0
-            ev1 = leaf_values.ev_player1
-            if not isinstance(ev0, torch.Tensor):
-                ev0 = torch.as_tensor(ev0, dtype=torch.float32, device=out_p0.device)
-            if not isinstance(ev1, torch.Tensor):
-                ev1 = torch.as_tensor(ev1, dtype=torch.float32, device=out_p1.device)
-            out_p0[leaf_slice].copy_(ev0.to(device=out_p0.device, dtype=torch.float32))
-            out_p1[leaf_slice].copy_(ev1.to(device=out_p1.device, dtype=torch.float32))
+            ev0 = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
+            ev1 = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
+            out_p0[leaf_slice].copy_(ev0)
+            out_p1[leaf_slice].copy_(ev1)
             if debug:
                 print(
                     "debug::leaf",
