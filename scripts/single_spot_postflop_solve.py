@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,10 @@ from torch.profiler import ProfilerActivity, profile, record_function
 
 def main() -> None:
     args = _parse_args()
+    if args.cuda_blocking:
+        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    if args.cuda_dsa:
+        os.environ["TORCH_USE_CUDA_DSA"] = "1"
     state = GameState(
         board=Board.from_str(args.board),
         players=(
@@ -81,7 +87,7 @@ def main() -> None:
         ) as prof:
             with record_function("solve::run_gpu_solve"):
                 trace = _run_gpu_solve(packed, evaluator, debug=args.debug)
-        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+        _print_profiler_tables(prof)
     else:
         trace = warmup_trace
     total_seconds = time.monotonic() - started_at
@@ -147,6 +153,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--min-reach-prob", type=float, default=0.0)
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--cuda-blocking", action="store_true")
+    parser.add_argument("--cuda-dsa", action="store_true")
     return parser.parse_args()
 
 
@@ -157,6 +165,39 @@ def _parse_hole_cards(value: str) -> tuple[Card, ...] | None:
     if len(text) != 4:
         raise ValueError("hole cards must be 4 characters like AsKs")
     return (card_from_str(text[:2]), card_from_str(text[2:]))
+
+
+def _print_profiler_tables(prof: object) -> None:
+    print("== CPU ops ==")
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    print("== CUDA kernels ==")
+    print(_format_cuda_kernel_table(prof))
+
+
+def _format_cuda_kernel_table(prof: object, row_limit: int = 50) -> str:
+    events = getattr(prof, "events", lambda: [])()
+    stats: dict[str, dict[str, float | int]] = defaultdict(lambda: {"count": 0, "cuda_time_total_us": 0.0, "cpu_time_total_us": 0.0})
+    for event in events:
+        device_type = getattr(event, "device_type", None)
+        device_name = getattr(device_type, "name", str(device_type))
+        if device_name != "CUDA":
+            continue
+        name = str(getattr(event, "name", "unknown"))
+        stats[name]["count"] += 1
+        stats[name]["cuda_time_total_us"] += float(getattr(event, "cuda_time_total", 0.0))
+        stats[name]["cpu_time_total_us"] += float(getattr(event, "cpu_time_total", 0.0))
+    if not stats:
+        return "No CUDA kernel events recorded."
+    rows = sorted(stats.items(), key=lambda item: float(item[1]["cuda_time_total_us"]), reverse=True)[:row_limit]
+    lines = [
+        f"{'Name':60}  {'Count':>7}  {'CUDA total (us)':>15}  {'CPU total (us)':>14}",
+        "-" * 105,
+    ]
+    for name, data in rows:
+        lines.append(
+            f"{name[:60]:60}  {int(data['count']):7d}  {float(data['cuda_time_total_us']):15.3f}  {float(data['cpu_time_total_us']):14.3f}"
+        )
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

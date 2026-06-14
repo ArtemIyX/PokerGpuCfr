@@ -376,31 +376,71 @@ def _compact_pass_impl(
             node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * probs)
             node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * probs)
             return
+        infoset_limit = int(strategy_table.shape[0])
+        slot_limit = int(strategy_table.shape[1]) if strategy_table.ndim > 1 else 0
+        if infoset_limit <= 0 or slot_limit <= 0:
+            return
+        infoset_valid = (edge_infoset >= 0) & (edge_infoset < infoset_limit)
+        slot_valid = (edge_slot >= 0) & (edge_slot < slot_limit)
+        flat_valid = torch.ones_like(infoset_valid, dtype=torch.bool)
+        if edge_flat is not None:
+            flat_valid = (edge_flat >= 0) & (edge_flat < strategy_table.numel())
+        valid = infoset_valid & slot_valid & flat_valid
+        if not bool(valid.any()):
+            return
         if edge_flat is None:
-            probs = strategy_table[edge_infoset, edge_slot]
+            probs = strategy_table[edge_infoset[valid], edge_slot[valid]]
         else:
-            probs = strategy_table.view(-1).index_select(0, edge_flat)
+            probs = strategy_table.view(-1).index_select(0, edge_flat[valid])
         weights = probs.unsqueeze(1)
-        edge_dst = edge_dst.clamp(0, node_range_p0.numel() - 1)
+        edge_dst = edge_dst[valid].clamp(0, node_range_p0.numel() - 1)
+        edge_src = edge_src[valid].clamp(0, node_range_p0.numel() - 1)
         node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * weights)
         node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * weights)
         return
     if mode == _COMPACT_MODE_BACKWARD:
         if out_p0 is None or out_p1 is None:
             return
-        edge_src = edge_src
-        child_p0 = out_p0[edge_dst]
-        child_p1 = out_p1[edge_dst]
-        if edge_infoset is None or edge_slot is None:
-            out_p0.index_add_(0, edge_src, edge_prob * child_p0)
-            out_p1.index_add_(0, edge_src, edge_prob * child_p1)
+        src_valid = (edge_src >= 0) & (edge_src < out_p0.numel())
+        dst_valid = (edge_dst >= 0) & (edge_dst < out_p0.numel())
+        valid = src_valid & dst_valid
+        if not bool(valid.any()):
             return
+        edge_src_valid = edge_src[valid]
+        edge_dst_valid = edge_dst[valid]
+        child_p0 = out_p0[edge_dst_valid]
+        child_p1 = out_p1[edge_dst_valid]
+        if edge_infoset is None or edge_slot is None:
+            out_p0.index_add_(0, edge_src_valid, edge_prob[valid] * child_p0)
+            out_p1.index_add_(0, edge_src_valid, edge_prob[valid] * child_p1)
+            return
+        infoset_limit = int(strategy_table.shape[0])
+        slot_limit = int(strategy_table.shape[1]) if strategy_table.ndim > 1 else 0
+        if infoset_limit <= 0 or slot_limit <= 0:
+            return
+        edge_infoset_valid = edge_infoset[valid]
+        edge_slot_valid = edge_slot[valid]
+        flat_valid = torch.ones_like(edge_infoset_valid, dtype=torch.bool)
+        if edge_flat is not None:
+            flat_valid = (edge_flat[valid] >= 0) & (edge_flat[valid] < strategy_table.numel())
+        strat_valid = (
+            (edge_infoset_valid >= 0)
+            & (edge_infoset_valid < infoset_limit)
+            & (edge_slot_valid >= 0)
+            & (edge_slot_valid < slot_limit)
+            & flat_valid
+        )
+        if not bool(strat_valid.any()):
+            return
+        edge_src_valid = edge_src_valid[strat_valid]
+        child_p0 = child_p0[strat_valid]
+        child_p1 = child_p1[strat_valid]
         if edge_flat is None:
-            probs = strategy_table[edge_infoset, edge_slot]
+            probs = strategy_table[edge_infoset_valid[strat_valid], edge_slot_valid[strat_valid]]
         else:
-            probs = strategy_table.view(-1).index_select(0, edge_flat)
-        out_p0.index_add_(0, edge_src, probs * child_p0)
-        out_p1.index_add_(0, edge_src, probs * child_p1)
+            probs = strategy_table.view(-1).index_select(0, edge_flat[valid][strat_valid])
+        out_p0.index_add_(0, edge_src_valid, probs * child_p0)
+        out_p1.index_add_(0, edge_src_valid, probs * child_p1)
         return
     if mode == _COMPACT_MODE_REGRET:
         if (
@@ -416,13 +456,27 @@ def _compact_pass_impl(
             return
         if edge_infoset is None or edge_slot is None:
             return
-        child_values = node_values_p0[edge_dst]
-        flat = action_offsets[edge_infoset.clamp(0, action_offsets.numel() - 1)] + edge_slot
+        infoset_limit = int(action_offsets.numel())
+        action_limit = int(action_counts.numel())
+        if infoset_limit <= 0 or action_limit <= 0:
+            return
+        edge_infoset_safe = edge_infoset.clamp(0, infoset_limit - 1)
+        action_counts_safe = action_counts[edge_infoset_safe].clamp_min(1)
+        slot_valid = (edge_slot >= 0) & (edge_slot < action_counts_safe)
+        dst_valid = (edge_dst >= 0) & (edge_dst < node_values_p0.numel())
+        infoset_valid = (edge_infoset >= 0) & (edge_infoset < infoset_limit) & (edge_infoset < action_limit)
+        valid = slot_valid & dst_valid & infoset_valid
+        if not bool(valid.any()):
+            return
+        edge_dst_valid = edge_dst[valid]
+        edge_infoset_valid = edge_infoset_safe[valid]
+        edge_slot_valid = edge_slot[valid]
+        child_values = node_values_p0[edge_dst_valid]
+        flat = action_offsets[edge_infoset_valid] + edge_slot_valid
         strat = strategy_table.view(-1).index_select(0, flat)
         infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
-        infoset_values.scatter_add_(0, edge_infoset.clamp(0, action_counts.numel() - 1), strat * child_values)
-        edge_infoset_safe = edge_infoset.clamp(0, action_counts.numel() - 1)
-        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset_safe])
+        infoset_values.scatter_add_(0, edge_infoset_valid, strat * child_values)
+        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset_valid])
         strategy_sums.index_add_(0, flat, strat)
 
 
