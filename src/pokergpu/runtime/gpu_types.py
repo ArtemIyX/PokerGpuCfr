@@ -175,10 +175,10 @@ class GpuSolveTrace:
     compact_phase_seconds: dict[str, tuple[float, ...]]
     node_count: int
     leaf_count: int
-    root_strategy: np.ndarray
-    root_action_ev_player0: np.ndarray
-    root_action_ev_player1: np.ndarray
+    root_strategy: torch.Tensor
+    root_action_ev_player0: torch.Tensor
+    root_action_ev_player1: torch.Tensor
     root_ev_player0: float
     root_ev_player1: float
-    gpu_backward_p0: np.ndarray
-    gpu_backward_p1: np.ndarray
+    gpu_backward_p0: torch.Tensor
+    gpu_backward_p1: torch.Tensor

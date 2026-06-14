@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import torch
 import pytest
 from pytest import MonkeyPatch
 import torch
@@ -288,11 +289,11 @@ def _fake_trace(packed: object) -> GpuSolveTrace:
         },
         node_count=1,
         leaf_count=1,
-        root_strategy=np.asarray([1.0], dtype=np.float32),
-        root_action_ev_player0=np.asarray([0.0], dtype=np.float32),
-        root_action_ev_player1=np.asarray([0.0], dtype=np.float32),
+        root_strategy=torch.tensor([1.0], dtype=torch.float32),
+        root_action_ev_player0=torch.tensor([0.0], dtype=torch.float32),
+        root_action_ev_player1=torch.tensor([0.0], dtype=torch.float32),
         root_ev_player0=0.0,
         root_ev_player1=0.0,
-        gpu_backward_p0=np.asarray([0.0], dtype=np.float32),
-        gpu_backward_p1=np.asarray([0.0], dtype=np.float32),
+        gpu_backward_p0=torch.tensor([0.0], dtype=torch.float32),
+        gpu_backward_p1=torch.tensor([0.0], dtype=torch.float32),
     )

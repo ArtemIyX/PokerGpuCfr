@@ -466,12 +466,15 @@ def _finish_gpu_solve(
     evaluator_impl: LeafEvaluator,
 ) -> PostflopResolveResult:
     trace = _run_gpu_solve(packed, evaluator_impl)
+    root_strategy = trace.root_strategy.detach().cpu().numpy().astype(np.float32, copy=False)
+    root_action_ev_player0 = trace.root_action_ev_player0.detach().cpu().numpy().astype(np.float32, copy=False)
+    root_action_ev_player1 = trace.root_action_ev_player1.detach().cpu().numpy().astype(np.float32, copy=False)
     return PostflopResolveResult(
         root_infoset_id=trace.packed.root_infoset,
         root_actions=trace.packed.root_actions,
-        root_strategy=trace.root_strategy,
-        root_action_ev_player0=trace.root_action_ev_player0,
-        root_action_ev_player1=trace.root_action_ev_player1,
+        root_strategy=root_strategy,
+        root_action_ev_player0=root_action_ev_player0,
+        root_action_ev_player1=root_action_ev_player1,
         root_ev_player0=trace.root_ev_player0,
         root_ev_player1=trace.root_ev_player1,
         iterations=trace.iterations,
@@ -589,21 +592,9 @@ def _run_gpu_solve(
         bb_scale = 1.0
     root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
     root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
-    root_strategy = root_strategy_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
-    root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
+    root_strategy = root_strategy_tensor
+    root_ev_p0 = float(_summarize_root_ev(root_strategy.detach().cpu().numpy().astype(np.float32, copy=False), root_action_ev_p0))
     root_ev_p1 = -root_ev_p0
-    if spec.cache_state is not None:
-        regrets_cpu = regrets.detach().cpu().numpy()
-        strategy_sums_cpu = strategy_sums.detach().cpu().numpy()
-        spec.cache_state.store_warm_start(
-            _gpu_plan_key(spec, template=packed.tree.template),
-            make_warm_start_state(
-                regret=tuple(float(value) for value in regrets_cpu),
-                strategy_sum=tuple(float(value) for value in strategy_sums_cpu),
-                source_key=_gpu_plan_key(spec, template=packed.tree.template),
-                blend_alpha=1.0,
-            ),
-        )
     return GpuSolveTrace(
         packed=packed,
         iterations=iterations,
@@ -618,8 +609,8 @@ def _run_gpu_solve(
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,
-        root_action_ev_player0=root_action_ev_p0,
-        root_action_ev_player1=root_action_ev_p1,
+        root_action_ev_player0=torch.as_tensor(root_action_ev_p0, dtype=torch.float32, device=backward_p0.device),
+        root_action_ev_player1=torch.as_tensor(root_action_ev_p1, dtype=torch.float32, device=backward_p1.device),
         root_ev_player0=root_ev_p0,
         root_ev_player1=root_ev_p1,
         gpu_backward_p0=backward_p0.detach().cpu().numpy(),
