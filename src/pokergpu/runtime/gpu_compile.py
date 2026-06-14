@@ -8,6 +8,7 @@ except Exception as exc:  # pragma: no cover
     raise RuntimeError(f"torch is required for GPU subtree compilation: {exc}") from exc
 
 from pokergpu.cfr.traversal import build_leaf_feature_batch
+from pokergpu.eval.tensor_builder import build_gpu_leaf_tensors
 from pokergpu.tree import NodeType
 from pokergpu.tree.builder import BuiltPublicTree
 
@@ -67,9 +68,12 @@ def compile_packed_subtree(
         frontier_node_indices,
         node_states=tree.node_states,
     )
+    leaf_feature_tensors = build_gpu_leaf_tensors(leaf_feature_batch, torch.device(device))
     action_infoset_index, action_slot_index = _action_maps(flat, infoset_remap, device=device)
     if action_infoset_index.numel() != action_slot_index.numel():
         raise ValueError("packed action maps must have matching lengths")
+    legal_action_mask = torch.ones_like(action_infoset_index, dtype=torch.bool, device=device)
+    card_removal_mask = torch.ones((tree.tree.node_count,), dtype=torch.bool, device=device)
     root_infoset = int(infoset_ids[0].item()) if infoset_ids.numel() else -1
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
     infoset_count = len(infoset_remap)
@@ -88,8 +92,11 @@ def compile_packed_subtree(
         chance_prob=chance_prob,
         frontier_nodes=frontier_nodes,
         leaf_feature_batch=leaf_feature_batch,
+        leaf_feature_tensors=leaf_feature_tensors,
         action_infoset_index=action_infoset_index,
         action_slot_index=action_slot_index,
+        legal_action_mask=legal_action_mask,
+        card_removal_mask=card_removal_mask,
         root_node=0,
         root_infoset=root_infoset,
         node_count=tree.tree.node_count,

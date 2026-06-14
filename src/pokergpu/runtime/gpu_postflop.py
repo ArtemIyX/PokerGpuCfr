@@ -48,6 +48,7 @@ class GpuSolveStats:
 class PackedGpuSolve:
     spec: PostflopResolveSpec
     tree: BuiltPublicTree
+    plan: "BatchedGpuPlan"
     layout: InfosetLayout
     root_infoset: int
     root_actions: tuple[str, ...]
@@ -60,6 +61,45 @@ class BatchedGpuSolveInput:
     spec: PostflopResolveSpec
     template: PublicTreeTemplate
     cache_key: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class BatchedGpuPlan:
+    node_type: torch.Tensor
+    node_first_child: torch.Tensor
+    node_child_count: torch.Tensor
+    node_parent: torch.Tensor
+    node_infoset: torch.Tensor
+    node_street: torch.Tensor
+    node_depth: torch.Tensor
+    node_terminal_payoff: torch.Tensor
+    node_is_frontier: torch.Tensor
+    forward_levels: tuple[dict[str, torch.Tensor], ...]
+    backward_levels: tuple[dict[str, torch.Tensor], ...]
+    level_frontier_mask: tuple[torch.Tensor, ...]
+    level_player_mask: tuple[torch.Tensor, ...]
+    edge_parent: torch.Tensor
+    edge_child: torch.Tensor
+    edge_node_type: torch.Tensor
+    edge_infoset: torch.Tensor
+    edge_action_slot: torch.Tensor
+    edge_chance_prob: torch.Tensor
+    level_nodes: tuple[torch.Tensor, ...]
+    node_player: torch.Tensor
+    level_edge_start: tuple[torch.Tensor, ...]
+    level_edge_count: tuple[torch.Tensor, ...]
+    level_edge_src: tuple[torch.Tensor, ...]
+    level_edge_dst: tuple[torch.Tensor, ...]
+    level_edge_infoset: tuple[torch.Tensor, ...]
+    level_edge_slot: tuple[torch.Tensor, ...]
+    level_edge_kind: tuple[torch.Tensor, ...]
+    level_edge_prob: tuple[torch.Tensor, ...]
+    frontier_nodes: torch.Tensor
+    frontier_leaf_batch: LeafFeatureBatch
+    root_child_nodes: torch.Tensor
+    root_child_parent_infoset: int
+    action_counts: torch.Tensor
+    action_offsets: torch.Tensor
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,7 +350,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
             root_infoset=cached.root_infoset,
             root_actions=cached.root_actions,
             packed_subtree=cached.packed_subtree,
-            gpu_state=_make_gpu_state(cached.plan, cached.packed_subtree, cached.layout),
+            gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout),
         )
     tree = built
     packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
@@ -320,9 +360,18 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
     if root_infoset is None:
         raise ValueError("root node must be a player infoset")
     levels = build_tree_levels(tree.tree)
+    plan = _build_batched_gpu_plan(
+        tree,
+        tree.actions_by_node,
+        levels,
+        layout,
+        frontier_leaf_batch=packed_subtree.leaf_feature_batch,
+        device=torch.device("cuda"),
+    )
     packed = PackedGpuSolve(
         spec=spec,
         tree=tree,
+        plan=plan,
         layout=layout,
         root_infoset=int(root_infoset),
         root_actions=tuple(_format_action(action) for action in tree.actions_by_node[0]),
@@ -331,6 +380,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
     packed = PackedGpuSolve(
         spec=packed.spec,
         tree=packed.tree,
+        plan=packed.plan,
         layout=packed.layout,
         root_infoset=packed.root_infoset,
         root_actions=packed.root_actions,
@@ -423,12 +473,6 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
         action_slot_index=packed.action_slot_index,
         action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
         action_counts=torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device),
-        level_edge_dst=tuple(),
-        level_edge_src=tuple(),
-        level_edge_infoset=tuple(),
-        level_edge_slot=tuple(),
-        level_edge_kind=tuple(),
-        level_edge_prob=tuple(),
         forward_reach_p0=forward_reach_p0,
         forward_reach_p1=forward_reach_p1,
         backward_p0=backward_p0,
@@ -440,6 +484,7 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
         root_strategy=root_strategy,
         frontier_nodes=packed.frontier_nodes,
         frontier_leaf_batch=packed.leaf_feature_batch,
+        frontier_leaf_tensors=packed.leaf_feature_tensors,
         node_type=packed.node_type,
         node_first_child=packed.first_child,
         node_child_count=packed.child_count,
@@ -459,6 +504,8 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
         level_nodes=tuple(),
         level_frontier_mask=tuple(),
         level_player_mask=tuple(),
+        level_legal_action_mask=tuple(),
+        level_card_removal_mask=tuple(),
         level_edge_start=tuple(),
         level_edge_count=tuple(),
         level_edge_src=tuple(),
@@ -538,7 +585,7 @@ def _run_gpu_solve(
     node_count = tree.tree.node_count
     state = packed.gpu_state
     if state is None:
-        state = _make_gpu_state(packed.plan, packed.packed_subtree, packed.layout)
+        state = _make_gpu_state(packed.packed_subtree, packed.layout)
         packed = PackedGpuSolve(
             spec=packed.spec,
             tree=packed.tree,
@@ -650,7 +697,7 @@ def _run_gpu_solve(
     )
     root_action_ev_p0 = _root_action_values_from_backward(
         tree.tree,
-        plan,
+        packed.plan,
         backward_p0,
         backward_p1,
         root_infoset,

@@ -192,8 +192,11 @@ class PackedGpuSubtree:
     chance_prob: Any
     frontier_nodes: Any
     leaf_feature_batch: Any
+    leaf_feature_tensors: Any
     action_infoset_index: Any
     action_slot_index: Any
+    legal_action_mask: Any
+    card_removal_mask: Any
     root_node: int = 0
     root_infoset: int = -1
     node_count: int = 0
@@ -226,12 +229,6 @@ class PackedGpuSolveState:
     action_slot_index: Any
     action_offsets: Any
     action_counts: Any
-    level_edge_dst: Any
-    level_edge_src: Any
-    level_edge_infoset: Any
-    level_edge_slot: Any
-    level_edge_kind: Any
-    level_edge_prob: Any
     forward_reach_p0: Any
     forward_reach_p1: Any
     backward_p0: Any
@@ -243,6 +240,7 @@ class PackedGpuSolveState:
     root_strategy: Any
     frontier_nodes: Any
     frontier_leaf_batch: Any
+    frontier_leaf_tensors: Any
     node_type: Any
     node_first_child: Any
     node_child_count: Any
@@ -262,6 +260,8 @@ class PackedGpuSolveState:
     level_nodes: Any
     level_frontier_mask: Any
     level_player_mask: Any
+    level_legal_action_mask: Any
+    level_card_removal_mask: Any
     level_edge_start: Any
     level_edge_count: Any
     level_edge_src: Any
