@@ -5,8 +5,8 @@ import torch
 from pokergpu.cfr import InfosetLayout
 
 
-_GPU_MIN_LEVEL_WORK = 96
-_GPU_MAX_LEVEL_MERGE = 6
+_GPU_MIN_LEVEL_WORK = 256
+_GPU_MAX_LEVEL_MERGE = 12
 
 
 def compact_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:

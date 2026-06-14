@@ -295,6 +295,53 @@ def build_batched_gpu_plan(
         backward_edge_slot_p1.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
         backward_edge_flat_p1.append(torch.as_tensor([flat_view.edge_infoset_id[i] * max_actions + flat_view.edge_action_slot[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
         backward_edge_prob_p1.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in backward_p1_idx], dtype=torch.float32, device=device))
+    def _filter_backward_triplet(
+        src_list: list[torch.Tensor],
+        dst_list: list[torch.Tensor],
+        infoset_list: list[torch.Tensor],
+        slot_list: list[torch.Tensor],
+        flat_list: list[torch.Tensor],
+        prob_list: list[torch.Tensor],
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+        filtered_src: list[torch.Tensor] = []
+        filtered_dst: list[torch.Tensor] = []
+        filtered_infoset: list[torch.Tensor] = []
+        filtered_slot: list[torch.Tensor] = []
+        filtered_flat: list[torch.Tensor] = []
+        filtered_prob: list[torch.Tensor] = []
+        action_limit = layout.total_actions
+        for index in range(len(src_list)):
+            src = src_list[index]
+            dst = dst_list[index]
+            infoset = infoset_list[index]
+            slot = slot_list[index]
+            flat = flat_list[index]
+            prob = prob_list[index]
+            valid = (src >= 0) & (src < tree.tree.node_count) & (dst >= 0) & (dst < tree.tree.node_count)
+            valid = valid & (infoset >= 0) & (infoset < layout.infoset_count) if hasattr(layout, "infoset_count") else valid
+            valid = valid & (slot >= 0) & (slot < max_actions)
+            valid = valid & (flat >= 0) & (flat < action_limit)
+            filtered_src.append(src[valid])
+            filtered_dst.append(dst[valid])
+            filtered_infoset.append(infoset[valid])
+            filtered_slot.append(slot[valid])
+            filtered_flat.append(flat[valid])
+            filtered_prob.append(prob[valid])
+        return filtered_src, filtered_dst, filtered_infoset, filtered_slot, filtered_flat, filtered_prob
+    compact_backward_edge_src_chance, compact_backward_edge_dst_chance, _, _, _, compact_backward_edge_prob_chance = _filter_backward_triplet(
+        backward_edge_src_chance, backward_edge_dst_chance, backward_edge_src_chance, backward_edge_dst_chance, backward_edge_src_chance, backward_edge_prob_chance
+    )
+    compact_backward_edge_src_p0, compact_backward_edge_dst_p0, compact_backward_edge_infoset_p0, compact_backward_edge_slot_p0, compact_backward_edge_flat_p0, compact_backward_edge_prob_p0 = _filter_backward_triplet(
+        backward_edge_src_p0, backward_edge_dst_p0, backward_edge_infoset_p0, backward_edge_slot_p0, backward_edge_flat_p0, backward_edge_prob_p0
+    )
+    compact_backward_edge_src_p1, compact_backward_edge_dst_p1, compact_backward_edge_infoset_p1, compact_backward_edge_slot_p1, compact_backward_edge_flat_p1, compact_backward_edge_prob_p1 = _filter_backward_triplet(
+        backward_edge_src_p1, backward_edge_dst_p1, backward_edge_infoset_p1, backward_edge_slot_p1, backward_edge_flat_p1, backward_edge_prob_p1
+    )
+    compact_backward_edge_src = compact_backward_edge_src_p0
+    compact_backward_edge_dst = compact_backward_edge_dst_p0
+    compact_backward_edge_infoset = compact_backward_edge_infoset_p0
+    compact_backward_edge_slot = compact_backward_edge_slot_p0
+    compact_backward_edge_prob = compact_backward_edge_prob_p0
     for node_index in range(tree.tree.node_count):
         node_type = tree.tree.node_types[node_index]
         node_player.append(0 if node_type is NodeType.PLAYER0 else 1 if node_type is NodeType.PLAYER1 else -1)

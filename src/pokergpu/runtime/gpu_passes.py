@@ -179,6 +179,7 @@ def _run_compact_iteration_core(
     strategy_sums: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
+    debug: bool = False,
 ) -> None:
     compact_level_count = min(
         len(state.compact_level_edge_src),
@@ -226,6 +227,7 @@ def _run_compact_iteration_core(
             _COMPACT_MODE_BACKWARD,
             out_p0=out_p0,
             out_p1=out_p1,
+            debug=debug,
         )
     for index in range(compact_backward_level_count):
         _compact_pass_impl(
@@ -294,6 +296,7 @@ def run_compact_iteration_gpu(
             strategy_sums=strategy_sums,
             node_values_p0=node_values_p0,
             node_values_p1=node_values_p1,
+            debug=debug,
         )
     if debug:
         root_children = state.root_child_nodes
@@ -359,12 +362,14 @@ def _compact_pass_impl(
     strategy_sums: torch.Tensor | None = None,
     node_values_p0: torch.Tensor | None = None,
     node_values_p1: torch.Tensor | None = None,
+    debug: bool = False,
 ) -> None:
     if edge_src.numel() == 0:
         return
     if mode == _COMPACT_MODE_FORWARD:
         if node_range_p0 is None or node_range_p1 is None:
             return
+        edge_src = edge_src.clamp(0, node_range_p0.numel() - 1)
         if edge_infoset is None or edge_slot is None:
             probs = edge_prob.unsqueeze(1)
             edge_dst = edge_dst.clamp(0, node_range_p0.numel() - 1)
@@ -383,10 +388,9 @@ def _compact_pass_impl(
     if mode == _COMPACT_MODE_BACKWARD:
         if out_p0 is None or out_p1 is None:
             return
-        valid = (edge_dst >= 0) & (edge_dst < out_p0.numel())
-        edge_dst = edge_dst.clamp(0, out_p0.numel() - 1)
-        child_p0 = out_p0[edge_dst] * valid.to(out_p0.dtype)
-        child_p1 = out_p1[edge_dst] * valid.to(out_p1.dtype)
+        edge_src = edge_src
+        child_p0 = out_p0[edge_dst]
+        child_p1 = out_p1[edge_dst]
         if edge_infoset is None or edge_slot is None:
             out_p0.index_add_(0, edge_src, edge_prob * child_p0)
             out_p1.index_add_(0, edge_src, edge_prob * child_p1)
@@ -412,11 +416,9 @@ def _compact_pass_impl(
             return
         if edge_infoset is None or edge_slot is None:
             return
-        valid = (edge_flat >= 0) & (edge_flat < strategy_table.numel()) & (edge_dst >= 0) & (edge_dst < node_values_p0.numel())
-        edge_dst = edge_dst.clamp(0, node_values_p0.numel() - 1)
-        child_values = node_values_p0[edge_dst] * valid.to(node_values_p0.dtype)
-        flat = (action_offsets[edge_infoset.clamp(0, action_offsets.numel() - 1)] + edge_slot).clamp(0, strategy_table.numel() - 1)
-        strat = strategy_table.view(-1).index_select(0, flat) * valid.to(strategy_table.dtype)
+        child_values = node_values_p0[edge_dst]
+        flat = action_offsets[edge_infoset.clamp(0, action_offsets.numel() - 1)] + edge_slot
+        strat = strategy_table.view(-1).index_select(0, flat)
         infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
         infoset_values.scatter_add_(0, edge_infoset.clamp(0, action_counts.numel() - 1), strat * child_values)
         edge_infoset_safe = edge_infoset.clamp(0, action_counts.numel() - 1)
