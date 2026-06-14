@@ -173,13 +173,13 @@ def average_strategy_from_gpu(
 ) -> np.ndarray:
     count = int(action_counts[infoset_index].item())
     start = int(action_offsets[infoset_index].item())
-    values = strategy_sums[start : start + count].detach().cpu().numpy().astype(np.float32, copy=False)
-    total = float(np.sum(values, dtype=np.float64))
+    values = strategy_sums.narrow(0, start, count)
+    total = float(values.sum().item())
     if total <= 0.0 and count > 0:
         return np.full(count, 1.0 / count, dtype=np.float32)
     if total <= 0.0:
         return np.zeros(0, dtype=np.float32)
-    return np.asarray(values / np.float32(total), dtype=np.float32)
+    return values.div(total).detach().cpu().numpy().astype(np.float32, copy=False)
 
 
 def make_cpu_store(
@@ -638,9 +638,9 @@ def evaluate_frontier_leaves(
         }
     else:
         tensors = state.frontier_leaf_tensors
-        tensors["range_p0"] = state.node_range_p0[state.frontier_nodes]
-        tensors["range_p1"] = state.node_range_p1[state.frontier_nodes]
-        tensors["range_p2"] = state.node_range_p2[state.frontier_nodes]
+        tensors["range_p0"].copy_(state.node_range_p0.index_select(0, state.frontier_nodes))
+        tensors["range_p1"].copy_(state.node_range_p1.index_select(0, state.frontier_nodes))
+        tensors["range_p2"].copy_(state.node_range_p2.index_select(0, state.frontier_nodes))
     evaluate_tensors = getattr(evaluator, "evaluate_tensors", None)
     if evaluate_tensors is not None:
         try:

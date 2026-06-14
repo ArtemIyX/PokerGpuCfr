@@ -310,6 +310,10 @@ def _make_gpu_state(
     compact_level_edge_prob = plan.compact_level_edge_prob if plan is not None else tuple()
     infoset_blocks = plan.infoset_blocks if plan is not None else tuple()
     frontier_leaf_tensors = build_gpu_leaf_tensors(packed.leaf_feature_batch, device) if packed.leaf_feature_batch.size > 0 else None
+    if frontier_leaf_tensors is not None:
+        frontier_leaf_tensors["range_p0"] = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
+        frontier_leaf_tensors["range_p1"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
+        frontier_leaf_tensors["range_p2"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -676,14 +680,19 @@ def _root_action_values_from_backward(
     root_node = 0
     start = int(tree.first_child[root_node])
     count = int(tree.child_count[root_node])
-    values: list[float] = []
-    for action_index in range(min(count, int(plan.root_child_nodes.numel()))):
-        child_node = int(tree.children[start + action_index].child)
-        if child_node < 0 or child_node >= backward_p0.numel():
-            values.append(0.0)
-            continue
-        values.append(float(backward_p0[child_node].item()))
-    return np.asarray(values, dtype=np.float32)
+    limit = min(count, int(plan.root_child_nodes.numel()))
+    if limit <= 0:
+        return np.zeros(0, dtype=np.float32)
+    child_nodes = torch.as_tensor(
+        [int(tree.children[start + action_index].child) for action_index in range(limit)],
+        dtype=torch.int64,
+        device=backward_p0.device,
+    )
+    valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
+    values = torch.zeros(limit, dtype=torch.float32, device=backward_p0.device)
+    if bool(valid.any()):
+        values[valid] = backward_p0[child_nodes[valid]]
+    return values.detach().cpu().numpy().astype(np.float32, copy=False)
 
 
 def debug_first_gpu_cpu_divergence(
