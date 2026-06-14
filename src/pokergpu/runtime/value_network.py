@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ContextManager
+from typing import Any, Callable, ContextManager, cast
 from contextlib import nullcontext
+from functools import lru_cache
 
 import numpy as np
 import torch
@@ -24,16 +25,20 @@ from pokergpu.value_network.dataset import (
 from pokergpu.value_network.model import ValueMLP, build_value_model, infer_value
 from pokergpu.value_network.target import ValueFeatureSpec, ValueTargetKind
 
-try:
-    from torch.profiler import record_function as _TorchRecordFunction
-except Exception:  # pragma: no cover
-    _TorchRecordFunction = None  # type: ignore[assignment]
-
-
 def record_function(name: str) -> ContextManager[None]:
-    if _TorchRecordFunction is None:
+    profiler = _get_record_function()
+    if profiler is None:
         return nullcontext()
-    return _TorchRecordFunction(name)
+    return cast(ContextManager[None], profiler(name))
+
+
+@lru_cache(maxsize=1)
+def _get_record_function() -> Any:
+    try:
+        from torch.profiler import record_function
+    except Exception:  # pragma: no cover
+        return None
+    return cast(Callable[[str], ContextManager[None]], record_function)
 
 
 @dataclass(frozen=True, slots=True)

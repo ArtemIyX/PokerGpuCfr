@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import time
 from contextlib import nullcontext
-from typing import Any, ContextManager, cast
+from functools import lru_cache
+from typing import Any, Callable, ContextManager, cast
 
 import numpy as np
 
@@ -24,16 +25,20 @@ from pokergpu.tree import NodeType, PublicTree
 
 from .gpu_plan import concat_compact_level_edges, concat_level_edges
 
-try:
-    from torch.profiler import record_function as _TorchRecordFunction
-except Exception:  # pragma: no cover
-    _TorchRecordFunction = None  # type: ignore[assignment]
-
-
 def record_function(name: str) -> ContextManager[None]:
-    if _TorchRecordFunction is None:
+    profiler = _get_record_function()
+    if profiler is None:
         return nullcontext()
-    return _TorchRecordFunction(name)
+    return cast(ContextManager[None], profiler(name))
+
+
+@lru_cache(maxsize=1)
+def _get_record_function() -> Any:
+    try:
+        from torch.profiler import record_function
+    except Exception:  # pragma: no cover
+        return None
+    return cast(Callable[[str], ContextManager[None]], record_function)
 
 _COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
 _REGRET_MATCH_COMPILE_ENABLED = os.getenv("POKERGPU_REGRET_MATCH_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
@@ -238,6 +243,13 @@ def _run_compact_iteration_core(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
+    node_range_p0.zero_()
+    node_range_p1.zero_()
+    if node_range_p0.shape[0] > 0:
+        node_range_p0[0].fill_(1.0)
+        node_range_p1[0].fill_(1.0)
+    out_p0.zero_()
+    out_p1.zero_()
     for index, _level_indices in enumerate(state.compact_forward_levels):
         edge_src = state.compact_level_edge_src[index]
         edge_dst = state.compact_level_edge_dst[index]
@@ -336,17 +348,7 @@ def run_compact_iteration_gpu(
     node_values_p1: torch.Tensor,
     evaluator: LeafEvaluator,
 ) -> None:
-    with record_function("solve::range_init"):
-        state.node_range_p0.zero_()
-        state.node_range_p1.zero_()
-        state.node_range_p2.zero_()
-        if state.node_range_p0.shape[0] > 0:
-            state.node_range_p0[0].fill_(1.0)
-            state.node_range_p1[0].fill_(1.0)
-            state.node_range_p2[0].fill_(1.0)
     with record_function("solve::leaf_eval"):
-        out_p0.zero_()
-        out_p1.zero_()
         if state.frontier_nodes.numel() > 0:
             leaf_values = evaluate_frontier_leaves(state, evaluator)
             out_p0[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
