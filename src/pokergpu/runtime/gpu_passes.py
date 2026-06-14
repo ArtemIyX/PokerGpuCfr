@@ -20,7 +20,22 @@ from pokergpu.eval.types import LeafFeatureBatch, LeafValueBatch
 from pokergpu.runtime.cache import PackedGpuSolveState
 from pokergpu.tree import NodeType, PublicTree
 
-from .gpu_types import BatchedGpuPlan
+from .gpu_plan import concat_level_edges, propagate_node_ranges
+
+__all__ = [
+    "regret_matching_table_inplace",
+    "average_strategy_from_gpu",
+    "make_cpu_store",
+    "update_regrets_gpu",
+    "update_regrets_compact_group",
+    "forward_pass_gpu",
+    "forward_pass_compact_group",
+    "backward_pass_gpu",
+    "backward_pass_compact_group",
+    "evaluate_frontier_leaves",
+    "concat_level_edges",
+    "propagate_node_ranges",
+]
 
 
 def regret_matching_table_inplace(
@@ -123,9 +138,7 @@ def update_regrets_compact_group(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    from .gpu_postflop import _concat_level_edges
-
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(state, level_indices)
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = concat_level_edges(state, level_indices)
     valid = (
         (edge_infoset >= 0)
         & (edge_infoset < strategy_table.shape[0])
@@ -155,9 +168,7 @@ def forward_pass_gpu(
     node_range_p1: torch.Tensor,
     timings: list[float] | None = None,
 ) -> None:
-    from .gpu_postflop import _propagate_node_ranges
-
-    _propagate_node_ranges(state)
+    propagate_node_ranges(state)
     for index, level_indices in enumerate(state.compact_forward_levels):
         started = time.monotonic()
         forward_pass_compact_group(state, level_indices, strategy_table, node_range_p0, node_range_p1)
@@ -172,9 +183,7 @@ def forward_pass_compact_group(
     node_range_p0: torch.Tensor,
     node_range_p1: torch.Tensor,
 ) -> None:
-    from .gpu_postflop import _concat_level_edges
-
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(state, level_indices)
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = concat_level_edges(state, level_indices)
     valid = (
         (edge_infoset >= 0)
         & (edge_infoset < strategy_table.shape[0])
@@ -247,9 +256,7 @@ def backward_pass_compact_group(
     out_p0: torch.Tensor,
     out_p1: torch.Tensor,
 ) -> None:
-    from .gpu_postflop import _concat_level_edges
-
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(state, level_indices)
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = concat_level_edges(state, level_indices)
     valid = (
         (edge_infoset >= 0)
         & (edge_infoset < strategy_table.shape[0])
@@ -311,62 +318,3 @@ def evaluate_frontier_leaves(
     if evaluate is not None:
         return cast(LeafValueBatch, evaluate(state.packed.leaf_feature_batch))
     raise RuntimeError("GPU leaf evaluation requires evaluate_tensors support")
-
-
-def concat_level_edges(
-    state: PackedGpuSolveState,
-    level_indices: tuple[int, ...],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    if not level_indices:
-        empty_i64 = torch.empty(0, dtype=torch.int64, device=state.regrets.device)
-        empty_f32 = torch.empty(0, dtype=torch.float32, device=state.regrets.device)
-        return empty_i64, empty_i64, empty_i64, empty_i64, empty_i64, empty_f32
-    edge_src = torch.cat([state.level_edge_src[index] for index in level_indices], dim=0)
-    edge_dst = torch.cat([state.level_edge_dst[index] for index in level_indices], dim=0)
-    edge_infoset = torch.cat([state.level_edge_infoset[index] for index in level_indices], dim=0)
-    edge_slot = torch.cat([state.level_edge_slot[index] for index in level_indices], dim=0)
-    edge_kind = torch.cat([state.level_edge_kind[index] for index in level_indices], dim=0)
-    edge_prob = torch.cat([state.level_edge_prob[index] for index in level_indices], dim=0)
-    return edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob
-
-
-def init_gpu_ranges(
-    root_ranges: tuple[RangeVector, ...],
-    *,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    tensors = []
-    for index in range(6):
-        if index < len(root_ranges):
-            values = root_ranges[index].values
-        else:
-            values = np.zeros(1326, dtype=np.float32)
-        tensors.append(torch.as_tensor(values, dtype=torch.float32, device=device))
-    return tensors[0], tensors[1], tensors[2], tensors[3], tensors[4], tensors[5]
-
-
-def propagate_node_ranges(state: PackedGpuSolveState) -> None:
-    state.node_range_p0.zero_()
-    state.node_range_p1.zero_()
-    state.node_range_p2.zero_()
-    state.node_range_p0[0] = torch.ones_like(state.node_range_p0[0])
-    state.node_range_p1[0] = torch.ones_like(state.node_range_p1[0])
-    state.node_range_p2[0] = torch.ones_like(state.node_range_p2[0])
-    for level_index in range(len(state.level_edge_dst)):
-        edge_src = state.level_edge_src[level_index]
-        edge_dst = state.level_edge_dst[level_index]
-        edge_kind = state.level_edge_kind[level_index]
-        edge_prob = state.level_edge_prob[level_index]
-        if edge_src.numel() == 0:
-            continue
-        for src, dst, kind, prob in zip(edge_src.tolist(), edge_dst.tolist(), edge_kind.tolist(), edge_prob.tolist(), strict=True):
-            src_i = int(src)
-            dst_i = int(dst)
-            if kind == 0:
-                state.node_range_p0[dst_i] = state.node_range_p0[src_i] * prob
-                state.node_range_p1[dst_i] = state.node_range_p1[src_i] * prob
-                state.node_range_p2[dst_i] = state.node_range_p2[src_i] * prob
-            else:
-                state.node_range_p0[dst_i] = state.node_range_p0[src_i]
-                state.node_range_p1[dst_i] = state.node_range_p1[src_i]
-                state.node_range_p2[dst_i] = state.node_range_p2[src_i]
