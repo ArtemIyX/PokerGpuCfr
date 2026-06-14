@@ -23,6 +23,7 @@ from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import LeafEvaluator
 from pokergpu.eval.types import LeafFeatureBatch, LeafValueBatch
+from pokergpu.eval.tensor_builder import build_gpu_leaf_tensors
 from pokergpu.runtime.cache import LruCache, PackedGpuSolveState, PackedGpuSubtree
 from pokergpu.runtime.caching import TreeTemplateKey, make_warm_start_state
 from pokergpu.tree import NodeType, PublicTree
@@ -312,6 +313,7 @@ def _make_gpu_state(
     compact_level_edge_kind = plan.compact_level_edge_kind if plan is not None else tuple()
     compact_level_edge_prob = plan.compact_level_edge_prob if plan is not None else tuple()
     infoset_blocks = plan.infoset_blocks if plan is not None else tuple()
+    frontier_leaf_tensors = build_gpu_leaf_tensors(packed.leaf_feature_batch, device) if packed.leaf_feature_batch.size > 0 else None
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -365,6 +367,7 @@ def _make_gpu_state(
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
         infoset_blocks=infoset_blocks,
+        frontier_leaf_tensors=frontier_leaf_tensors,
         root_child_nodes=tuple(),
     )
 

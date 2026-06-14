@@ -272,6 +272,7 @@ class PackedGpuSolveState:
     compact_forward_levels: Any
     compact_backward_levels: Any
     infoset_blocks: Any
+    frontier_leaf_tensors: Any
     root_child_nodes: Any
     root_child_parent_infoset: int = -1
     iteration: int = 0

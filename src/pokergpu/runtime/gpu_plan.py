@@ -66,17 +66,21 @@ def propagate_node_ranges(state: Any) -> None:
         edge_prob = state.level_edge_prob[level_index]
         if edge_src.numel() == 0:
             continue
-        for src, dst, kind, prob in zip(edge_src.tolist(), edge_dst.tolist(), edge_kind.tolist(), edge_prob.tolist(), strict=True):
-            src_i = int(src)
-            dst_i = int(dst)
-            if kind == 0:
-                state.node_range_p0[dst_i] = state.node_range_p0[src_i] * prob
-                state.node_range_p1[dst_i] = state.node_range_p1[src_i] * prob
-                state.node_range_p2[dst_i] = state.node_range_p2[src_i] * prob
-            else:
-                state.node_range_p0[dst_i] = state.node_range_p0[src_i]
-                state.node_range_p1[dst_i] = state.node_range_p1[src_i]
-                state.node_range_p2[dst_i] = state.node_range_p2[src_i]
+        chance_mask = edge_kind == 0
+        if bool(chance_mask.any()):
+            src = edge_src[chance_mask]
+            dst = edge_dst[chance_mask]
+            weights = edge_prob[chance_mask].unsqueeze(1)
+            state.node_range_p0.index_add_(0, dst, state.node_range_p0[src] * weights)
+            state.node_range_p1.index_add_(0, dst, state.node_range_p1[src] * weights)
+            state.node_range_p2.index_add_(0, dst, state.node_range_p2[src] * weights)
+        player_mask = edge_kind != 0
+        if bool(player_mask.any()):
+            src = edge_src[player_mask]
+            dst = edge_dst[player_mask]
+            state.node_range_p0.index_add_(0, dst, state.node_range_p0[src])
+            state.node_range_p1.index_add_(0, dst, state.node_range_p1[src])
+            state.node_range_p2.index_add_(0, dst, state.node_range_p2[src])
 
 
 def init_gpu_ranges(

@@ -325,21 +325,27 @@ def evaluate_frontier_leaves(
     state: PackedGpuSolveState,
     evaluator: LeafEvaluator,
 ) -> LeafValueBatch:
-    tensors = {
-        "range_p0": state.node_range_p0[state.frontier_nodes],
-        "range_p1": state.node_range_p1[state.frontier_nodes],
-        "range_p2": state.node_range_p2[state.frontier_nodes],
-        "street": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-        "pot": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "stack_p0": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "stack_p1": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "board_size": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-        "player_to_act": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-        "terminal_payoff": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "is_terminal": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
-        "is_frontier": torch.ones(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
-        "infoset_id": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-    }
+    if state.frontier_leaf_tensors is None:
+        tensors = {
+            "range_p0": state.node_range_p0[state.frontier_nodes],
+            "range_p1": state.node_range_p1[state.frontier_nodes],
+            "range_p2": state.node_range_p2[state.frontier_nodes],
+            "street": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
+            "pot": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
+            "stack_p0": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
+            "stack_p1": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
+            "board_size": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
+            "player_to_act": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
+            "terminal_payoff": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
+            "is_terminal": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
+            "is_frontier": torch.ones(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
+            "infoset_id": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
+        }
+    else:
+        tensors = state.frontier_leaf_tensors
+        tensors["range_p0"] = state.node_range_p0[state.frontier_nodes]
+        tensors["range_p1"] = state.node_range_p1[state.frontier_nodes]
+        tensors["range_p2"] = state.node_range_p2[state.frontier_nodes]
     evaluate_tensors = getattr(evaluator, "evaluate_tensors", None)
     if evaluate_tensors is not None:
         try:
