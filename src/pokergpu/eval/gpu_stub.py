@@ -65,5 +65,29 @@ class GpuBatchLeafEvaluator(LeafEvaluator):
         except Exception:
             return self._cpu_fallback.evaluate(batch)
 
+    def evaluate_tensors(self, tensors: dict[str, torch.Tensor]) -> LeafValueBatch:
+        if self._device.type != "cuda":
+            raise RuntimeError("GPU tensors require a CUDA device")
+        ev_p0 = torch.zeros(tensors["street"].shape[0], dtype=torch.float32, device=self._device)
+        ev_p1 = torch.zeros_like(ev_p0)
+        terminal_payoff = tensors.get("terminal_payoff")
+        if terminal_payoff is not None:
+            terminal_mask = ~torch.isnan(terminal_payoff)
+            if torch.any(terminal_mask):
+                ev_p0[terminal_mask] = terminal_payoff[terminal_mask]
+                ev_p1[terminal_mask] = -terminal_payoff[terminal_mask]
+        return LeafValueBatch(
+            values=np.stack(
+                (
+                    ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
+                    ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
+                ),
+                axis=1,
+            ),
+            ev_player0=ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
+            ev_player1=ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
+            ev_player2=(-(ev_p0 + ev_p1)).detach().to("cpu", dtype=torch.float32).numpy(),
+        )
+
     def evaluate_many(self, batches: tuple[LeafFeatureBatch, ...]) -> tuple[LeafValueBatch, ...]:
         return tuple(self.evaluate(batch) for batch in batches)

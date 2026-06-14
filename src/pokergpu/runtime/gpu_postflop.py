@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import Any
+from typing import cast
 
 import numpy as np
 
@@ -24,7 +25,7 @@ from pokergpu.core.canonical import canonical_board_key
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.eval import LeafEvaluator
-from pokergpu.eval.types import LeafFeatureBatch
+from pokergpu.eval.types import LeafFeatureBatch, LeafValueBatch
 from pokergpu.runtime.cache import LruCache, PackedGpuSolveState, PackedGpuSubtree
 from pokergpu.runtime.caching import TreeTemplateKey, make_warm_start_state
 from pokergpu.tree import NodeType, PublicTree
@@ -1061,7 +1062,7 @@ def _backward_pass_gpu_batched(
 
     frontier_nodes = state.frontier_nodes
     if int(frontier_nodes.numel()) > 0:
-        leaf_values = evaluator.evaluate(state.frontier_leaf_batch)
+        leaf_values = _evaluate_frontier_leaves(state, evaluator)
         out_p0[frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
 
@@ -1102,6 +1103,20 @@ def _backward_pass_gpu_batched(
             probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
             out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
             out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
+
+
+def _evaluate_frontier_leaves(
+    state: PackedGpuSolveState,
+    evaluator: LeafEvaluator,
+) -> LeafValueBatch:
+    tensors = state.frontier_leaf_tensors
+    evaluate_tensors = getattr(evaluator, "evaluate_tensors", None)
+    if evaluate_tensors is not None:
+        try:
+            return cast(LeafValueBatch, evaluate_tensors(tensors))
+        except Exception:
+            pass
+    return evaluator.evaluate(state.frontier_leaf_batch)
 
 
 def _update_store_from_gpu(
