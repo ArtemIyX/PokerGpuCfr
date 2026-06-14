@@ -364,7 +364,13 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
             root_infoset=cached.root_infoset,
             root_actions=cached.root_actions,
             packed_subtree=cached.packed_subtree,
-            gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout, cached.root_ranges),
+            gpu_state=_make_gpu_state(
+                cached.packed_subtree,
+                cached.layout,
+                cached.root_ranges,
+                compact_forward_levels=cached.plan.compact_forward_levels,
+                compact_backward_levels=cached.plan.compact_backward_levels,
+            ),
         )
     tree = built
     packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
@@ -400,7 +406,13 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         root_infoset=packed.root_infoset,
         root_actions=packed.root_actions,
         packed_subtree=packed.packed_subtree,
-        gpu_state=_make_gpu_state(packed.packed_subtree, packed.layout, packed.root_ranges),
+        gpu_state=_make_gpu_state(
+            packed.packed_subtree,
+            packed.layout,
+            packed.root_ranges,
+            compact_forward_levels=plan.compact_forward_levels,
+            compact_backward_levels=plan.compact_backward_levels,
+        ),
     )
     _load_warm_start_into_gpu_state(packed, spec)
     _GPU_PLAN_CACHE.put(cache_key, packed)
@@ -466,6 +478,9 @@ def _make_gpu_state(
     packed: PackedGpuSubtree,
     layout: InfosetLayout,
     root_ranges: tuple[RangeVector, ...],
+    *,
+    compact_forward_levels: tuple[tuple[int, ...], ...] = (),
+    compact_backward_levels: tuple[tuple[int, ...], ...] = (),
 ) -> PackedGpuSolveState:
     device = packed.node_type.device
     action_count = int(layout.total_actions)
@@ -522,6 +537,8 @@ def _make_gpu_state(
         level_edge_slot=tuple(),
         level_edge_kind=tuple(),
         level_edge_prob=tuple(),
+        compact_forward_levels=compact_forward_levels,
+        compact_backward_levels=compact_backward_levels,
         root_child_nodes=tuple(),
     )
 
@@ -596,7 +613,13 @@ def _run_gpu_solve(
     node_count = tree.tree.node_count
     state = packed.gpu_state
     if state is None:
-        state = _make_gpu_state(packed.packed_subtree, packed.layout, packed.root_ranges)
+        state = _make_gpu_state(
+            packed.packed_subtree,
+            packed.layout,
+            packed.root_ranges,
+            compact_forward_levels=packed.plan.compact_forward_levels,
+            compact_backward_levels=packed.plan.compact_backward_levels,
+        )
         packed = PackedGpuSolve(
             spec=packed.spec,
             tree=packed.tree,
@@ -928,12 +951,10 @@ def _update_regrets_gpu(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    for level_index in range(len(state.level_edge_dst)):
-        edge_src = state.level_edge_src[level_index]
-        edge_dst = state.level_edge_dst[level_index]
-        edge_infoset = state.level_edge_infoset[level_index]
-        edge_slot = state.level_edge_slot[level_index]
-        edge_kind = state.level_edge_kind[level_index]
+    for level_indices in state.compact_backward_levels:
+        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
+            state, level_indices
+        )
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -964,12 +985,10 @@ def _update_regrets_gpu_batched(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    for level_index in range(len(state.level_edge_dst)):
-        edge_src = state.level_edge_src[level_index]
-        edge_dst = state.level_edge_dst[level_index]
-        edge_infoset = state.level_edge_infoset[level_index]
-        edge_slot = state.level_edge_slot[level_index]
-        edge_kind = state.level_edge_kind[level_index]
+    for level_indices in state.compact_backward_levels:
+        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
+            state, level_indices
+        )
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -1007,13 +1026,10 @@ def _forward_pass_gpu_batched(
     node_range_p1: torch.Tensor,
 ) -> None:
     _propagate_node_ranges(state)
-    for level_index in range(len(state.level_edge_dst)):
-        edge_src = state.level_edge_src[level_index]
-        edge_dst = state.level_edge_dst[level_index]
-        edge_infoset = state.level_edge_infoset[level_index]
-        edge_slot = state.level_edge_slot[level_index]
-        edge_kind = state.level_edge_kind[level_index]
-        edge_prob = state.level_edge_prob[level_index]
+    for level_indices in state.compact_forward_levels:
+        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
+            state, level_indices
+        )
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -1079,13 +1095,10 @@ def _backward_pass_gpu_batched(
         out_p0[frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
 
-    for level_index in reversed(range(len(state.level_edge_dst))):
-        edge_src = state.level_edge_src[level_index]
-        edge_dst = state.level_edge_dst[level_index]
-        edge_infoset = state.level_edge_infoset[level_index]
-        edge_slot = state.level_edge_slot[level_index]
-        edge_kind = state.level_edge_kind[level_index]
-        edge_prob = state.level_edge_prob[level_index]
+    for level_indices in reversed(state.compact_backward_levels):
+        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
+            state, level_indices
+        )
         valid = (
             (edge_infoset >= 0)
             & (edge_infoset < strategy_table.shape[0])
@@ -1152,21 +1165,33 @@ def _merge_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[in
     merged: list[tuple[int, ...]] = []
     pending: list[int] = []
     pending_work = 0
-    for index, level in enumerate(levels):
-        pending.extend(level)
+    for level_index, level in enumerate(levels):
+        pending.append(level_index)
         pending_work += len(level)
-        if pending_work >= _GPU_MIN_LEVEL_WORK or len(pending) >= _GPU_MIN_LEVEL_WORK:
-            merged.append(tuple(pending))
-            pending = []
-            pending_work = 0
-            continue
-        if len(pending) >= _GPU_MAX_LEVEL_MERGE:
+        if pending_work >= _GPU_MIN_LEVEL_WORK or len(pending) >= _GPU_MAX_LEVEL_MERGE:
             merged.append(tuple(pending))
             pending = []
             pending_work = 0
     if pending:
         merged.append(tuple(pending))
     return tuple(merged)
+
+
+def _concat_level_edges(
+    state: PackedGpuSolveState,
+    level_indices: tuple[int, ...],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    if not level_indices:
+        empty_i64 = torch.empty(0, dtype=torch.int64, device=state.regrets.device)
+        empty_f32 = torch.empty(0, dtype=torch.float32, device=state.regrets.device)
+        return empty_i64, empty_i64, empty_i64, empty_i64, empty_i64, empty_f32
+    edge_src = torch.cat([state.level_edge_src[index] for index in level_indices], dim=0)
+    edge_dst = torch.cat([state.level_edge_dst[index] for index in level_indices], dim=0)
+    edge_infoset = torch.cat([state.level_edge_infoset[index] for index in level_indices], dim=0)
+    edge_slot = torch.cat([state.level_edge_slot[index] for index in level_indices], dim=0)
+    edge_kind = torch.cat([state.level_edge_kind[index] for index in level_indices], dim=0)
+    edge_prob = torch.cat([state.level_edge_prob[index] for index in level_indices], dim=0)
+    return edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob
 
 
 def _init_gpu_ranges(
