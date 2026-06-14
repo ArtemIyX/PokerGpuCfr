@@ -7,7 +7,7 @@ except Exception:  # pragma: no cover
 
 import torch
 
-from .triton_kernels import backward_compact_kernel, forward_compact_kernel, regret_matching_accum_kernel, regret_matching_normalize_kernel
+from .triton_kernels import backward_compact_kernel, forward_compact_kernel, normalize_row_kernel, regret_matching_accum_kernel, regret_matching_normalize_kernel
 
 
 def _grid(n: int, block: int) -> tuple[int]:
@@ -111,6 +111,21 @@ def launch_regret_matching(
         action_slot_index,
         num_actions,
         int(out.shape[1]) if out.ndim > 1 else 1,
+        BLOCK=block,
+    )
+    return True
+
+
+def launch_normalize_row(values: torch.Tensor, out: torch.Tensor, total: float) -> bool:
+    if triton is None or values.numel() == 0:
+        return False
+    count = int(values.numel())
+    block = 1024
+    normalize_row_kernel[_grid(count, block)](
+        values,
+        out,
+        count,
+        float(total),
         BLOCK=block,
     )
     return True

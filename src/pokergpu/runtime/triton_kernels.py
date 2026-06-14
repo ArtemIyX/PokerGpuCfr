@@ -11,6 +11,21 @@ except Exception:  # pragma: no cover
 if triton is not None:
 
     @triton.jit  # type: ignore[untyped-decorator]
+    def normalize_row_kernel(  # type: ignore[no-untyped-def]
+        values_ptr,
+        out_ptr,
+        count,
+        total,
+        BLOCK: tl.constexpr,
+    ):
+        pid = tl.program_id(0)
+        offs = pid * BLOCK + tl.arange(0, BLOCK)
+        mask = offs < count
+        values = tl.load(values_ptr + offs, mask=mask, other=0.0)
+        normalized = tl.where(total > 0.0, values / total, 0.0)
+        tl.store(out_ptr + offs, normalized, mask=mask)
+
+    @triton.jit  # type: ignore[untyped-decorator]
     def regret_matching_accum_kernel(  # type: ignore[no-untyped-def]
         regrets_ptr,
         out_ptr,

@@ -25,7 +25,7 @@ from pokergpu.tree import NodeType, PublicTree
 
 from .gpu_plan import concat_compact_level_edges, concat_level_edges
 from .gpu_types import CompactEdgeGroup
-from .triton_launch import launch_backward_compact, launch_forward_compact, launch_regret_matching
+from .triton_launch import launch_backward_compact, launch_forward_compact, launch_normalize_row, launch_regret_matching
 
 def record_function(name: str) -> ContextManager[None]:
     profiler = _get_record_function()
@@ -129,14 +129,17 @@ def average_strategy_from_gpu(
     action_offsets: torch.Tensor,
     infoset_index: int,
 ) -> np.ndarray:
-    count = int(action_counts[infoset_index].detach().cpu().item())
-    start = int(action_offsets[infoset_index].detach().cpu().item())
+    count = int(action_counts[infoset_index].item())
+    start = int(action_offsets[infoset_index].item())
     values = strategy_sums.narrow(0, start, count)
-    total = float(values.sum().detach().cpu().item())
+    total = float(values.sum().item())
     if total <= 0.0 and count > 0:
         return np.full(count, 1.0 / count, dtype=np.float32)
     if total <= 0.0:
         return np.zeros(0, dtype=np.float32)
+    out = torch.empty_like(values)
+    if launch_normalize_row(values, out, total):
+        return out.detach().cpu().numpy().astype(np.float32, copy=False)
     return values.div(total).detach().cpu().numpy().astype(np.float32, copy=False)
 
 
