@@ -29,6 +29,7 @@ from pokergpu.runtime.cache import LruCache, PackedGpuSolveState, PackedGpuSubtr
 from pokergpu.runtime.caching import TreeTemplateKey, make_warm_start_state
 from pokergpu.tree import NodeType, PublicTree
 from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public_tree
+from .gpu_passes import record_function
 from pokergpu.tree.public_tree import PublicTreeTemplate
 
 from .gpu_compile import compile_packed_subtree
@@ -549,24 +550,25 @@ def _run_gpu_solve(
         if spec.time_budget_sec <= 0.0 and target_iterations <= 0:
             break
 
-    started_phase = time.monotonic()
-    root_strategy = average_strategy_from_gpu(
-        strategy_sums,
-        state.action_counts,
-        state.action_offsets,
-        root_infoset,
-    )
-    root_action_ev_p0 = _root_action_values_from_backward(
-        tree.tree,
-        packed.plan,
-        backward_p0,
-        backward_p1,
-        root_infoset,
-        buffer=state.root_action_ev_buffer,
-    )
-    if debug:
-        print("debug::root_action_raw", root_action_ev_p0)
-    phase_seconds["finalize"] += time.monotonic() - started_phase
+    with record_function("solve::finalize"):
+        started_phase = time.monotonic()
+        root_strategy = average_strategy_from_gpu(
+            strategy_sums,
+            state.action_counts,
+            state.action_offsets,
+            root_infoset,
+        )
+        root_action_ev_p0 = _root_action_values_from_backward(
+            tree.tree,
+            packed.plan,
+            backward_p0,
+            backward_p1,
+            root_infoset,
+            buffer=state.root_action_ev_buffer,
+        )
+        if debug:
+            print("debug::root_action_raw", root_action_ev_p0)
+        phase_seconds["finalize"] += time.monotonic() - started_phase
     root_action_ev_p1 = -root_action_ev_p0
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
     if bb_scale <= 0.0:
