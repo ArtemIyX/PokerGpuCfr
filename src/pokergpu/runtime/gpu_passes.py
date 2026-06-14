@@ -350,9 +350,12 @@ def run_compact_iteration_gpu(
 ) -> None:
     with record_function("solve::leaf_eval"):
         if state.frontier_nodes.numel() > 0:
-            leaf_values = evaluate_frontier_leaves(state, evaluator)
-            out_p0[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
-            out_p1[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
+            leaf_values = cast(LeafValueBatch, evaluator.evaluate(state.packed.leaf_feature_batch))
+            leaf_start = int(state.frontier_nodes[0].item())
+            leaf_count = int(state.frontier_nodes.numel())
+            leaf_slice = slice(leaf_start, leaf_start + leaf_count)
+            out_p0[leaf_slice] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
+            out_p1[leaf_slice] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
     with record_function("solve::cfr_core"):
         _COMPACT_ITERATION_CORE(
             state,
@@ -634,12 +637,3 @@ def backward_pass_compact_group(
     )
 
 
-def evaluate_frontier_leaves(
-    state: PackedGpuSolveState,
-    evaluator: LeafEvaluator,
-) -> LeafValueBatch:
-    evaluate = getattr(evaluator, "evaluate", None)
-    if evaluate is not None:
-        with record_function("leaf::evaluate_batch"):
-            return cast(LeafValueBatch, evaluate(state.packed.leaf_feature_batch))
-    raise RuntimeError("GPU leaf evaluation requires evaluate support")
