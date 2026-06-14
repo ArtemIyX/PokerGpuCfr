@@ -135,15 +135,12 @@ def average_strategy_from_gpu(
     count = cached_count if cached_count is not None else int(action_counts[infoset_index])
     start = cached_start if cached_start is not None else int(action_offsets[infoset_index])
     values = strategy_sums.narrow(0, start, count)
-    total = float(values.sum())
-    if total <= 0.0 and count > 0:
-        return torch.full_like(values, 1.0 / count)
-    if total <= 0.0:
+    total = values.sum()
+    if count <= 0:
         return torch.zeros_like(values)
-    out = torch.empty_like(values)
-    if launch_normalize_row(values, out, total):
-        return out
-    return values.div(total)
+    normalized = values / total.clamp_min(1.0)
+    uniform = torch.full_like(values, 1.0 / count)
+    return torch.where(total > 0, normalized, uniform)
 
 
 def make_cpu_store(

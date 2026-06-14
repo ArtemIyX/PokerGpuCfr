@@ -590,10 +590,11 @@ def _run_gpu_solve(
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
     if bb_scale <= 0.0:
         bb_scale = 1.0
-    root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
-    root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
+    root_action_ev_p0 = root_action_ev_p0 / bb_scale
+    root_action_ev_p1 = root_action_ev_p1 / bb_scale
     root_strategy = root_strategy_tensor
-    root_ev_p0 = float(_summarize_root_ev(root_strategy.detach().cpu().numpy().astype(np.float32, copy=False), root_action_ev_p0))
+    limit = min(int(root_strategy.numel()), int(root_action_ev_p0.numel()))
+    root_ev_p0 = float(torch.sum(root_strategy[:limit] * root_action_ev_p0[:limit], dtype=torch.float64))
     root_ev_p1 = -root_ev_p0
     return GpuSolveTrace(
         packed=packed,
@@ -609,8 +610,8 @@ def _run_gpu_solve(
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,
-        root_action_ev_player0=torch.as_tensor(root_action_ev_p0, dtype=torch.float32, device=backward_p0.device),
-        root_action_ev_player1=torch.as_tensor(root_action_ev_p1, dtype=torch.float32, device=backward_p1.device),
+        root_action_ev_player0=root_action_ev_p0,
+        root_action_ev_player1=root_action_ev_p1,
         root_ev_player0=root_ev_p0,
         root_ev_player1=root_ev_p1,
         gpu_backward_p0=backward_p0.detach().cpu().numpy(),
@@ -768,11 +769,11 @@ def _root_action_values_from_backward(
     root_infoset: int,
     *,
     buffer: torch.Tensor | None = None,
-) -> np.ndarray:
+) -> torch.Tensor:
     del tree, root_infoset
     limit = int(plan.root_child_nodes.numel())
     if limit <= 0:
-        return np.zeros(0, dtype=np.float32)
+        return torch.zeros(0, dtype=torch.float32, device=backward_p0.device)
     child_nodes = plan.root_branch_nodes[:limit]
     valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
     safe_child_nodes = child_nodes.clamp(0, max(0, backward_p0.numel() - 1))
@@ -780,7 +781,7 @@ def _root_action_values_from_backward(
     if buffer is not None and buffer.numel() >= limit:
         buffer[:limit].copy_(values)
         values = buffer[:limit]
-    return values.detach().cpu().numpy().astype(np.float32, copy=False)
+    return values
 
 
 def debug_first_gpu_cpu_divergence(
