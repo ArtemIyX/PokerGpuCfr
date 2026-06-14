@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import Any
 from typing import cast
 
@@ -31,102 +30,40 @@ from pokergpu.tree.builder import BuiltPublicTree, TreeBuildConfig, build_public
 from pokergpu.tree.public_tree import PublicTreeTemplate
 
 from .gpu_compile import compile_packed_subtree
+from .gpu_passes import (
+    average_strategy_from_gpu,
+    concat_level_edges,
+    backward_pass_gpu,
+    evaluate_frontier_leaves,
+    forward_pass_gpu,
+    init_gpu_ranges,
+    make_cpu_store,
+    regret_matching_table_inplace,
+    propagate_node_ranges,
+    update_regrets_gpu,
+)
+from .gpu_types import (
+    BatchedGpuPlan,
+    BatchedGpuSolveInput,
+    GpuSolveStats,
+    GpuSolveTrace,
+    PackedGpuSolve,
+)
+from .gpu_schedule import build_infoset_blocks, compact_level_schedule
 from .postflop import PostflopResolveResult, PostflopResolveSpec, _summarize_root_ev
 from .value_network import default_postflop_leaf_evaluator
 
-
-@dataclass(frozen=True, slots=True)
-class GpuSolveStats:
-    iterations: int
-    node_count: int
-    leaf_count: int
-    elapsed_seconds: float
-
-
-@dataclass(frozen=True, slots=True)
-class PackedGpuSolve:
-    spec: PostflopResolveSpec
-    tree: BuiltPublicTree
-    plan: "BatchedGpuPlan"
-    layout: InfosetLayout
-    root_infoset: int
-    root_actions: tuple[str, ...]
-    packed_subtree: PackedGpuSubtree
-    gpu_state: PackedGpuSolveState | None = None
-    root_ranges: tuple[RangeVector, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class BatchedGpuSolveInput:
-    spec: PostflopResolveSpec
-    template: PublicTreeTemplate
-    cache_key: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class BatchedGpuPlan:
-    node_type: torch.Tensor
-    node_first_child: torch.Tensor
-    node_child_count: torch.Tensor
-    node_parent: torch.Tensor
-    node_infoset: torch.Tensor
-    node_street: torch.Tensor
-    node_depth: torch.Tensor
-    node_terminal_payoff: torch.Tensor
-    node_is_frontier: torch.Tensor
-    forward_levels: tuple[dict[str, torch.Tensor], ...]
-    backward_levels: tuple[dict[str, torch.Tensor], ...]
-    level_frontier_mask: tuple[torch.Tensor, ...]
-    level_player_mask: tuple[torch.Tensor, ...]
-    edge_parent: torch.Tensor
-    edge_child: torch.Tensor
-    edge_node_type: torch.Tensor
-    edge_infoset: torch.Tensor
-    edge_action_slot: torch.Tensor
-    edge_chance_prob: torch.Tensor
-    level_nodes: tuple[torch.Tensor, ...]
-    node_player: torch.Tensor
-    level_edge_start: tuple[torch.Tensor, ...]
-    level_edge_count: tuple[torch.Tensor, ...]
-    level_edge_src: tuple[torch.Tensor, ...]
-    level_edge_dst: tuple[torch.Tensor, ...]
-    level_edge_infoset: tuple[torch.Tensor, ...]
-    level_edge_slot: tuple[torch.Tensor, ...]
-    level_edge_kind: tuple[torch.Tensor, ...]
-    level_edge_prob: tuple[torch.Tensor, ...]
-    compact_forward_levels: tuple[tuple[int, ...], ...]
-    compact_backward_levels: tuple[tuple[int, ...], ...]
-    infoset_blocks: tuple[torch.Tensor, ...]
-    frontier_nodes: torch.Tensor
-    frontier_leaf_batch: LeafFeatureBatch
-    root_child_nodes: torch.Tensor
-    root_child_parent_infoset: int
-    action_counts: torch.Tensor
-    action_offsets: torch.Tensor
-
-
-@dataclass(frozen=True, slots=True)
-class GpuSolveTrace:
-    packed: PackedGpuSolve
-    iterations: int
-    elapsed_seconds: float
-    phase_seconds: dict[str, float]
-    level_node_counts: tuple[int, ...]
-    level_edge_counts: tuple[int, ...]
-    level_frontier_counts: tuple[int, ...]
-    compact_forward_level_sizes: tuple[int, ...]
-    compact_backward_level_sizes: tuple[int, ...]
-    infoset_block_sizes: tuple[int, ...]
-    compact_phase_seconds: dict[str, tuple[float, ...]]
-    node_count: int
-    leaf_count: int
-    root_strategy: np.ndarray
-    root_action_ev_player0: np.ndarray
-    root_action_ev_player1: np.ndarray
-    root_ev_player0: float
-    root_ev_player1: float
-    gpu_backward_p0: np.ndarray
-    gpu_backward_p1: np.ndarray
+__all__ = [
+    "BatchedGpuPlan",
+    "BatchedGpuSolveInput",
+    "GpuSolveStats",
+    "GpuSolveTrace",
+    "PackedGpuSolve",
+    "resolve_postflop_gpu",
+    "resolve_postflop_gpu_batch",
+    "resolve_postflop_gpu_batch_inputs",
+    "resolve_postflop_gpu_many",
+]
 
 
 _PRIVATE_HAND_COUNT = 1326
@@ -136,10 +73,6 @@ _GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
 _GPU_BATCH_MIN_SOLVES = 4
 _GPU_MIN_LEAFS = 1024
 _GPU_MIN_INFOSSETS = 1024
-_GPU_MIN_LEVEL_WORK = 32
-_GPU_MAX_LEVEL_MERGE = 3
-
-
 def resolve_postflop_gpu_many(
     specs: tuple[PostflopResolveSpec, ...],
     *,
@@ -263,9 +196,9 @@ def _build_batched_gpu_plan(
     level_edge_slot: list[torch.Tensor] = []
     level_edge_kind: list[torch.Tensor] = []
     level_edge_prob: list[torch.Tensor] = []
-    compact_forward_levels = _compact_level_schedule(levels.forward_levels)
-    compact_backward_levels = _compact_level_schedule(levels.backward_levels)
-    infoset_blocks = _build_infoset_blocks(layout, device=device)
+    compact_forward_levels = compact_level_schedule(levels.forward_levels)
+    compact_backward_levels = compact_level_schedule(levels.backward_levels)
+    infoset_blocks = build_infoset_blocks(layout, device=device)
     for level in levels.forward_levels:
         forward_levels.append(_build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
@@ -495,7 +428,7 @@ def _make_gpu_state(
     regrets = torch.zeros(action_count, dtype=torch.float32, device=device)
     strategy_sums = torch.zeros_like(regrets)
     strategy_table = torch.zeros((packed.infoset_count, max(packed.max_actions, 1)), dtype=torch.float32, device=device)
-    ranges = _init_gpu_ranges(root_ranges, device=device)
+    ranges = init_gpu_ranges(root_ranges, device=device)
     node_range_p0 = torch.zeros((packed.node_count, _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
     node_range_p1 = torch.zeros_like(node_range_p0)
     node_range_p2 = torch.zeros_like(node_range_p0)
@@ -559,74 +492,6 @@ def _make_gpu_state(
         infoset_blocks=infoset_blocks,
         root_child_nodes=tuple(),
     )
-
-
-def _regret_matching_table_inplace(
-    out: torch.Tensor,
-    regrets: torch.Tensor,
-    action_infoset_index: torch.Tensor,
-    action_slot_index: torch.Tensor,
-    action_counts: torch.Tensor,
-    legal_action_mask: torch.Tensor | None = None,
-    infoset_blocks: tuple[torch.Tensor, ...] = (),
-) -> torch.Tensor:
-    out.zero_()
-    num_infosets = int(action_counts.numel())
-    max_actions = int(out.shape[1])
-    if num_infosets == 0:
-        return out
-    totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
-    if infoset_blocks:
-        for block in infoset_blocks:
-            block = block[(block >= 0) & (block < regrets.numel())]
-            if block.numel() == 0:
-                continue
-            infosets = action_infoset_index[block]
-            slots = action_slot_index[block]
-            values = torch.clamp(regrets[block], min=0.0)
-            valid = (infosets >= 0) & (infosets < num_infosets) & (slots >= 0) & (slots < max_actions)
-            if legal_action_mask is not None and legal_action_mask.numel() >= int(block.max().item()) + 1:
-                valid = valid & legal_action_mask[block]
-            if not bool(valid.any()):
-                continue
-            infosets = infosets[valid]
-            slots = slots[valid]
-            values = values[valid]
-            out.index_put_((infosets, slots), values, accumulate=False)
-            totals.scatter_add_(0, infosets, values)
-    else:
-        limit = min(
-            int(regrets.numel()),
-            int(action_infoset_index.numel()),
-            int(action_slot_index.numel()),
-            int(legal_action_mask.numel()) if legal_action_mask is not None else int(action_infoset_index.numel()),
-        )
-        if limit == 0:
-            return out
-        action_infoset_index = action_infoset_index[:limit]
-        action_slot_index = action_slot_index[:limit]
-        regrets = regrets[:limit]
-        valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
-        if legal_action_mask is not None and legal_action_mask.numel() >= limit:
-            valid = valid & legal_action_mask[:limit]
-        if not bool(valid.any()):
-            return out
-        infosets = action_infoset_index[valid]
-        slots = action_slot_index[valid]
-        values = torch.clamp(regrets[valid], min=0.0)
-        out.index_put_((infosets, slots), values, accumulate=False)
-        totals.scatter_add_(0, infosets, values)
-    nonzero = totals > 0
-    if bool(nonzero.any()):
-        out[nonzero] = out[nonzero] / totals[nonzero].unsqueeze(1)
-    zero_rows = ~nonzero
-    if bool(zero_rows.any()):
-        counts = action_counts[zero_rows].clamp_min(1).to(torch.float32)
-        out[zero_rows] = 0.0
-        idx = torch.nonzero(zero_rows, as_tuple=False).flatten()
-        for i, count in zip(idx.tolist(), counts.tolist(), strict=False):
-            out[i, : int(count)] = 1.0 / float(count)
-    return out
 
 
 def _finish_gpu_solve(
@@ -711,20 +576,19 @@ def _run_gpu_solve(
         or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
     ):
         started_phase = time.monotonic()
-        _regret_matching_table_inplace(
+        regret_matching_table_inplace(
             strategy_table,
             regrets,
             state.action_infoset_index,
             state.action_slot_index,
             state.action_counts,
             state.packed.legal_action_mask,
-            state.infoset_blocks,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
         started_phase = time.monotonic()
-        _propagate_node_ranges(state)
-        _forward_pass_gpu(
+        propagate_node_ranges(state)
+        forward_pass_gpu(
             state,
             strategy_table,
             state.node_range_p0,
@@ -736,7 +600,7 @@ def _run_gpu_solve(
         started_phase = time.monotonic()
         backward_p0.zero_()
         backward_p1.zero_()
-        _backward_pass_gpu(
+        backward_pass_gpu(
             state,
             strategy_table,
             evaluator_impl,
@@ -747,7 +611,7 @@ def _run_gpu_solve(
         phase_seconds["backward"] += time.monotonic() - started_phase
 
         started_phase = time.monotonic()
-        _update_regrets_gpu(
+        update_regrets_gpu(
             state,
             regrets,
             strategy_sums,
@@ -764,17 +628,16 @@ def _run_gpu_solve(
             break
 
     started_phase = time.monotonic()
-    _regret_matching_table_inplace(
+    regret_matching_table_inplace(
         strategy_table,
         regrets,
         state.action_infoset_index,
         state.action_slot_index,
         state.action_counts,
         state.packed.legal_action_mask,
-        state.infoset_blocks,
     )
-    _propagate_node_ranges(state)
-    _forward_pass_gpu(
+    propagate_node_ranges(state)
+    forward_pass_gpu(
         state,
         strategy_table,
         state.node_range_p0,
@@ -783,7 +646,7 @@ def _run_gpu_solve(
     )
     backward_p0.zero_()
     backward_p1.zero_()
-    _backward_pass_gpu(
+    backward_pass_gpu(
         state,
         strategy_table,
         evaluator_impl,
@@ -793,7 +656,7 @@ def _run_gpu_solve(
     )
     phase_seconds["finalize"] += time.monotonic() - started_phase
 
-    root_strategy = _average_strategy_from_gpu(
+    root_strategy = average_strategy_from_gpu(
         strategy_sums,
         state.action_counts,
         state.action_offsets,
@@ -1022,325 +885,6 @@ def _make_cpu_store(
         regrets=regrets.detach().cpu().numpy().astype(np.float32, copy=True),
         strategy_sums=strategy_sums.detach().cpu().numpy().astype(np.float32, copy=True),
     )
-
-
-def _update_regrets_gpu(
-    state: PackedGpuSolveState,
-    regrets: torch.Tensor,
-    strategy_sums: torch.Tensor,
-    strategy_table: torch.Tensor,
-    node_values_p0: torch.Tensor,
-    node_values_p1: torch.Tensor,
-    timings: list[float] | None = None,
-) -> None:
-    for index, level_indices in enumerate(state.compact_backward_levels):
-        started = time.monotonic()
-        _update_regrets_compact_group(
-            state,
-            level_indices,
-            regrets,
-            strategy_sums,
-            strategy_table,
-            node_values_p0,
-            node_values_p1,
-        )
-        if timings is not None and index < len(timings):
-            timings[index] += time.monotonic() - started
-
-
-def _update_regrets_compact_group(
-    state: PackedGpuSolveState,
-    level_indices: tuple[int, ...],
-    regrets: torch.Tensor,
-    strategy_sums: torch.Tensor,
-    strategy_table: torch.Tensor,
-    node_values_p0: torch.Tensor,
-    node_values_p1: torch.Tensor,
-) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
-        state, level_indices
-    )
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
-    )
-    if not bool(valid.any()):
-        return
-    edge_src = edge_src[valid]
-    edge_dst = edge_dst[valid]
-    edge_infoset = edge_infoset[valid]
-    edge_slot = edge_slot[valid]
-    edge_kind = edge_kind[valid]
-    flat = state.action_offsets[edge_infoset] + edge_slot
-    child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
-    strat = strategy_table[edge_infoset, edge_slot]
-    infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-    infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
-    regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
-    strategy_sums.index_add_(0, flat, strat)
-
-
-def _update_regrets_gpu_batched(
-    state: PackedGpuSolveState,
-    regrets: torch.Tensor,
-    strategy_sums: torch.Tensor,
-    strategy_table: torch.Tensor,
-    node_values_p0: torch.Tensor,
-    node_values_p1: torch.Tensor,
-    timings: list[float] | None = None,
-) -> None:
-    for index, level_indices in enumerate(state.compact_backward_levels):
-        started = time.monotonic()
-        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
-            state, level_indices
-        )
-        valid = (
-            (edge_infoset >= 0)
-            & (edge_infoset < strategy_table.shape[0])
-            & (edge_slot >= 0)
-            & (edge_slot < strategy_table.shape[1])
-        )
-        if not bool(valid.any()):
-            continue
-        edge_src = edge_src[valid]
-        edge_dst = edge_dst[valid]
-        edge_infoset = edge_infoset[valid]
-        edge_slot = edge_slot[valid]
-        edge_kind = edge_kind[valid]
-        flat = state.action_offsets[edge_infoset] + edge_slot
-        child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
-        strat = strategy_table[edge_infoset, edge_slot]
-        infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-        infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
-        strategy_sums.scatter_add_(0, flat, strat)
-        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
-        if timings is not None and index < len(timings):
-            timings[index] += time.monotonic() - started
-
-
-def _forward_pass_gpu(*args: Any) -> None:
-    if len(args) == 4 and isinstance(args[0], PackedGpuSolveState):
-        state, strategy_table, node_range_p0, node_range_p1 = args
-        _forward_pass_gpu_batched(state, strategy_table, node_range_p0, node_range_p1)
-        return
-    if len(args) == 5 and isinstance(args[0], PackedGpuSolveState):
-        state, strategy_table, node_range_p0, node_range_p1, timings = args
-        _forward_pass_gpu_batched(state, strategy_table, node_range_p0, node_range_p1, timings)
-        return
-    raise TypeError("_forward_pass_gpu received unsupported arguments")
-
-
-def _forward_pass_gpu_batched(
-    state: PackedGpuSolveState,
-    strategy_table: torch.Tensor,
-    node_range_p0: torch.Tensor,
-    node_range_p1: torch.Tensor,
-    timings: list[float] | None = None,
-) -> None:
-    _propagate_node_ranges(state)
-    for index, level_indices in enumerate(state.compact_forward_levels):
-        started = time.monotonic()
-        _forward_pass_compact_group(state, level_indices, strategy_table, node_range_p0, node_range_p1)
-        if timings is not None and index < len(timings):
-            timings[index] += time.monotonic() - started
-
-
-def _forward_pass_compact_group(
-    state: PackedGpuSolveState,
-    level_indices: tuple[int, ...],
-    strategy_table: torch.Tensor,
-    node_range_p0: torch.Tensor,
-    node_range_p1: torch.Tensor,
-) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
-        state, level_indices
-    )
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
-    )
-    if not bool(valid.any()):
-        return
-    edge_src = edge_src[valid]
-    edge_dst = edge_dst[valid]
-    edge_infoset = edge_infoset[valid]
-    edge_slot = edge_slot[valid]
-    edge_kind = edge_kind[valid]
-    edge_prob = edge_prob[valid]
-    chance_mask = edge_kind == 0
-    if bool(chance_mask.any()):
-        src = edge_src[chance_mask]
-        dst = edge_dst[chance_mask]
-        probs = edge_prob[chance_mask]
-        weights = probs.unsqueeze(1)
-        node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-        node_range_p1.index_add_(0, dst, node_range_p1[src] * weights)
-    player_mask = edge_kind == 1
-    if bool(player_mask.any()):
-        src = edge_src[player_mask]
-        dst = edge_dst[player_mask]
-        infosets = edge_infoset[player_mask]
-        slots = edge_slot[player_mask]
-        probs = strategy_table[infosets, slots]
-        weights = probs.unsqueeze(1)
-        node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-        node_range_p1.index_add_(0, dst, node_range_p1[src])
-    player_mask = edge_kind == 2
-    if bool(player_mask.any()):
-        src = edge_src[player_mask]
-        dst = edge_dst[player_mask]
-        infosets = edge_infoset[player_mask]
-        slots = edge_slot[player_mask]
-        probs = strategy_table[infosets, slots]
-        node_range_p0.index_add_(0, dst, node_range_p0[src])
-        node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
-
-
-def _backward_pass_gpu(*args: Any) -> None:
-    if len(args) == 5 and isinstance(args[0], PackedGpuSolveState):
-        state, strategy_table, evaluator, out_p0, out_p1 = args
-        _backward_pass_gpu_batched(state, strategy_table, evaluator, out_p0, out_p1)
-        return
-    if len(args) == 6 and isinstance(args[0], PackedGpuSolveState):
-        state, strategy_table, evaluator, out_p0, out_p1, timings = args
-        _backward_pass_gpu_batched(state, strategy_table, evaluator, out_p0, out_p1, timings)
-        return
-    raise TypeError("_backward_pass_gpu received unsupported arguments")
-
-
-def _backward_pass_gpu_batched(
-    state: PackedGpuSolveState,
-    strategy_table: torch.Tensor,
-    evaluator: LeafEvaluator,
-    out_p0: torch.Tensor,
-    out_p1: torch.Tensor,
-    timings: list[float] | None = None,
-) -> None:
-    out_p0.zero_()
-    out_p1.zero_()
-
-    frontier_nodes = state.frontier_nodes
-    if int(frontier_nodes.numel()) > 0:
-        leaf_values = _evaluate_frontier_leaves(state, evaluator)
-        out_p0[frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
-        out_p1[frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
-
-    for index, level_indices in enumerate(reversed(state.compact_backward_levels)):
-        started = time.monotonic()
-        _backward_pass_compact_group(state, level_indices, strategy_table, out_p0, out_p1)
-        if timings is not None and index < len(timings):
-            timings[index] += time.monotonic() - started
-
-
-def _backward_pass_compact_group(
-    state: PackedGpuSolveState,
-    level_indices: tuple[int, ...],
-    strategy_table: torch.Tensor,
-    out_p0: torch.Tensor,
-    out_p1: torch.Tensor,
-) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
-        state, level_indices
-    )
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
-    )
-    if not bool(valid.any()):
-        return
-    edge_src = edge_src[valid]
-    edge_dst = edge_dst[valid]
-    edge_infoset = edge_infoset[valid]
-    edge_slot = edge_slot[valid]
-    edge_kind = edge_kind[valid]
-    edge_prob = edge_prob[valid]
-    child_p0 = out_p0[edge_dst]
-    child_p1 = out_p1[edge_dst]
-    chance_mask = edge_kind == 0
-    if bool(chance_mask.any()):
-        out_p0.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p0[chance_mask])
-        out_p1.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p1[chance_mask])
-    player_mask = edge_kind == 1
-    if bool(player_mask.any()):
-        probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
-        out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
-        out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
-    player_mask = edge_kind == 2
-    if bool(player_mask.any()):
-        probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
-        out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
-        out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
-
-
-def _evaluate_frontier_leaves(
-    state: PackedGpuSolveState,
-    evaluator: LeafEvaluator,
-) -> LeafValueBatch:
-    tensors = {
-        "range_p0": state.node_range_p0[state.frontier_nodes],
-        "range_p1": state.node_range_p1[state.frontier_nodes],
-        "range_p2": state.node_range_p2[state.frontier_nodes],
-        "street": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-        "pot": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "stack_p0": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "stack_p1": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "board_size": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-        "player_to_act": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-        "terminal_payoff": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-        "is_terminal": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
-        "is_frontier": torch.ones(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
-        "infoset_id": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-    }
-    evaluate_tensors = getattr(evaluator, "evaluate_tensors", None)
-    if evaluate_tensors is not None:
-        try:
-            return cast(LeafValueBatch, evaluate_tensors(tensors))
-        except Exception:
-            pass
-    evaluate = getattr(evaluator, "evaluate", None)
-    if evaluate is not None:
-        return cast(LeafValueBatch, evaluate(state.packed.leaf_feature_batch))
-    raise RuntimeError("GPU leaf evaluation requires evaluate_tensors support")
-
-
-def _merge_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
-    if not levels:
-        return ()
-    merged: list[tuple[int, ...]] = []
-    pending: list[int] = []
-    pending_work = 0
-    for level_index, level in enumerate(levels):
-        pending.append(level_index)
-        pending_work += len(level)
-        if pending_work >= _GPU_MIN_LEVEL_WORK or len(pending) >= _GPU_MAX_LEVEL_MERGE:
-            merged.append(tuple(pending))
-            pending = []
-            pending_work = 0
-    if pending:
-        merged.append(tuple(pending))
-    return tuple(merged)
-
-
-def _compact_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
-    return _merge_level_schedule(levels)
-
-
-def _build_infoset_blocks(
-    layout: InfosetLayout,
-    *,
-    device: torch.device,
-) -> tuple[torch.Tensor, ...]:
-    blocks: list[torch.Tensor] = []
-    for infoset_index, action_count in enumerate(layout.action_counts):
-        start = int(layout.offsets[infoset_index])
-        blocks.append(torch.arange(start, start + int(action_count), dtype=torch.int64, device=device))
-    return tuple(blocks)
 
 
 def _concat_level_edges(
