@@ -192,6 +192,8 @@ class PackedGpuSubtree:
     chance_prob: Any
     frontier_nodes: Any
     chance_child_nodes: Any
+    chance_child_valid_mask: Any
+    chance_child_safe_nodes: Any
     leaf_feature_batch: Any
     chance_leaf_feature_batch: Any
     leaf_feature_tensors: Any

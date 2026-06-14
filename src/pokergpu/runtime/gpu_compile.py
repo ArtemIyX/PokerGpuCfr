@@ -66,6 +66,8 @@ def compile_packed_subtree(
     children = torch.as_tensor([int(flat.edge_child[i]) for i in range(len(flat.edge_child))], dtype=torch.int64, device=device)
     frontier_nodes = torch.as_tensor(tuple(frontier_node_list), dtype=torch.int64, device=device)
     chance_child_nodes = torch.as_tensor(tuple(chance_child_list), dtype=torch.int64, device=device)
+    chance_child_valid_mask = torch.ones_like(chance_child_nodes, dtype=torch.bool, device=device)
+    chance_child_safe_nodes = chance_child_nodes
     frontier_node_indices = tuple(int(index) for index in frontier_nodes.tolist())
     leaf_feature_batch = build_leaf_feature_batch(
         tree.tree,
@@ -101,6 +103,8 @@ def compile_packed_subtree(
         chance_prob=chance_prob,
         frontier_nodes=frontier_nodes,
         chance_child_nodes=chance_child_nodes,
+        chance_child_valid_mask=chance_child_valid_mask,
+        chance_child_safe_nodes=chance_child_safe_nodes,
         leaf_feature_batch=leaf_feature_batch,
         chance_leaf_feature_batch=chance_leaf_feature_batch,
         leaf_feature_tensors=leaf_feature_tensors,

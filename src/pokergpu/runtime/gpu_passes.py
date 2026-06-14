@@ -222,30 +222,25 @@ def run_compact_iteration_gpu(
 ) -> None:
     with record_function("solve::leaf_eval"):
         frontier_count = state.frontier_count
-        leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
         if frontier_count > 0:
+            leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
             leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
             ev0 = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
             ev1 = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
             out_p0[leaf_slice].copy_(ev0)
             out_p1[leaf_slice].copy_(ev1)
-        chance_count = int(state.packed.chance_child_nodes.numel())
+        chance_nodes = state.packed.chance_child_nodes
+        chance_count = chance_nodes.numel()
         if chance_count > 0:
             chance_values = evaluator.evaluate(state.packed.chance_leaf_feature_batch)
-            chance_nodes = state.packed.chance_child_nodes
             ev0 = torch.as_tensor(chance_values.ev_player0, dtype=torch.float32, device=out_p0.device)
             ev1 = torch.as_tensor(chance_values.ev_player1, dtype=torch.float32, device=out_p1.device)
-            valid = (chance_nodes >= 0) & (chance_nodes < out_p0.numel())
-            if bool(valid.any()):
-                out_p0.index_copy_(0, chance_nodes[valid], ev0[valid])
-                out_p1.index_copy_(0, chance_nodes[valid], ev1[valid])
-            if debug:
-                print(
-                    "debug::leaf",
-                    float(torch.sum(torch.abs(out_p0[leaf_slice])).detach().cpu()),
-                    float(torch.sum(torch.abs(out_p1[leaf_slice])).detach().cpu()),
-                    int(frontier_count),
-                )
+            limit = out_p0.numel()
+            if limit > 0:
+                safe_nodes = state.packed.chance_child_safe_nodes
+                valid = state.packed.chance_child_valid_mask.to(ev0.dtype)
+                out_p0.scatter_add_(0, safe_nodes, ev0 * valid)
+                out_p1.scatter_add_(0, safe_nodes, ev1 * valid)
     with record_function("solve::cfr_core"):
         _COMPACT_ITERATION_CORE(
             state,
@@ -258,26 +253,7 @@ def run_compact_iteration_gpu(
             strategy_sums=strategy_sums,
             node_values_p0=node_values_p0,
             node_values_p1=node_values_p1,
-            debug=debug,
         )
-    if debug:
-        root_children = state.root_child_nodes
-        edge_src0 = state.compact_backward_edge_src[0] if len(state.compact_backward_edge_src) > 0 else None
-        edge_dst0 = state.compact_backward_edge_dst[0] if len(state.compact_backward_edge_dst) > 0 else None
-        if edge_src0 is None or edge_dst0 is None:
-            print("warn::missing_compact_edge_block", len(state.compact_backward_edge_src), len(state.compact_backward_edge_dst))
-        if root_children is None or int(root_children.numel()) == 0:
-            print("warn::missing_root_children")
-        if out_p0.numel() == 0:
-            return
-        if float(torch.sum(torch.abs(out_p0)).detach().cpu()) == 0.0:
-            print("warn::backward_p0_all_zero")
-        if root_children is not None and int(root_children.numel()) > 0 and len(state.compact_backward_edge_dst) > 0:
-            hits = torch.zeros(root_children.shape[0], dtype=torch.bool, device=root_children.device)
-            for edge_dst_block in state.compact_backward_edge_dst:
-                hits = hits | torch.isin(root_children, edge_dst_block)
-            if hits.numel() > 0 and not bool(hits.any().detach().cpu()):
-                print("warn::root_children_missing_from_backward_blocks")
 
 
 def propagate_node_ranges_compact(
