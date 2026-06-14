@@ -85,7 +85,7 @@ def compile_packed_subtree(
         raise ValueError("packed action maps must have matching lengths")
     legal_action_mask = torch.ones_like(action_infoset_index, dtype=torch.bool, device=device)
     card_removal_mask = _build_card_removal_mask(tree, device=device)
-    root_infoset = int(infoset_ids[0].item()) if infoset_ids.numel() else -1
+    root_infoset = int(compact_infoset_ids[0]) if compact_infoset_ids else -1
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
     infoset_count = len(infoset_remap)
     return PackedGpuSubtree(

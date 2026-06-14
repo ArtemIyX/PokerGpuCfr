@@ -342,7 +342,7 @@ def _make_gpu_state(
         frontier_leaf_tensors["range_p1"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
         frontier_leaf_tensors["range_p2"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
     frontier_range_nodes = packed.frontier_nodes
-    frontier_start = int(frontier_range_nodes[0].detach().cpu().item()) if frontier_range_nodes.numel() > 0 else 0
+    frontier_start = int(frontier_range_nodes[0]) if frontier_range_nodes.numel() > 0 else 0
     frontier_count = int(frontier_range_nodes.numel())
     frontier_range_p0 = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
     frontier_range_p1 = torch.zeros_like(frontier_range_p0)
