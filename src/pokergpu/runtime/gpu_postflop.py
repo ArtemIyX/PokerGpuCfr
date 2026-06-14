@@ -94,6 +94,8 @@ class BatchedGpuPlan:
     level_edge_slot: tuple[torch.Tensor, ...]
     level_edge_kind: tuple[torch.Tensor, ...]
     level_edge_prob: tuple[torch.Tensor, ...]
+    compact_forward_levels: tuple[tuple[int, ...], ...]
+    compact_backward_levels: tuple[tuple[int, ...], ...]
     frontier_nodes: torch.Tensor
     frontier_leaf_batch: LeafFeatureBatch
     root_child_nodes: torch.Tensor
@@ -111,6 +113,8 @@ class GpuSolveTrace:
     level_node_counts: tuple[int, ...]
     level_edge_counts: tuple[int, ...]
     level_frontier_counts: tuple[int, ...]
+    compact_forward_level_sizes: tuple[int, ...]
+    compact_backward_level_sizes: tuple[int, ...]
     node_count: int
     leaf_count: int
     root_strategy: np.ndarray
@@ -129,6 +133,8 @@ _GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
 _GPU_BATCH_MIN_SOLVES = 4
 _GPU_MIN_LEAFS = 1024
 _GPU_MIN_INFOSSETS = 1024
+_GPU_MIN_LEVEL_WORK = 32
+_GPU_MAX_LEVEL_MERGE = 3
 
 
 def resolve_postflop_gpu_many(
@@ -254,6 +260,8 @@ def _build_batched_gpu_plan(
     level_edge_slot: list[torch.Tensor] = []
     level_edge_kind: list[torch.Tensor] = []
     level_edge_prob: list[torch.Tensor] = []
+    compact_forward_levels = _merge_level_schedule(levels.forward_levels)
+    compact_backward_levels = _merge_level_schedule(levels.backward_levels)
     for level in levels.forward_levels:
         forward_levels.append(_build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
@@ -318,6 +326,8 @@ def _build_batched_gpu_plan(
         level_edge_slot=tuple(level_edge_slot),
         level_edge_kind=tuple(level_edge_kind),
         level_edge_prob=tuple(level_edge_prob),
+        compact_forward_levels=compact_forward_levels,
+        compact_backward_levels=compact_backward_levels,
         frontier_nodes=torch.as_tensor(frontier_nodes, dtype=torch.int64, device=device),
         frontier_leaf_batch=frontier_leaf_batch,
         root_child_nodes=torch.as_tensor(root_children, dtype=torch.int64, device=device),
@@ -615,6 +625,8 @@ def _run_gpu_solve(
     level_node_counts = tuple(int(level.numel()) for level in state.level_nodes)
     level_edge_counts = tuple(int(level.numel()) for level in state.level_edge_dst)
     level_frontier_counts = tuple(int(mask.sum().item()) for mask in state.level_frontier_mask)
+    compact_forward_level_sizes = tuple(len(level) for level in packed.plan.compact_forward_levels)
+    compact_backward_level_sizes = tuple(len(level) for level in packed.plan.compact_backward_levels)
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     target_iterations = max(0, int(spec.iterations))
     while (
@@ -726,6 +738,8 @@ def _run_gpu_solve(
         level_node_counts=level_node_counts,
         level_edge_counts=level_edge_counts,
         level_frontier_counts=level_frontier_counts,
+        compact_forward_level_sizes=compact_forward_level_sizes,
+        compact_backward_level_sizes=compact_backward_level_sizes,
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,
@@ -1130,6 +1144,29 @@ def _evaluate_frontier_leaves(
         except Exception:
             pass
     raise RuntimeError("GPU leaf evaluation requires evaluate_tensors support")
+
+
+def _merge_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
+    if not levels:
+        return ()
+    merged: list[tuple[int, ...]] = []
+    pending: list[int] = []
+    pending_work = 0
+    for index, level in enumerate(levels):
+        pending.extend(level)
+        pending_work += len(level)
+        if pending_work >= _GPU_MIN_LEVEL_WORK or len(pending) >= _GPU_MIN_LEVEL_WORK:
+            merged.append(tuple(pending))
+            pending = []
+            pending_work = 0
+            continue
+        if len(pending) >= _GPU_MAX_LEVEL_MERGE:
+            merged.append(tuple(pending))
+            pending = []
+            pending_work = 0
+    if pending:
+        merged.append(tuple(pending))
+    return tuple(merged)
 
 
 def _init_gpu_ranges(
