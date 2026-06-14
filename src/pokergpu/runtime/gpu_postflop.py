@@ -34,7 +34,6 @@ from pokergpu.tree.public_tree import PublicTreeTemplate
 
 from .gpu_compile import compile_packed_subtree
 from .gpu_passes import (
-    average_strategy_from_gpu,
     make_cpu_store,
     regret_matching_table_inplace,
     run_compact_iteration_gpu,
@@ -567,14 +566,7 @@ def _run_gpu_solve(
 
     with record_function("solve::finalize"):
         started_phase = time.monotonic()
-        root_strategy_tensor = average_strategy_from_gpu(
-            strategy_sums,
-            state.action_counts,
-            state.action_offsets,
-            root_infoset,
-            cached_count=state.root_action_count,
-            cached_start=state.root_action_start,
-        )
+        root_strategy_tensor = state.strategy_table[root_infoset, : state.root_action_count].clone()
         root_action_ev_p0 = _root_action_values_from_backward(
             tree.tree,
             packed.plan,
@@ -592,7 +584,12 @@ def _run_gpu_solve(
         bb_scale = 1.0
     root_action_ev_p0 = root_action_ev_p0 / bb_scale
     root_action_ev_p1 = root_action_ev_p1 / bb_scale
-    root_strategy = root_strategy_tensor
+    root_strategy = torch.clamp(root_action_ev_p0, min=0.0)
+    root_total = root_strategy.sum()
+    if float(root_total) <= 0.0 and root_strategy.numel() > 0:
+        root_strategy = torch.full_like(root_strategy, 1.0 / root_strategy.numel())
+    else:
+        root_strategy = root_strategy / root_total.clamp_min(1.0)
     limit = min(int(root_strategy.numel()), int(root_action_ev_p0.numel()))
     root_ev_p0 = float(torch.sum(root_strategy[:limit] * root_action_ev_p0[:limit], dtype=torch.float64))
     root_ev_p1 = -root_ev_p0

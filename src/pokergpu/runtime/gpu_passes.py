@@ -224,6 +224,13 @@ def _run_compact_iteration_core(
     with record_function("solve::regret"):
         for group in state.compact_backward_groups:
             _compact_group_pass(group, strategy_table, _COMPACT_MODE_REGRET, regrets=regrets, strategy_sums=strategy_sums, node_values_p0=node_values_p0, node_values_p1=node_values_p1)
+    regret_matching_table_inplace(
+        strategy_table,
+        regrets,
+        state.action_infoset_index,
+        state.action_slot_index,
+        state.action_counts,
+    )
 
 
 def _compiled_iteration_core() -> Any:
