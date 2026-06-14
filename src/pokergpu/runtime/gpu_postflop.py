@@ -108,6 +108,9 @@ class GpuSolveTrace:
     iterations: int
     elapsed_seconds: float
     phase_seconds: dict[str, float]
+    level_node_counts: tuple[int, ...]
+    level_edge_counts: tuple[int, ...]
+    level_frontier_counts: tuple[int, ...]
     node_count: int
     leaf_count: int
     root_strategy: np.ndarray
@@ -609,6 +612,9 @@ def _run_gpu_solve(
         "regret": 0.0,
         "finalize": 0.0,
     }
+    level_node_counts = tuple(int(level.numel()) for level in state.level_nodes)
+    level_edge_counts = tuple(int(level.numel()) for level in state.level_edge_dst)
+    level_frontier_counts = tuple(int(mask.sum().item()) for mask in state.level_frontier_mask)
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     target_iterations = max(0, int(spec.iterations))
     while (
@@ -717,6 +723,9 @@ def _run_gpu_solve(
         iterations=iterations,
         elapsed_seconds=time.monotonic() - started_at,
         phase_seconds=phase_seconds,
+        level_node_counts=level_node_counts,
+        level_edge_counts=level_edge_counts,
+        level_frontier_counts=level_frontier_counts,
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,

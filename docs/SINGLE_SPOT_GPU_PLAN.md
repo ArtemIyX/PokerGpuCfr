@@ -74,13 +74,13 @@ This lets each iteration run as a small number of level-wise kernels instead of 
 
 Resident GPU state should include:
 
-- regret table `R`
-- strategy sum `S`
-- current strategy `sigma`
-- reach arrays
-- counterfactual value arrays
-- leaf feature buffers
-- masks for legal actions and card removal
+- [x] regret table `R`
+- [x] strategy sum `S`
+- [x] current strategy `sigma`
+- [x] reach arrays
+- [x] counterfactual value arrays
+- [x] leaf feature buffers
+- [x] masks for legal actions and card removal
 
 If a tensor is used every iteration, it should not live on CPU.
 

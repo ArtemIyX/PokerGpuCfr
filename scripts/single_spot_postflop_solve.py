@@ -79,6 +79,9 @@ def main() -> None:
                     "node_count": packed.tree.tree.node_count,
                     "leaf_count": int(packed.plan.frontier_nodes.numel()),
                     "level_widths": [len(level) for level in packed.tree.level_schedule.level_nodes],
+                    "level_node_counts": list(trace.level_node_counts),
+                    "level_edge_counts": list(trace.level_edge_counts),
+                    "level_frontier_counts": list(trace.level_frontier_counts),
                     "frontier_batch_size": int(packed.plan.frontier_nodes.numel()),
                 },
                 "timing": {

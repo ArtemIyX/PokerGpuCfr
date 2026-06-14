@@ -276,6 +276,9 @@ def _fake_trace(packed: object) -> GpuSolveTrace:
             "regret": 0.0,
             "finalize": 0.0,
         },
+        level_node_counts=(1,),
+        level_edge_counts=(0,),
+        level_frontier_counts=(0,),
         node_count=1,
         leaf_count=1,
         root_strategy=np.asarray([1.0], dtype=np.float32),
@@ -285,6 +288,4 @@ def _fake_trace(packed: object) -> GpuSolveTrace:
         root_ev_player1=0.0,
         gpu_backward_p0=np.asarray([0.0], dtype=np.float32),
         gpu_backward_p1=np.asarray([0.0], dtype=np.float32),
-        cpu_backward_p0=np.asarray([0.0], dtype=np.float32),
-        cpu_backward_p1=np.asarray([0.0], dtype=np.float32),
     )
