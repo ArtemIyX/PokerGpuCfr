@@ -327,6 +327,8 @@ class PackedGpuSolveState:
     root_child_nodes: Any
     root_action_ev_buffer: Any
     root_child_parent_infoset: int = -1
+    root_action_count: int = 0
+    root_action_start: int = 0
     iteration: int = 0
 
 

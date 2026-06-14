@@ -128,19 +128,22 @@ def average_strategy_from_gpu(
     action_counts: torch.Tensor,
     action_offsets: torch.Tensor,
     infoset_index: int,
-) -> np.ndarray:
-    count = int(action_counts[infoset_index].item())
-    start = int(action_offsets[infoset_index].item())
+    *,
+    cached_count: int | None = None,
+    cached_start: int | None = None,
+) -> torch.Tensor:
+    count = cached_count if cached_count is not None else int(action_counts[infoset_index].item())
+    start = cached_start if cached_start is not None else int(action_offsets[infoset_index].item())
     values = strategy_sums.narrow(0, start, count)
     total = float(values.sum().item())
     if total <= 0.0 and count > 0:
-        return np.full(count, 1.0 / count, dtype=np.float32)
+        return torch.full_like(values, 1.0 / count)
     if total <= 0.0:
-        return np.zeros(0, dtype=np.float32)
+        return torch.zeros_like(values)
     out = torch.empty_like(values)
     if launch_normalize_row(values, out, total):
-        return out.detach().cpu().numpy().astype(np.float32, copy=False)
-    return values.div(total).detach().cpu().numpy().astype(np.float32, copy=False)
+        return out
+    return values.div(total)
 
 
 def make_cpu_store(

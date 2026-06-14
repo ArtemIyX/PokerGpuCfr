@@ -300,6 +300,8 @@ def _make_gpu_state(
     regrets = torch.zeros(action_count, dtype=torch.float32, device=device)
     strategy_sums = torch.zeros_like(regrets)
     strategy_table = torch.zeros((packed.infoset_count, max(packed.max_actions, 1)), dtype=torch.float32, device=device)
+    action_offsets = torch.as_tensor(layout.offsets, dtype=torch.int64, device=device)
+    action_counts = torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device)
     ranges = init_gpu_ranges(root_ranges, device=device)
     node_range_p0 = torch.zeros((packed.node_count, _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
     node_range_p1 = torch.zeros_like(node_range_p0)
@@ -349,6 +351,8 @@ def _make_gpu_state(
     frontier_range_p1 = torch.zeros_like(frontier_range_p0)
     frontier_range_p2 = torch.zeros_like(frontier_range_p0)
     root_action_ev_buffer = torch.zeros_like(plan.root_child_nodes, dtype=torch.float32, device=device) if plan is not None else torch.zeros(0, dtype=torch.float32, device=device)
+    root_action_count = int(action_counts[packed.root_infoset].item()) if packed.root_infoset >= 0 and packed.root_infoset < action_counts.numel() else 0
+    root_action_start = int(action_offsets[packed.root_infoset].item()) if packed.root_infoset >= 0 and packed.root_infoset < action_offsets.numel() else 0
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -359,8 +363,8 @@ def _make_gpu_state(
         node_range_p2=node_range_p2,
         action_infoset_index=packed.action_infoset_index,
         action_slot_index=packed.action_slot_index,
-        action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
-        action_counts=torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device),
+        action_offsets=action_offsets,
+        action_counts=action_counts,
         backward_p0=backward_p0,
         backward_p1=backward_p1,
         frontier_nodes=packed.frontier_nodes,
@@ -452,6 +456,8 @@ def _make_gpu_state(
         root_branch_nodes=plan.root_branch_nodes if plan is not None else torch.zeros(0, dtype=torch.int64, device=device),
         root_child_nodes=plan.root_child_nodes if plan is not None else torch.zeros(0, dtype=torch.int64, device=device),
         root_action_ev_buffer=root_action_ev_buffer,
+        root_action_count=root_action_count,
+        root_action_start=root_action_start,
     )
 
 
@@ -558,11 +564,13 @@ def _run_gpu_solve(
 
     with record_function("solve::finalize"):
         started_phase = time.monotonic()
-        root_strategy = average_strategy_from_gpu(
+        root_strategy_tensor = average_strategy_from_gpu(
             strategy_sums,
             state.action_counts,
             state.action_offsets,
             root_infoset,
+            cached_count=state.root_action_count,
+            cached_start=state.root_action_start,
         )
         root_action_ev_p0 = _root_action_values_from_backward(
             tree.tree,
@@ -581,6 +589,7 @@ def _run_gpu_solve(
         bb_scale = 1.0
     root_action_ev_p0 = np.asarray(root_action_ev_p0 / bb_scale, dtype=np.float32)
     root_action_ev_p1 = np.asarray(root_action_ev_p1 / bb_scale, dtype=np.float32)
+    root_strategy = root_strategy_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
     root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
     root_ev_p1 = -root_ev_p0
     if spec.cache_state is not None:
@@ -660,9 +669,9 @@ def _load_warm_start_into_gpu_state(
     regret = np.asarray(warm_start.regret, dtype=np.float32)
     strategy_sum = np.asarray(warm_start.strategy_sum, dtype=np.float32)
     if regret.size == state.regrets.numel():
-        state.regrets.copy_(torch.from_numpy(np.asarray(regret, dtype=np.float32)))
+        state.regrets.copy_(torch.from_numpy(regret))
     if strategy_sum.size == state.strategy_sums.numel():
-        state.strategy_sums.copy_(torch.from_numpy(np.asarray(strategy_sum, dtype=np.float32)))
+        state.strategy_sums.copy_(torch.from_numpy(strategy_sum))
 
 
 def _spec_root_ranges(spec: PostflopResolveSpec) -> tuple[RangeVector, ...]:
