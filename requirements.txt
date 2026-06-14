@@ -12,10 +12,13 @@ treys>=0.1.8
 
 # ML / GPU path
 torch>=2.3
+triton-windows<3.8
 
 # CUDA install note:
 # If you want GPU support, install the CUDA wheel from PyTorch, e.g.
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Triton is required for torch.compile on GPU:
+# pip install triton
 
 # Data / experiments
 pandas>=2.2

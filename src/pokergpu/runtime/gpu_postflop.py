@@ -468,10 +468,7 @@ def _run_gpu_solve(
                 "regret": compact_regret_phase_seconds,
             },
         )
-        phase_seconds["strategy"] += 0.0
-        phase_seconds["forward"] += 0.0
-        phase_seconds["backward"] += 0.0
-        phase_seconds["regret"] += 0.0
+        phase_seconds["strategy"] += time.monotonic() - started_phase
         iterations += 1
         if target_iterations > 0 and iterations >= target_iterations:
             break

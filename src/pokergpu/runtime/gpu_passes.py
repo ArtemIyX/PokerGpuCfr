@@ -23,6 +23,9 @@ from pokergpu.tree import NodeType, PublicTree
 
 from .gpu_plan import concat_compact_level_edges, concat_level_edges
 
+_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
+_REGRET_MATCH_COMPILE_ENABLED = os.getenv("POKERGPU_REGRET_MATCH_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
+
 __all__ = [
     "regret_matching_table_inplace",
     "average_strategy_from_gpu",
@@ -162,20 +165,6 @@ def _compiled_regret_matching_impl() -> Any:
 _REGRET_MATCHING_IMPL: Any = _compiled_regret_matching_impl()
 
 
-def _compiled_iteration_core() -> Any:
-    if not _COMPACT_COMPILE_ENABLED:
-        return _run_compact_iteration_core
-    if not hasattr(torch, "compile"):
-        return _run_compact_iteration_core
-    try:
-        return torch.compile(_run_compact_iteration_core, fullgraph=False, dynamic=True)
-    except Exception:
-        return _run_compact_iteration_core
-
-
-_COMPACT_ITERATION_CORE: Any = _compiled_iteration_core()
-
-
 def average_strategy_from_gpu(
     strategy_sums: torch.Tensor,
     action_counts: torch.Tensor,
@@ -238,11 +227,87 @@ def _run_compact_iteration_core(
     node_values_p1: torch.Tensor,
 ) -> None:
     for index, _level_indices in enumerate(state.compact_forward_levels):
-        forward_pass_compact_group(state, index, strategy_table, node_range_p0, node_range_p1)
+        edge_src = state.compact_level_edge_src[index]
+        edge_dst = state.compact_level_edge_dst[index]
+        edge_infoset = state.compact_level_edge_infoset[index]
+        edge_slot = state.compact_level_edge_slot[index]
+        edge_kind = state.compact_level_edge_kind[index]
+        edge_prob = state.compact_level_edge_prob[index]
+        if edge_src.numel() == 0:
+            continue
+        _compact_pass_impl(
+            edge_src,
+            edge_dst,
+            edge_infoset,
+            edge_slot,
+            edge_kind,
+            edge_prob,
+            strategy_table,
+            _COMPACT_MODE_FORWARD,
+            node_range_p0=node_range_p0,
+            node_range_p1=node_range_p1,
+        )
     for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
-        backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
+        compact_index = len(state.compact_backward_levels) - 1 - index
+        edge_src = state.compact_level_edge_src[compact_index]
+        edge_dst = state.compact_level_edge_dst[compact_index]
+        edge_infoset = state.compact_level_edge_infoset[compact_index]
+        edge_slot = state.compact_level_edge_slot[compact_index]
+        edge_kind = state.compact_level_edge_kind[compact_index]
+        edge_prob = state.compact_level_edge_prob[compact_index]
+        if edge_src.numel() == 0:
+            continue
+        _compact_pass_impl(
+            edge_src,
+            edge_dst,
+            edge_infoset,
+            edge_slot,
+            edge_kind,
+            edge_prob,
+            strategy_table,
+            _COMPACT_MODE_BACKWARD,
+            out_p0=out_p0,
+            out_p1=out_p1,
+        )
     for index, _level_indices in enumerate(state.compact_backward_levels):
-        update_regrets_compact_group(state, index, regrets, strategy_sums, strategy_table, node_values_p0, node_values_p1)
+        edge_src = state.compact_level_edge_src[index]
+        edge_dst = state.compact_level_edge_dst[index]
+        edge_infoset = state.compact_level_edge_infoset[index]
+        edge_slot = state.compact_level_edge_slot[index]
+        edge_kind = state.compact_level_edge_kind[index]
+        edge_prob = state.compact_level_edge_prob[index]
+        if edge_src.numel() == 0:
+            continue
+        _compact_pass_impl(
+            edge_src,
+            edge_dst,
+            edge_infoset,
+            edge_slot,
+            edge_kind,
+            edge_prob,
+            strategy_table,
+            _COMPACT_MODE_REGRET,
+            regrets=regrets,
+            strategy_sums=strategy_sums,
+            node_values_p0=node_values_p0,
+            node_values_p1=node_values_p1,
+            action_offsets=state.action_offsets,
+            action_counts=state.action_counts,
+        )
+
+
+def _compiled_iteration_core() -> Any:
+    if not _COMPACT_COMPILE_ENABLED:
+        return _run_compact_iteration_core
+    if not hasattr(torch, "compile"):
+        return _run_compact_iteration_core
+    try:
+        return torch.compile(_run_compact_iteration_core, fullgraph=False, dynamic=True)
+    except Exception:
+        return _run_compact_iteration_core
+
+
+_COMPACT_ITERATION_CORE: Any = _compiled_iteration_core()
 
 
 def run_compact_iteration_gpu(
@@ -307,37 +372,9 @@ def propagate_node_ranges_compact(
         )
 
 
-def _process_compact_edges(
-    state: PackedGpuSolveState,
-    compact_level_index: int,
-    strategy_table: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = concat_compact_level_edges(state, compact_level_index)
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
-    )
-    if not bool(valid.any()):
-        empty_i64 = torch.empty(0, dtype=torch.int64, device=strategy_table.device)
-        empty_f32 = torch.empty(0, dtype=torch.float32, device=strategy_table.device)
-        return empty_i64, empty_i64, empty_i64, empty_i64, empty_i64, empty_f32
-    return (
-        edge_src[valid],
-        edge_dst[valid],
-        edge_infoset[valid],
-        edge_slot[valid],
-        edge_kind[valid],
-        edge_prob[valid],
-    )
-
-
 _COMPACT_MODE_FORWARD = 0
 _COMPACT_MODE_BACKWARD = 1
 _COMPACT_MODE_REGRET = 2
-_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
-_REGRET_MATCH_COMPILE_ENABLED = os.getenv("POKERGPU_REGRET_MATCH_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _compact_pass_impl(
@@ -460,9 +497,14 @@ def _compact_pass(
     node_values_p0: torch.Tensor | None = None,
     node_values_p1: torch.Tensor | None = None,
 ) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _process_compact_edges(
-        state, compact_level_index, strategy_table
-    )
+    edge_src = state.compact_level_edge_src[compact_level_index]
+    if edge_src.numel() == 0:
+        return
+    edge_dst = state.compact_level_edge_dst[compact_level_index]
+    edge_infoset = state.compact_level_edge_infoset[compact_level_index]
+    edge_slot = state.compact_level_edge_slot[compact_level_index]
+    edge_kind = state.compact_level_edge_kind[compact_level_index]
+    edge_prob = state.compact_level_edge_prob[compact_level_index]
     _COMPACT_PASS_IMPL(
         edge_src,
         edge_dst,
@@ -513,12 +555,10 @@ def forward_pass_gpu(
     node_range_p1: torch.Tensor,
     timings: list[float] | None = None,
 ) -> None:
+    started = time.monotonic()
     propagate_node_ranges_compact(state, strategy_table)
-    for index, _level_indices in enumerate(state.compact_forward_levels):
-        started = time.monotonic()
-        forward_pass_compact_group(state, index, strategy_table, node_range_p0, node_range_p1)
-        if timings is not None and index < len(timings):
-            timings[index] += time.monotonic() - started
+    if timings is not None:
+        timings.append(time.monotonic() - started)
 
 
 def forward_pass_compact_group(
@@ -546,6 +586,7 @@ def backward_pass_gpu(
     out_p1: torch.Tensor,
     timings: list[float] | None = None,
 ) -> None:
+    started = time.monotonic()
     out_p0.zero_()
     out_p1.zero_()
     frontier_nodes = state.frontier_nodes
@@ -554,10 +595,9 @@ def backward_pass_gpu(
         out_p0[frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
     for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
-        started = time.monotonic()
         backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
-        if timings is not None and index < len(timings):
-            timings[index] += time.monotonic() - started
+    if timings is not None:
+        timings.append(time.monotonic() - started)
 
 
 def backward_pass_compact_group(
