@@ -3,13 +3,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ContextManager
+from contextlib import nullcontext
 
 import numpy as np
-try:
-    from torch.profiler import record_function
-except Exception:  # pragma: no cover
-    from contextlib import nullcontext as record_function
 import torch
 
 from pokergpu.eval import (
@@ -26,6 +23,17 @@ from pokergpu.value_network.dataset import (
 )
 from pokergpu.value_network.model import ValueMLP, build_value_model, infer_value
 from pokergpu.value_network.target import ValueFeatureSpec, ValueTargetKind
+
+try:
+    from torch.profiler import record_function as _TorchRecordFunction
+except Exception:  # pragma: no cover
+    _TorchRecordFunction = None  # type: ignore[assignment]
+
+
+def record_function(name: str) -> ContextManager[None]:
+    if _TorchRecordFunction is None:
+        return nullcontext()
+    return _TorchRecordFunction(name)
 
 
 @dataclass(frozen=True, slots=True)

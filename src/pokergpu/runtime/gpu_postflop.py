@@ -123,7 +123,7 @@ def resolve_postflop_gpu(
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for resolve_postflop_gpu")
 
-    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
+    evaluator_impl = evaluator or CpuStubLeafEvaluator()
     packed = _prepare_gpu_solve(spec)
     return _finish_gpu_solve(packed, evaluator_impl)
 

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, cast
+from contextlib import nullcontext
+from typing import Any, ContextManager, cast
 
 import numpy as np
 
@@ -24,11 +25,15 @@ from pokergpu.tree import NodeType, PublicTree
 from .gpu_plan import concat_compact_level_edges, concat_level_edges
 
 try:
-    from torch.profiler import record_function as _record_function
+    from torch.profiler import record_function as _TorchRecordFunction
 except Exception:  # pragma: no cover
-    from contextlib import nullcontext as _record_function
+    _TorchRecordFunction = None  # type: ignore[assignment]
 
-record_function = _record_function
+
+def record_function(name: str) -> ContextManager[None]:
+    if _TorchRecordFunction is None:
+        return nullcontext()
+    return _TorchRecordFunction(name)
 
 _COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
 _REGRET_MATCH_COMPILE_ENABLED = os.getenv("POKERGPU_REGRET_MATCH_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
@@ -335,14 +340,10 @@ def run_compact_iteration_gpu(
         state.node_range_p0.zero_()
         state.node_range_p1.zero_()
         state.node_range_p2.zero_()
-        state.node_range_p0[0] = torch.ones_like(state.node_range_p0[0])
-        state.node_range_p1[0] = torch.ones_like(state.node_range_p1[0])
-        state.node_range_p2[0] = torch.ones_like(state.node_range_p2[0])
-    with record_function("solve::frontier_copy"):
-        if state.frontier_nodes.numel() > 0:
-            state.frontier_range_p0.copy_(state.node_range_p0.index_select(0, state.frontier_nodes))
-            state.frontier_range_p1.copy_(state.node_range_p1.index_select(0, state.frontier_nodes))
-            state.frontier_range_p2.copy_(state.node_range_p2.index_select(0, state.frontier_nodes))
+        if state.node_range_p0.shape[0] > 0:
+            state.node_range_p0[0].fill_(1.0)
+            state.node_range_p1[0].fill_(1.0)
+            state.node_range_p2[0].fill_(1.0)
     with record_function("solve::leaf_eval"):
         out_p0.zero_()
         out_p1.zero_()
@@ -635,28 +636,6 @@ def evaluate_frontier_leaves(
     state: PackedGpuSolveState,
     evaluator: LeafEvaluator,
 ) -> LeafValueBatch:
-    with record_function("leaf::prep_tensors"):
-        if state.frontier_leaf_tensors is None:
-            tensors = {
-                "range_p0": state.frontier_range_p0,
-                "range_p1": state.frontier_range_p1,
-                "range_p2": state.frontier_range_p2,
-                "street": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-                "pot": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-                "stack_p0": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-                "stack_p1": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-                "board_size": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-                "player_to_act": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-                "terminal_payoff": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.float32, device=state.node_range_p0.device),
-                "is_terminal": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
-                "is_frontier": torch.ones(state.frontier_nodes.shape[0], dtype=torch.bool, device=state.node_range_p0.device),
-                "infoset_id": torch.zeros(state.frontier_nodes.shape[0], dtype=torch.int32, device=state.node_range_p0.device),
-            }
-        else:
-            tensors = state.frontier_leaf_tensors
-            tensors["range_p0"].copy_(state.frontier_range_p0)
-            tensors["range_p1"].copy_(state.frontier_range_p1)
-            tensors["range_p2"].copy_(state.frontier_range_p2)
     evaluate = getattr(evaluator, "evaluate", None)
     if evaluate is not None:
         with record_function("leaf::evaluate_batch"):
