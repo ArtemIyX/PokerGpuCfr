@@ -79,9 +79,9 @@ class PostflopRuntimeValueNetworkEvaluator(LeafEvaluator):
         put(to_np("is_terminal", np.bool_).astype(np.float32))
         put(to_np("is_frontier", np.bool_).astype(np.float32))
         put(np.clip(to_np("infoset_id", np.int32), -1, 1_000_000))
-        put(to_np("range_p0", np.float32) if "range_p0" in tensors else to_np("reach_p0", np.float32))
-        put(to_np("range_p1", np.float32) if "range_p1" in tensors else to_np("reach_p1", np.float32))
-        put(to_np("range_p2", np.float32) if "range_p2" in tensors else to_np("reach_p2", np.float32))
+        put(to_np("range_p0", np.float32))
+        put(to_np("range_p1", np.float32))
+        put(to_np("range_p2", np.float32))
         normalized = normalize_feature_batch(ValueFeatureBatch(features), self._normalizer).values
         values = infer_value(self._model, normalized)
         return LeafValueBatch(

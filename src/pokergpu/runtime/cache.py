@@ -224,33 +224,16 @@ class PackedGpuSolveState:
     regrets: Any
     strategy_sums: Any
     strategy_table: Any
-    strategy_flat: Any
-    range_p0: Any
-    range_p1: Any
-    range_p2: Any
-    range_p3: Any
-    range_p4: Any
-    range_p5: Any
     node_range_p0: Any
     node_range_p1: Any
     node_range_p2: Any
-    node_range_p3: Any
-    node_range_p4: Any
-    node_range_p5: Any
     action_infoset_index: Any
     action_slot_index: Any
     action_offsets: Any
     action_counts: Any
     backward_p0: Any
     backward_p1: Any
-    leaf_values_p0: Any
-    leaf_values_p1: Any
-    root_action_ev_p0: Any
-    root_action_ev_p1: Any
-    root_strategy: Any
     frontier_nodes: Any
-    frontier_leaf_batch: Any
-    frontier_leaf_tensors: Any
     node_type: Any
     node_first_child: Any
     node_child_count: Any
