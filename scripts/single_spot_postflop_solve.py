@@ -72,6 +72,7 @@ def main() -> None:
     evaluator = CpuStubLeafEvaluator()
     started_at = time.monotonic()
     packed = _prepare_gpu_solve(spec)
+    warmup_trace = _run_gpu_solve(packed, evaluator)
     if args.profile:
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -80,9 +81,9 @@ def main() -> None:
         ) as prof:
             with record_function("solve::run_gpu_solve"):
                 trace = _run_gpu_solve(packed, evaluator)
-        print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
     else:
-        trace = _run_gpu_solve(packed, evaluator)
+        trace = warmup_trace
     total_seconds = time.monotonic() - started_at
 
     print(
