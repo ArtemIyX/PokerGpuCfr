@@ -346,6 +346,7 @@ def _make_gpu_state(
     frontier_range_p0 = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
     frontier_range_p1 = torch.zeros_like(frontier_range_p0)
     frontier_range_p2 = torch.zeros_like(frontier_range_p0)
+    root_action_ev_buffer = torch.zeros_like(plan.root_child_nodes, dtype=torch.float32, device=device) if plan is not None else torch.zeros(0, dtype=torch.float32, device=device)
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -443,6 +444,7 @@ def _make_gpu_state(
         frontier_range_p1=frontier_range_p1,
         frontier_range_p2=frontier_range_p2,
         root_child_nodes=plan.root_child_nodes if plan is not None else tuple(),
+        root_action_ev_buffer=root_action_ev_buffer,
     )
 
 
@@ -560,6 +562,7 @@ def _run_gpu_solve(
         backward_p0,
         backward_p1,
         root_infoset,
+        buffer=state.root_action_ev_buffer,
     )
     if debug:
         print("debug::root_action_raw", root_action_ev_p0.tolist())
@@ -649,9 +652,9 @@ def _load_warm_start_into_gpu_state(
     regret = np.asarray(warm_start.regret, dtype=np.float32)
     strategy_sum = np.asarray(warm_start.strategy_sum, dtype=np.float32)
     if regret.size == state.regrets.numel():
-        state.regrets.copy_(torch.as_tensor(regret, dtype=torch.float32, device=state.regrets.device))
+        state.regrets.copy_(torch.from_numpy(np.asarray(regret, dtype=np.float32)))
     if strategy_sum.size == state.strategy_sums.numel():
-        state.strategy_sums.copy_(torch.as_tensor(strategy_sum, dtype=torch.float32, device=state.strategy_sums.device))
+        state.strategy_sums.copy_(torch.from_numpy(np.asarray(strategy_sum, dtype=np.float32)))
 
 
 def _spec_root_ranges(spec: PostflopResolveSpec) -> tuple[RangeVector, ...]:
@@ -753,6 +756,8 @@ def _root_action_values_from_backward(
     backward_p0: torch.Tensor,
     backward_p1: torch.Tensor,
     root_infoset: int,
+    *,
+    buffer: torch.Tensor | None = None,
 ) -> np.ndarray:
     del tree, root_infoset
     limit = int(plan.root_child_nodes.numel())
@@ -762,6 +767,9 @@ def _root_action_values_from_backward(
     valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
     safe_child_nodes = child_nodes.clamp(0, max(0, backward_p0.numel() - 1))
     values = backward_p0[safe_child_nodes] * valid.to(backward_p0.dtype)
+    if buffer is not None and buffer.numel() >= limit:
+        buffer[:limit].copy_(values)
+        values = buffer[:limit]
     return values.detach().cpu().numpy().astype(np.float32, copy=False)
 
 

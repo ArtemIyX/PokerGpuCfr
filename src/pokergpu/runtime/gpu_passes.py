@@ -273,8 +273,8 @@ def run_compact_iteration_gpu(
         if frontier_count > 0:
             leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
             leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
-            out_p0[leaf_slice] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
-            out_p1[leaf_slice] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
+            out_p0[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player0, dtype=np.float32)))
+            out_p1[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player1, dtype=np.float32)))
             if debug:
                 print(
                     "debug::leaf",
@@ -542,8 +542,8 @@ def backward_pass_gpu(
     if frontier_count > 0:
         leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
         leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
-        out_p0[leaf_slice] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
-        out_p1[leaf_slice] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
+        out_p0[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player0, dtype=np.float32)))
+        out_p1[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player1, dtype=np.float32)))
     for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
         backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
     if timings is not None:

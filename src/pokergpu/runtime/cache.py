@@ -316,6 +316,7 @@ class PackedGpuSolveState:
     frontier_range_p1: Any
     frontier_range_p2: Any
     root_child_nodes: Any
+    root_action_ev_buffer: Any
     root_child_parent_infoset: int = -1
     iteration: int = 0
 
