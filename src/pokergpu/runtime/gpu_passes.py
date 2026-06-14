@@ -188,38 +188,14 @@ def _run_compact_iteration_core(
         if node_range_p0.shape[0] > 0:
             node_range_p0[0].fill_(1.0)
             node_range_p1[0].fill_(1.0)
-        for group in zip(
-            state.compact_level_edge_src,
-            state.compact_level_edge_dst,
-            state.compact_level_edge_infoset,
-            state.compact_level_edge_slot,
-            state.compact_level_edge_kind,
-            state.compact_level_edge_prob,
-            strict=True,
-        ):
-            _compact_group_pass(_make_compact_group(*group, device=state.regrets.device), strategy_table, _COMPACT_MODE_FORWARD, node_range_p0=node_range_p0, node_range_p1=node_range_p1)
+        for group in state.compact_forward_groups:
+            _compact_group_pass(group, strategy_table, _COMPACT_MODE_FORWARD, node_range_p0=node_range_p0, node_range_p1=node_range_p1)
     with record_function("solve::backward"):
-        for group in zip(
-            state.compact_backward_edge_src,
-            state.compact_backward_edge_dst,
-            state.compact_backward_edge_infoset,
-            state.compact_backward_edge_slot,
-            state.compact_backward_edge_kind,
-            state.compact_backward_edge_prob,
-            strict=True,
-        ):
-            _compact_group_pass(_make_compact_group(group[0], group[1], group[2], group[3], group[4], group[5], device=state.regrets.device), strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
+        for group in state.compact_backward_groups:
+            _compact_group_pass(group, strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
     with record_function("solve::regret"):
-        for group in zip(
-            state.compact_backward_edge_src,
-            state.compact_backward_edge_dst,
-            state.compact_backward_edge_infoset,
-            state.compact_backward_edge_slot,
-            state.compact_backward_edge_kind,
-            state.compact_backward_edge_prob,
-            strict=True,
-        ):
-            _compact_group_pass(_make_compact_group(group[0], group[1], group[2], group[3], group[4], group[5], device=state.regrets.device), strategy_table, _COMPACT_MODE_REGRET, regrets=regrets, strategy_sums=strategy_sums, node_values_p0=node_values_p0, node_values_p1=node_values_p1)
+        for group in state.compact_backward_groups:
+            _compact_group_pass(group, strategy_table, _COMPACT_MODE_REGRET, regrets=regrets, strategy_sums=strategy_sums, node_values_p0=node_values_p0, node_values_p1=node_values_p1)
 
 
 def _compiled_iteration_core() -> Any:

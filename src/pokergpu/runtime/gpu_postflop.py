@@ -394,6 +394,8 @@ def _make_gpu_state(
         level_edge_slot=level_edge_slot,
         level_edge_kind=level_edge_kind,
         level_edge_prob=level_edge_prob,
+        compact_forward_groups=plan.compact_forward_groups if plan is not None else tuple(),
+        compact_backward_groups=plan.compact_backward_groups if plan is not None else tuple(),
         compact_level_edge_src=compact_level_edge_src,
         compact_level_edge_dst=compact_level_edge_dst,
         compact_level_edge_infoset=compact_level_edge_infoset,

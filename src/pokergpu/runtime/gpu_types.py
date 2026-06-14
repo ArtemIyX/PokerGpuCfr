@@ -103,6 +103,8 @@ class BatchedGpuPlan:
     level_edge_slot: tuple[torch.Tensor, ...]
     level_edge_kind: tuple[torch.Tensor, ...]
     level_edge_prob: tuple[torch.Tensor, ...]
+    compact_forward_groups: tuple[CompactEdgeGroup, ...]
+    compact_backward_groups: tuple[CompactEdgeGroup, ...]
     compact_level_edge_src: tuple[torch.Tensor, ...]
     compact_level_edge_dst: tuple[torch.Tensor, ...]
     compact_level_edge_infoset: tuple[torch.Tensor, ...]

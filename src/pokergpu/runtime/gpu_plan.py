@@ -433,6 +433,8 @@ def build_batched_gpu_plan(
         level_edge_slot=tuple(level_edge_slot),
         level_edge_kind=tuple(level_edge_kind),
         level_edge_prob=tuple(level_edge_prob),
+        compact_forward_groups=tuple(compact_forward_groups),
+        compact_backward_groups=tuple(compact_backward_groups),
         compact_level_edge_src=tuple(compact_level_edge_src),
         compact_level_edge_dst=tuple(compact_level_edge_dst),
         compact_level_edge_infoset=tuple(compact_level_edge_infoset),
