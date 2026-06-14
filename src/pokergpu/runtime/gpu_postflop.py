@@ -1035,31 +1035,51 @@ def _update_regrets_gpu(
 ) -> None:
     for index, level_indices in enumerate(state.compact_backward_levels):
         started = time.monotonic()
-        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
-            state, level_indices
+        _update_regrets_compact_group(
+            state,
+            level_indices,
+            regrets,
+            strategy_sums,
+            strategy_table,
+            node_values_p0,
+            node_values_p1,
         )
-        valid = (
-            (edge_infoset >= 0)
-            & (edge_infoset < strategy_table.shape[0])
-            & (edge_slot >= 0)
-            & (edge_slot < strategy_table.shape[1])
-        )
-        if not bool(valid.any()):
-            continue
-        edge_src = edge_src[valid]
-        edge_dst = edge_dst[valid]
-        edge_infoset = edge_infoset[valid]
-        edge_slot = edge_slot[valid]
-        edge_kind = edge_kind[valid]
-        flat = state.action_offsets[edge_infoset] + edge_slot
-        child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
-        strat = strategy_table[edge_infoset, edge_slot]
-        infoset_value = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-        infoset_value.scatter_add_(0, edge_infoset, strat * child_values)
-        regrets.index_add_(0, flat, child_values - infoset_value[edge_infoset])
-        strategy_sums.index_add_(0, flat, strat)
         if timings is not None and index < len(timings):
             timings[index] += time.monotonic() - started
+
+
+def _update_regrets_compact_group(
+    state: PackedGpuSolveState,
+    level_indices: tuple[int, ...],
+    regrets: torch.Tensor,
+    strategy_sums: torch.Tensor,
+    strategy_table: torch.Tensor,
+    node_values_p0: torch.Tensor,
+    node_values_p1: torch.Tensor,
+) -> None:
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
+        state, level_indices
+    )
+    valid = (
+        (edge_infoset >= 0)
+        & (edge_infoset < strategy_table.shape[0])
+        & (edge_slot >= 0)
+        & (edge_slot < strategy_table.shape[1])
+    )
+    if not bool(valid.any()):
+        return
+    edge_src = edge_src[valid]
+    edge_dst = edge_dst[valid]
+    edge_infoset = edge_infoset[valid]
+    edge_slot = edge_slot[valid]
+    edge_kind = edge_kind[valid]
+    flat = state.action_offsets[edge_infoset] + edge_slot
+    child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
+    strat = strategy_table[edge_infoset, edge_slot]
+    infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+    infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
+    regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
+    strategy_sums.index_add_(0, flat, strat)
 
 
 def _update_regrets_gpu_batched(
