@@ -191,7 +191,7 @@ def _process_compact_edges(
 _COMPACT_MODE_FORWARD = 0
 _COMPACT_MODE_BACKWARD = 1
 _COMPACT_MODE_REGRET = 2
-_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
+_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "0").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _compact_pass_impl(

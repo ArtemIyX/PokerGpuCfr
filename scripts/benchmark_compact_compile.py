@@ -35,7 +35,7 @@ def _run_case(env: dict[str, str], enabled: bool) -> dict[str, object]:
             "--board",
             "AhKdTc",
             "--iterations",
-            "8",
+            "16",
             "--max-depth",
             "5",
             "--max-nodes",
