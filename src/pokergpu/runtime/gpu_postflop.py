@@ -124,6 +124,9 @@ class GpuSolveTrace:
     cpu_backward_p1: np.ndarray
 
 
+_PRIVATE_HAND_COUNT = 1326
+
+
 _GPU_PLAN_CACHE: LruCache[PackedGpuSolve] = LruCache(max_entries=64)
 _GPU_BATCH_MIN_SOLVES = 4
 _GPU_MIN_LEAFS = 1024
@@ -463,6 +466,12 @@ def _make_gpu_state(
     strategy_table = torch.zeros((packed.infoset_count, max(packed.max_actions, 1)), dtype=torch.float32, device=device)
     strategy_flat = torch.zeros(action_count, dtype=torch.float32, device=device)
     ranges = _init_gpu_ranges(root_ranges, device=device)
+    node_range_p0 = torch.zeros((packed.node_count, _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
+    node_range_p1 = torch.zeros_like(node_range_p0)
+    node_range_p2 = torch.zeros_like(node_range_p0)
+    node_range_p3 = torch.zeros_like(node_range_p0)
+    node_range_p4 = torch.zeros_like(node_range_p0)
+    node_range_p5 = torch.zeros_like(node_range_p0)
     forward_reach_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
     forward_reach_p1 = torch.zeros_like(forward_reach_p0)
     backward_p0 = torch.zeros_like(forward_reach_p0)
@@ -484,6 +493,12 @@ def _make_gpu_state(
         range_p3=ranges[3],
         range_p4=ranges[4],
         range_p5=ranges[5],
+        node_range_p0=node_range_p0,
+        node_range_p1=node_range_p1,
+        node_range_p2=node_range_p2,
+        node_range_p3=node_range_p3,
+        node_range_p4=node_range_p4,
+        node_range_p5=node_range_p5,
         action_infoset_index=packed.action_infoset_index,
         action_slot_index=packed.action_slot_index,
         action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
@@ -649,6 +664,7 @@ def _run_gpu_solve(
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
         started_phase = time.monotonic()
+        _propagate_node_ranges(state)
         forward_reach_p0.zero_()
         forward_reach_p1.zero_()
         forward_reach_p0[0] = 1.0
@@ -693,6 +709,7 @@ def _run_gpu_solve(
         state.action_counts,
         state.packed.legal_action_mask,
     )
+    _propagate_node_ranges(state)
     forward_reach_p0.zero_()
     forward_reach_p1.zero_()
     forward_reach_p0[0] = 1.0
@@ -1129,12 +1146,10 @@ def _evaluate_frontier_leaves(
     evaluator: LeafEvaluator,
 ) -> LeafValueBatch:
     tensors = dict(state.frontier_leaf_tensors)
-    masks = state.packed.card_removal_mask
-    if masks.ndim == 2 and int(masks.shape[0]) >= int(state.frontier_nodes.numel()):
-        frontier_masks = masks[state.frontier_nodes]
-        tensors["range_p0"] = state.range_p0.unsqueeze(0).expand_as(frontier_masks).to(dtype=torch.float32) * frontier_masks.to(dtype=torch.float32)
-        tensors["range_p1"] = state.range_p1.unsqueeze(0).expand_as(frontier_masks).to(dtype=torch.float32) * frontier_masks.to(dtype=torch.float32)
-        tensors["range_p2"] = state.range_p2.unsqueeze(0).expand_as(frontier_masks).to(dtype=torch.float32) * frontier_masks.to(dtype=torch.float32)
+    frontier_nodes = state.frontier_nodes
+    tensors["range_p0"] = state.node_range_p0[frontier_nodes]
+    tensors["range_p1"] = state.node_range_p1[frontier_nodes]
+    tensors["range_p2"] = state.node_range_p2[frontier_nodes]
     evaluate_tensors = getattr(evaluator, "evaluate_tensors", None)
     if evaluate_tensors is not None:
         try:
@@ -1157,6 +1172,41 @@ def _init_gpu_ranges(
             values = np.zeros(1326, dtype=np.float32)
         tensors.append(torch.as_tensor(values, dtype=torch.float32, device=device))
     return tensors[0], tensors[1], tensors[2], tensors[3], tensors[4], tensors[5]
+
+
+def _propagate_node_ranges(state: PackedGpuSolveState) -> None:
+    state.node_range_p0.zero_()
+    state.node_range_p1.zero_()
+    state.node_range_p2.zero_()
+    state.node_range_p3.zero_()
+    state.node_range_p4.zero_()
+    state.node_range_p5.zero_()
+    state.node_range_p0[0] = state.range_p0 * state.packed.card_removal_mask[0].to(dtype=torch.float32)
+    state.node_range_p1[0] = state.range_p1 * state.packed.card_removal_mask[0].to(dtype=torch.float32)
+    state.node_range_p2[0] = state.range_p2 * state.packed.card_removal_mask[0].to(dtype=torch.float32)
+    for level_index in range(len(state.level_edge_dst)):
+        edge_src = state.level_edge_src[level_index]
+        edge_dst = state.level_edge_dst[level_index]
+        edge_kind = state.level_edge_kind[level_index]
+        edge_prob = state.level_edge_prob[level_index]
+        if edge_src.numel() == 0:
+            continue
+        for src, dst, kind, prob in zip(edge_src.tolist(), edge_dst.tolist(), edge_kind.tolist(), edge_prob.tolist(), strict=True):
+            src_i = int(src)
+            dst_i = int(dst)
+            if kind == 0:
+                state.node_range_p0[dst_i] = state.node_range_p0[src_i] * prob
+                state.node_range_p1[dst_i] = state.node_range_p1[src_i] * prob
+                state.node_range_p2[dst_i] = state.node_range_p2[src_i] * prob
+            elif kind == 1:
+                probs = state.strategy_table[state.edge_infoset[dst_i] if dst_i < state.edge_infoset.numel() else 0]
+                state.node_range_p0[dst_i] = state.node_range_p0[src_i]
+                state.node_range_p1[dst_i] = state.node_range_p1[src_i]
+                state.node_range_p2[dst_i] = state.node_range_p2[src_i]
+            else:
+                state.node_range_p0[dst_i] = state.node_range_p0[src_i]
+                state.node_range_p1[dst_i] = state.node_range_p1[src_i]
+                state.node_range_p2[dst_i] = state.node_range_p2[src_i]
 
 
 def _spec_root_ranges(spec: PostflopResolveSpec) -> tuple[RangeVector, ...]:

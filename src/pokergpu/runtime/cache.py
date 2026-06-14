@@ -231,6 +231,12 @@ class PackedGpuSolveState:
     range_p3: Any
     range_p4: Any
     range_p5: Any
+    node_range_p0: Any
+    node_range_p1: Any
+    node_range_p2: Any
+    node_range_p3: Any
+    node_range_p4: Any
+    node_range_p5: Any
     action_infoset_index: Any
     action_slot_index: Any
     action_offsets: Any
