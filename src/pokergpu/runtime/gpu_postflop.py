@@ -38,9 +38,10 @@ from .gpu_passes import (
     forward_pass_gpu,
     make_cpu_store,
     regret_matching_table_inplace,
+    run_compact_iteration_gpu,
     update_regrets_gpu,
 )
-from .gpu_plan import build_batched_gpu_plan, init_gpu_ranges, propagate_node_ranges
+from .gpu_plan import build_batched_gpu_plan, init_gpu_ranges
 from .gpu_types import (
     BatchedGpuPlan,
     BatchedGpuSolveInput,
@@ -454,52 +455,28 @@ def _run_gpu_solve(
         or (target_iterations <= 0 and (time.monotonic() < deadline or iterations == 0))
     ):
         started_phase = time.monotonic()
-        regret_matching_table_inplace(
-            strategy_table,
-            regrets,
-            state.action_infoset_index,
-            state.action_slot_index,
-            state.action_counts,
-            state.packed.legal_action_mask,
-            state.infoset_blocks,
-        )
-        phase_seconds["strategy"] += time.monotonic() - started_phase
-
-        started_phase = time.monotonic()
-        propagate_node_ranges(state)
-        forward_pass_gpu(
+        run_compact_iteration_gpu(
             state,
             strategy_table,
-            state.node_range_p0,
-            state.node_range_p1,
-            compact_forward_phase_seconds,
+            node_range_p0=state.node_range_p0,
+            node_range_p1=state.node_range_p1,
+            out_p0=backward_p0,
+            out_p1=backward_p1,
+            regrets=regrets,
+            strategy_sums=strategy_sums,
+            node_values_p0=backward_p0,
+            node_values_p1=backward_p1,
+            evaluator=evaluator_impl,
+            timings={
+                "forward": compact_forward_phase_seconds,
+                "backward": compact_backward_phase_seconds,
+                "regret": compact_regret_phase_seconds,
+            },
         )
-        phase_seconds["forward"] += time.monotonic() - started_phase
-
-        started_phase = time.monotonic()
-        backward_p0.zero_()
-        backward_p1.zero_()
-        backward_pass_gpu(
-            state,
-            strategy_table,
-            evaluator_impl,
-            backward_p0,
-            backward_p1,
-            compact_backward_phase_seconds,
-        )
-        phase_seconds["backward"] += time.monotonic() - started_phase
-
-        started_phase = time.monotonic()
-        update_regrets_gpu(
-            state,
-            regrets,
-            strategy_sums,
-            strategy_table,
-            backward_p0,
-            backward_p1,
-            compact_regret_phase_seconds,
-        )
-        phase_seconds["regret"] += time.monotonic() - started_phase
+        phase_seconds["strategy"] += 0.0
+        phase_seconds["forward"] += 0.0
+        phase_seconds["backward"] += 0.0
+        phase_seconds["regret"] += 0.0
         iterations += 1
         if target_iterations > 0 and iterations >= target_iterations:
             break
@@ -507,32 +484,23 @@ def _run_gpu_solve(
             break
 
     started_phase = time.monotonic()
-    regret_matching_table_inplace(
-        strategy_table,
-        regrets,
-        state.action_infoset_index,
-        state.action_slot_index,
-        state.action_counts,
-        state.packed.legal_action_mask,
-        state.infoset_blocks,
-    )
-    propagate_node_ranges(state)
-    forward_pass_gpu(
+    run_compact_iteration_gpu(
         state,
         strategy_table,
-        state.node_range_p0,
-        state.node_range_p1,
-        compact_forward_phase_seconds,
-    )
-    backward_p0.zero_()
-    backward_p1.zero_()
-    backward_pass_gpu(
-        state,
-        strategy_table,
-        evaluator_impl,
-        backward_p0,
-        backward_p1,
-        compact_backward_phase_seconds,
+        node_range_p0=state.node_range_p0,
+        node_range_p1=state.node_range_p1,
+        out_p0=backward_p0,
+        out_p1=backward_p1,
+        regrets=regrets,
+        strategy_sums=strategy_sums,
+        node_values_p0=backward_p0,
+        node_values_p1=backward_p1,
+        evaluator=evaluator_impl,
+        timings={
+            "forward": compact_forward_phase_seconds,
+            "backward": compact_backward_phase_seconds,
+            "regret": compact_regret_phase_seconds,
+        },
     )
     phase_seconds["finalize"] += time.monotonic() - started_phase
 

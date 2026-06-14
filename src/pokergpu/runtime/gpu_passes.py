@@ -21,25 +21,59 @@ from pokergpu.eval.types import LeafFeatureBatch, LeafValueBatch
 from pokergpu.runtime.cache import PackedGpuSolveState
 from pokergpu.tree import NodeType, PublicTree
 
-from .gpu_plan import concat_compact_level_edges, concat_level_edges, propagate_node_ranges
+from .gpu_plan import concat_compact_level_edges, concat_level_edges
 
 __all__ = [
     "regret_matching_table_inplace",
     "average_strategy_from_gpu",
     "make_cpu_store",
+    "run_compact_iteration_gpu",
     "update_regrets_gpu",
     "update_regrets_compact_group",
+    "propagate_node_ranges_compact",
     "forward_pass_gpu",
     "forward_pass_compact_group",
     "backward_pass_gpu",
     "backward_pass_compact_group",
     "evaluate_frontier_leaves",
     "concat_level_edges",
-    "propagate_node_ranges",
 ]
 
 
 def regret_matching_table_inplace(
+    out: torch.Tensor,
+    regrets: torch.Tensor,
+    action_infoset_index: torch.Tensor,
+    action_slot_index: torch.Tensor,
+    action_counts: torch.Tensor,
+    legal_action_mask: torch.Tensor | None = None,
+    infoset_blocks: tuple[torch.Tensor, ...] | None = None,
+) -> torch.Tensor:
+    if _REGRET_MATCH_COMPILE_ENABLED and hasattr(torch, "compile"):
+        return cast(
+            torch.Tensor,
+            _REGRET_MATCHING_IMPL(
+            out,
+            regrets,
+            action_infoset_index,
+            action_slot_index,
+            action_counts,
+            legal_action_mask,
+            infoset_blocks,
+            ),
+        )
+    return _regret_matching_table_inplace_impl(
+        out,
+        regrets,
+        action_infoset_index,
+        action_slot_index,
+        action_counts,
+        legal_action_mask,
+        infoset_blocks,
+    )
+
+
+def _regret_matching_table_inplace_impl(
     out: torch.Tensor,
     regrets: torch.Tensor,
     action_infoset_index: torch.Tensor,
@@ -114,6 +148,20 @@ def regret_matching_table_inplace(
     return out
 
 
+def _compiled_regret_matching_impl() -> Any:
+    if not _REGRET_MATCH_COMPILE_ENABLED:
+        return _regret_matching_table_inplace_impl
+    if not hasattr(torch, "compile"):
+        return _regret_matching_table_inplace_impl
+    try:
+        return torch.compile(_regret_matching_table_inplace_impl, fullgraph=False, dynamic=True)
+    except Exception:
+        return _regret_matching_table_inplace_impl
+
+
+_REGRET_MATCHING_IMPL: Any = _compiled_regret_matching_impl()
+
+
 def average_strategy_from_gpu(
     strategy_sums: torch.Tensor,
     action_counts: torch.Tensor,
@@ -162,6 +210,71 @@ def update_regrets_gpu(
             timings[index] += time.monotonic() - started
 
 
+def run_compact_iteration_gpu(
+    state: PackedGpuSolveState,
+    strategy_table: torch.Tensor,
+    *,
+    node_range_p0: torch.Tensor,
+    node_range_p1: torch.Tensor,
+    out_p0: torch.Tensor,
+    out_p1: torch.Tensor,
+    regrets: torch.Tensor,
+    strategy_sums: torch.Tensor,
+    node_values_p0: torch.Tensor,
+    node_values_p1: torch.Tensor,
+    evaluator: LeafEvaluator,
+    timings: dict[str, list[float]] | None = None,
+) -> None:
+    state.node_range_p0.zero_()
+    state.node_range_p1.zero_()
+    state.node_range_p2.zero_()
+    state.node_range_p0[0] = torch.ones_like(state.node_range_p0[0])
+    state.node_range_p1[0] = torch.ones_like(state.node_range_p1[0])
+    state.node_range_p2[0] = torch.ones_like(state.node_range_p2[0])
+    out_p0.zero_()
+    out_p1.zero_()
+    if state.frontier_nodes.numel() > 0:
+        leaf_values = evaluate_frontier_leaves(state, evaluator)
+        out_p0[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
+        out_p1[state.frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
+    for index, _level_indices in enumerate(state.compact_forward_levels):
+        started = time.monotonic()
+        forward_pass_compact_group(state, index, strategy_table, node_range_p0, node_range_p1)
+        if timings is not None and "forward" in timings and index < len(timings["forward"]):
+            timings["forward"][index] += time.monotonic() - started
+    for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
+        started = time.monotonic()
+        backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
+        if timings is not None and "backward" in timings and index < len(timings["backward"]):
+            timings["backward"][index] += time.monotonic() - started
+    for index, _level_indices in enumerate(state.compact_backward_levels):
+        started = time.monotonic()
+        update_regrets_compact_group(state, index, regrets, strategy_sums, strategy_table, node_values_p0, node_values_p1)
+        if timings is not None and "regret" in timings and index < len(timings["regret"]):
+            timings["regret"][index] += time.monotonic() - started
+
+
+def propagate_node_ranges_compact(
+    state: PackedGpuSolveState,
+    strategy_table: torch.Tensor,
+) -> None:
+    state.node_range_p0.zero_()
+    state.node_range_p1.zero_()
+    state.node_range_p2.zero_()
+    state.node_range_p0[0] = torch.ones_like(state.node_range_p0[0])
+    state.node_range_p1[0] = torch.ones_like(state.node_range_p1[0])
+    state.node_range_p2[0] = torch.ones_like(state.node_range_p2[0])
+    for index, _level_indices in enumerate(state.compact_forward_levels):
+        _compact_pass(
+            state,
+            index,
+            strategy_table,
+            _COMPACT_MODE_FORWARD,
+            node_range_p0=state.node_range_p0,
+            node_range_p1=state.node_range_p1,
+        )
+
+
 def _process_compact_edges(
     state: PackedGpuSolveState,
     compact_level_index: int,
@@ -191,7 +304,8 @@ def _process_compact_edges(
 _COMPACT_MODE_FORWARD = 0
 _COMPACT_MODE_BACKWARD = 1
 _COMPACT_MODE_REGRET = 2
-_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "0").strip().lower() not in {"0", "false", "no", "off"}
+_COMPACT_COMPILE_ENABLED = os.getenv("POKERGPU_COMPACT_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
+_REGRET_MATCH_COMPILE_ENABLED = os.getenv("POKERGPU_REGRET_MATCH_COMPILE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _compact_pass_impl(
@@ -367,7 +481,7 @@ def forward_pass_gpu(
     node_range_p1: torch.Tensor,
     timings: list[float] | None = None,
 ) -> None:
-    propagate_node_ranges(state)
+    propagate_node_ranges_compact(state, strategy_table)
     for index, _level_indices in enumerate(state.compact_forward_levels):
         started = time.monotonic()
         forward_pass_compact_group(state, index, strategy_table, node_range_p0, node_range_p1)

@@ -52,39 +52,6 @@ def concat_compact_level_edges(
     )
 
 
-def propagate_node_ranges(state: Any) -> None:
-    import torch
-
-    state.node_range_p0.zero_()
-    state.node_range_p1.zero_()
-    state.node_range_p2.zero_()
-    state.node_range_p0[0] = torch.ones_like(state.node_range_p0[0])
-    state.node_range_p1[0] = torch.ones_like(state.node_range_p1[0])
-    state.node_range_p2[0] = torch.ones_like(state.node_range_p2[0])
-    for level_index in range(len(state.level_edge_dst)):
-        edge_src = state.level_edge_src[level_index]
-        edge_dst = state.level_edge_dst[level_index]
-        edge_kind = state.level_edge_kind[level_index]
-        edge_prob = state.level_edge_prob[level_index]
-        if edge_src.numel() == 0:
-            continue
-        chance_mask = edge_kind == 0
-        if bool(chance_mask.any()):
-            src = edge_src[chance_mask]
-            dst = edge_dst[chance_mask]
-            weights = edge_prob[chance_mask].unsqueeze(1)
-            state.node_range_p0.index_add_(0, dst, state.node_range_p0[src] * weights)
-            state.node_range_p1.index_add_(0, dst, state.node_range_p1[src] * weights)
-            state.node_range_p2.index_add_(0, dst, state.node_range_p2[src] * weights)
-        player_mask = edge_kind != 0
-        if bool(player_mask.any()):
-            src = edge_src[player_mask]
-            dst = edge_dst[player_mask]
-            state.node_range_p0.index_add_(0, dst, state.node_range_p0[src])
-            state.node_range_p1.index_add_(0, dst, state.node_range_p1[src])
-            state.node_range_p2.index_add_(0, dst, state.node_range_p2[src])
-
-
 def init_gpu_ranges(
     root_ranges: tuple[Any, ...],
     *,
