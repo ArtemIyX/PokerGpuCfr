@@ -40,6 +40,32 @@ class PackedGpuSolve:
 
 
 @dataclass(frozen=True, slots=True)
+class CompactEdgeGroup:
+    src: torch.Tensor
+    dst: torch.Tensor
+    infoset: torch.Tensor
+    slot: torch.Tensor
+    kind: torch.Tensor
+    prob: torch.Tensor
+    flat: torch.Tensor
+    chance_src: torch.Tensor
+    chance_dst: torch.Tensor
+    chance_prob: torch.Tensor
+    p0_src: torch.Tensor
+    p0_dst: torch.Tensor
+    p0_infoset: torch.Tensor
+    p0_slot: torch.Tensor
+    p0_flat: torch.Tensor
+    p0_prob: torch.Tensor
+    p1_src: torch.Tensor
+    p1_dst: torch.Tensor
+    p1_infoset: torch.Tensor
+    p1_slot: torch.Tensor
+    p1_flat: torch.Tensor
+    p1_prob: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
 class BatchedGpuSolveInput:
     spec: PostflopResolveSpec
     template: PublicTreeTemplate

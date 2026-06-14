@@ -719,9 +719,11 @@ def _coalition_root_ev(
         node_states=tree.node_states,
     )
     values = evaluator.evaluate(batch)
-    root_ev[0] = float(np.mean(values.ev_player0, dtype=np.float64))
+    ev0 = np.asarray(values.ev_player0, dtype=np.float32)
+    ev1 = np.asarray(values.ev_player1, dtype=np.float32)
+    root_ev[0] = float(np.mean(ev0, dtype=np.float64))
     if active_count > 1:
-        root_ev[1] = float(np.mean(values.ev_player1, dtype=np.float64))
+        root_ev[1] = float(np.mean(ev1, dtype=np.float64))
     if active_count > 2:
         remainder = -float(np.sum(root_ev[:2], dtype=np.float64))
         root_ev[2:] = np.float32(remainder / float(active_count - 2))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -50,17 +51,23 @@ class LeafFeatureBatch:
 
 @dataclass(slots=True, frozen=True)
 class LeafValueBatch:
-    values: NDArray[np.float32]
-    ev_player0: NDArray[np.float32]
-    ev_player1: NDArray[np.float32]
-    ev_player2: NDArray[np.float32] | None = None
+    values: Any
+    ev_player0: Any
+    ev_player1: Any
+    ev_player2: Any = None
 
     def __post_init__(self) -> None:
-        if self.values.ndim != 2:
+        values_ndim = getattr(self.values, "ndim", None)
+        ev0_shape = getattr(self.ev_player0, "shape", None)
+        ev1_shape = getattr(self.ev_player1, "shape", None)
+        ev2_shape = getattr(self.ev_player2, "shape", None) if self.ev_player2 is not None else ev0_shape
+        if ev0_shape is None or ev1_shape is None:
+            raise ValueError("leaf EV arrays must expose shapes")
+        if values_ndim != 2:
             raise ValueError("leaf value matrix must be two-dimensional")
-        if self.ev_player0.shape != self.ev_player1.shape:
+        if ev0_shape != ev1_shape:
             raise ValueError("leaf EV arrays must have matching shapes")
-        if self.ev_player2 is not None and self.ev_player2.shape != self.ev_player0.shape:
+        if self.ev_player2 is not None and ev2_shape != ev0_shape:
             raise ValueError("leaf EV arrays must have matching shapes")
-        if self.values.shape[0] != self.ev_player0.shape[0]:
+        if getattr(self.values, "shape", (0,))[0] != ev0_shape[0]:
             raise ValueError("leaf values must match batch size")

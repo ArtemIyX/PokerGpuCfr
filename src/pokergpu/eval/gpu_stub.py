@@ -51,16 +51,10 @@ class GpuBatchLeafEvaluator(LeafEvaluator):
                     ev_p0[index] = float(payout_p0)
                     ev_p1[index] = float(payout_p1)
             return LeafValueBatch(
-                values=np.stack(
-                    (
-                        ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
-                        ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
-                    ),
-                    axis=1,
-                ),
-                ev_player0=ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
-                ev_player1=ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
-                ev_player2=(-(ev_p0 + ev_p1)).detach().to("cpu", dtype=torch.float32).numpy(),
+                values=torch.stack((ev_p0, ev_p1), dim=1),
+                ev_player0=ev_p0,
+                ev_player1=ev_p1,
+                ev_player2=-(ev_p0 + ev_p1),
             )
         except Exception:
             return self._cpu_fallback.evaluate(batch)
@@ -77,16 +71,10 @@ class GpuBatchLeafEvaluator(LeafEvaluator):
                 ev_p0[terminal_mask] = terminal_payoff[terminal_mask]
                 ev_p1[terminal_mask] = -terminal_payoff[terminal_mask]
         return LeafValueBatch(
-            values=np.stack(
-                (
-                    ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
-                    ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
-                ),
-                axis=1,
-            ),
-            ev_player0=ev_p0.detach().to("cpu", dtype=torch.float32).numpy(),
-            ev_player1=ev_p1.detach().to("cpu", dtype=torch.float32).numpy(),
-            ev_player2=(-(ev_p0 + ev_p1)).detach().to("cpu", dtype=torch.float32).numpy(),
+            values=torch.stack((ev_p0, ev_p1), dim=1),
+            ev_player0=ev_p0,
+            ev_player1=ev_p1,
+            ev_player2=-(ev_p0 + ev_p1),
         )
 
     def evaluate_many(self, batches: tuple[LeafFeatureBatch, ...]) -> tuple[LeafValueBatch, ...]:

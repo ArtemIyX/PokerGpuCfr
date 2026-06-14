@@ -24,6 +24,7 @@ from pokergpu.runtime.cache import PackedGpuSolveState
 from pokergpu.tree import NodeType, PublicTree
 
 from .gpu_plan import concat_compact_level_edges, concat_level_edges
+from .gpu_types import CompactEdgeGroup
 
 def record_function(name: str) -> ContextManager[None]:
     profiler = _get_record_function()
@@ -110,7 +111,7 @@ def _regret_matching_table_inplace_impl(
     totals_safe = totals.clamp_min(1.0).unsqueeze(1)
     out /= totals_safe
     zero_rows = totals <= 0
-    if bool(zero_rows.any()):
+    if zero_rows.numel() > 0:
         max_actions = out.shape[1]
         slots_mask = torch.arange(max_actions, device=out.device).unsqueeze(0)
         counts = action_counts.clamp_min(1).to(out.device).unsqueeze(1)
@@ -181,71 +182,41 @@ def _run_compact_iteration_core(
     node_values_p1: torch.Tensor,
     debug: bool = False,
 ) -> None:
-    compact_level_count = min(
-        len(state.compact_level_edge_src),
-        len(state.compact_level_edge_dst),
-        len(state.compact_level_edge_infoset),
-        len(state.compact_level_edge_slot),
-        len(state.compact_level_edge_kind),
-        len(state.compact_level_edge_prob),
-    )
-    compact_backward_level_count = min(
-        len(state.compact_backward_edge_src),
-        len(state.compact_backward_edge_dst),
-        len(state.compact_backward_edge_infoset),
-        len(state.compact_backward_edge_slot),
-        len(state.compact_backward_edge_kind),
-        len(state.compact_backward_edge_prob),
-    )
     node_range_p0.zero_()
     node_range_p1.zero_()
     if node_range_p0.shape[0] > 0:
         node_range_p0[0].fill_(1.0)
         node_range_p1[0].fill_(1.0)
-    for index in range(compact_level_count):
-        _compact_pass_impl(
-            state.compact_level_edge_src[index],
-            state.compact_level_edge_dst[index],
-            state.compact_level_edge_infoset[index],
-            state.compact_level_edge_slot[index],
-            None,
-            state.compact_level_edge_prob[index],
-            strategy_table,
-            _COMPACT_MODE_FORWARD,
-            node_range_p0=node_range_p0,
-            node_range_p1=node_range_p1,
-        )
-    for index in range(compact_backward_level_count):
-        _compact_pass_impl(
-            state.compact_backward_edge_src[index],
-            state.compact_backward_edge_dst[index],
-            state.compact_backward_edge_infoset[index],
-            state.compact_backward_edge_slot[index],
-            None,
-            state.compact_backward_edge_prob[index],
-            strategy_table,
-            _COMPACT_MODE_BACKWARD,
-            out_p0=out_p0,
-            out_p1=out_p1,
-            debug=debug,
-        )
-    for index in range(compact_backward_level_count):
-        _compact_pass_impl(
-            state.compact_backward_edge_src[index],
-            state.compact_backward_edge_dst[index],
-            state.compact_backward_edge_infoset[index],
-            state.compact_backward_edge_slot[index],
-            None,
-            state.compact_backward_edge_prob[index],
-            strategy_table,
-            _COMPACT_MODE_REGRET,
-            regrets=regrets,
-            strategy_sums=strategy_sums,
-            node_values_p0=node_values_p0,
-            node_values_p1=node_values_p1,
-            action_offsets=state.action_offsets,
-            action_counts=state.action_counts,
-        )
+    for group in zip(
+        state.compact_level_edge_src,
+        state.compact_level_edge_dst,
+        state.compact_level_edge_infoset,
+        state.compact_level_edge_slot,
+        state.compact_level_edge_kind,
+        state.compact_level_edge_prob,
+        strict=True,
+    ):
+        _compact_group_pass(_make_compact_group(*group, device=state.regrets.device), strategy_table, _COMPACT_MODE_FORWARD, node_range_p0=node_range_p0, node_range_p1=node_range_p1)
+    for group in zip(
+        state.compact_backward_edge_src,
+        state.compact_backward_edge_dst,
+        state.compact_backward_edge_infoset,
+        state.compact_backward_edge_slot,
+        state.compact_backward_edge_kind,
+        state.compact_backward_edge_prob,
+        strict=True,
+    ):
+        _compact_group_pass(_make_compact_group(group[0], group[1], group[2], group[3], group[4], group[5], device=state.regrets.device), strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
+    for group in zip(
+        state.compact_backward_edge_src,
+        state.compact_backward_edge_dst,
+        state.compact_backward_edge_infoset,
+        state.compact_backward_edge_slot,
+        state.compact_backward_edge_kind,
+        state.compact_backward_edge_prob,
+        strict=True,
+    ):
+        _compact_group_pass(_make_compact_group(group[0], group[1], group[2], group[3], group[4], group[5], device=state.regrets.device), strategy_table, _COMPACT_MODE_REGRET, regrets=regrets, strategy_sums=strategy_sums, node_values_p0=node_values_p0, node_values_p1=node_values_p1)
 
 
 def _compiled_iteration_core() -> Any:
@@ -275,13 +246,19 @@ def run_compact_iteration_gpu(
         if frontier_count > 0:
             leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
             leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
-            out_p0[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player0, dtype=np.float32)))
-            out_p1[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player1, dtype=np.float32)))
+            ev0 = leaf_values.ev_player0
+            ev1 = leaf_values.ev_player1
+            if not isinstance(ev0, torch.Tensor):
+                ev0 = torch.as_tensor(ev0, dtype=torch.float32, device=out_p0.device)
+            if not isinstance(ev1, torch.Tensor):
+                ev1 = torch.as_tensor(ev1, dtype=torch.float32, device=out_p1.device)
+            out_p0[leaf_slice].copy_(ev0.to(device=out_p0.device, dtype=torch.float32, non_blocking=True))
+            out_p1[leaf_slice].copy_(ev1.to(device=out_p1.device, dtype=torch.float32, non_blocking=True))
             if debug:
                 print(
                     "debug::leaf",
-                    float(torch.sum(torch.abs(out_p0[leaf_slice])).item()),
-                    float(torch.sum(torch.abs(out_p1[leaf_slice])).item()),
+                    float(torch.sum(torch.abs(out_p0[leaf_slice])).detach().cpu()),
+                    float(torch.sum(torch.abs(out_p1[leaf_slice])).detach().cpu()),
                     int(frontier_count),
                 )
     with record_function("solve::cfr_core"):
@@ -306,13 +283,15 @@ def run_compact_iteration_gpu(
             print("warn::missing_compact_edge_block", len(state.compact_backward_edge_src), len(state.compact_backward_edge_dst))
         if root_children is None or int(root_children.numel()) == 0:
             print("warn::missing_root_children")
-        if float(torch.sum(torch.abs(out_p0)).item()) == 0.0:
+        if out_p0.numel() == 0:
+            return
+        if float(torch.sum(torch.abs(out_p0)).detach().cpu()) == 0.0:
             print("warn::backward_p0_all_zero")
         if root_children is not None and int(root_children.numel()) > 0 and len(state.compact_backward_edge_dst) > 0:
             hits = torch.zeros(root_children.shape[0], dtype=torch.bool, device=root_children.device)
             for edge_dst_block in state.compact_backward_edge_dst:
                 hits = hits | torch.isin(root_children, edge_dst_block)
-            if not bool(hits.any()):
+            if hits.numel() > 0 and not bool(hits.any().detach().cpu()):
                 print("warn::root_children_missing_from_backward_blocks")
 
 
@@ -326,10 +305,38 @@ def propagate_node_ranges_compact(
     state.node_range_p0[0] = torch.ones_like(state.node_range_p0[0])
     state.node_range_p1[0] = torch.ones_like(state.node_range_p1[0])
     state.node_range_p2[0] = torch.ones_like(state.node_range_p2[0])
-    for index, _level_indices in enumerate(state.compact_forward_levels):
-        _compact_pass(
-            state,
-            index,
+    for src, dst, infoset, slot, kind, prob, flat, chance_src, chance_dst, chance_prob, p0_src, p0_dst, p0_infoset, p0_slot, p0_flat, p0_prob, p1_src, p1_dst, p1_infoset, p1_slot, p1_flat, p1_prob in zip(
+        state.compact_level_edge_src,
+        state.compact_level_edge_dst,
+        state.compact_level_edge_infoset,
+        state.compact_level_edge_slot,
+        state.compact_level_edge_kind,
+        state.compact_level_edge_prob,
+        state.compact_level_edge_flat_p0,
+        state.compact_level_edge_src_chance,
+        state.compact_level_edge_dst_chance,
+        state.compact_level_edge_prob_chance,
+        state.compact_level_edge_src_p0,
+        state.compact_level_edge_dst_p0,
+        state.compact_level_edge_infoset_p0,
+        state.compact_level_edge_slot_p0,
+        state.compact_level_edge_flat_p0,
+        state.compact_level_edge_prob_p0,
+        state.compact_level_edge_src_p1,
+        state.compact_level_edge_dst_p1,
+        state.compact_level_edge_infoset_p1,
+        state.compact_level_edge_slot_p1,
+        state.compact_level_edge_flat_p1,
+        state.compact_level_edge_prob_p1,
+        strict=True,
+    ):
+        _compact_group_pass(
+            CompactEdgeGroup(
+                src, dst, infoset, slot, kind, prob, flat,
+                chance_src, chance_dst, chance_prob,
+                p0_src, p0_dst, p0_infoset, p0_slot, p0_flat, p0_prob,
+                p1_src, p1_dst, p1_infoset, p1_slot, p1_flat, p1_prob,
+            ),
             strategy_table,
             _COMPACT_MODE_FORWARD,
             node_range_p0=state.node_range_p0,
@@ -340,6 +347,44 @@ def propagate_node_ranges_compact(
 _COMPACT_MODE_FORWARD = 0
 _COMPACT_MODE_BACKWARD = 1
 _COMPACT_MODE_REGRET = 2
+
+
+def _make_compact_group(
+    src: torch.Tensor,
+    dst: torch.Tensor,
+    infoset: torch.Tensor,
+    slot: torch.Tensor,
+    kind: torch.Tensor,
+    prob: torch.Tensor,
+    *,
+    device: torch.device,
+) -> CompactEdgeGroup:
+    empty_i64 = torch.empty(0, dtype=torch.int64, device=device)
+    empty_f32 = torch.empty(0, dtype=torch.float32, device=device)
+    return CompactEdgeGroup(
+        src=src,
+        dst=dst,
+        infoset=infoset,
+        slot=slot,
+        kind=kind,
+        prob=prob,
+        flat=empty_i64,
+        chance_src=empty_i64,
+        chance_dst=empty_i64,
+        chance_prob=empty_f32,
+        p0_src=empty_i64,
+        p0_dst=empty_i64,
+        p0_infoset=empty_i64,
+        p0_slot=empty_i64,
+        p0_flat=empty_i64,
+        p0_prob=empty_f32,
+        p1_src=empty_i64,
+        p1_dst=empty_i64,
+        p1_infoset=empty_i64,
+        p1_slot=empty_i64,
+        p1_flat=empty_i64,
+        p1_prob=empty_f32,
+    )
 
 
 def _compact_pass_impl(
@@ -487,9 +532,8 @@ def _compiled_compact_pass_impl() -> Any:
 _COMPACT_PASS_IMPL = _compiled_compact_pass_impl()
 
 
-def _compact_pass(
-    state: PackedGpuSolveState,
-    compact_level_index: int,
+def _compact_group_pass(
+    group: CompactEdgeGroup,
     strategy_table: torch.Tensor,
     mode: int,
     node_range_p0: torch.Tensor | None = None,
@@ -501,14 +545,14 @@ def _compact_pass(
     node_values_p0: torch.Tensor | None = None,
     node_values_p1: torch.Tensor | None = None,
 ) -> None:
-    edge_src = state.compact_level_edge_src[compact_level_index]
+    edge_src = group.src
     if edge_src.numel() == 0:
         return
-    edge_dst = state.compact_level_edge_dst[compact_level_index]
-    edge_infoset = state.compact_level_edge_infoset[compact_level_index]
-    edge_slot = state.compact_level_edge_slot[compact_level_index]
-    edge_kind = state.compact_level_edge_kind[compact_level_index]
-    edge_prob = state.compact_level_edge_prob[compact_level_index]
+    edge_dst = group.dst
+    edge_infoset = group.infoset
+    edge_slot = group.slot
+    edge_kind = group.kind
+    edge_prob = group.prob
     _COMPACT_PASS_IMPL(
         edge_src,
         edge_dst,
@@ -522,8 +566,6 @@ def _compact_pass(
         node_range_p1=node_range_p1,
         out_p0=out_p0,
         out_p1=out_p1,
-        action_offsets=state.action_offsets,
-        action_counts=state.action_counts,
         regrets=regrets,
         strategy_sums=strategy_sums,
         node_values_p0=node_values_p0,
@@ -540,9 +582,32 @@ def update_regrets_compact_group(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    _compact_pass(
-        state,
-        compact_level_index,
+    group = CompactEdgeGroup(
+        src=state.compact_backward_edge_src[compact_level_index],
+        dst=state.compact_backward_edge_dst[compact_level_index],
+        infoset=state.compact_backward_edge_infoset[compact_level_index],
+        slot=state.compact_backward_edge_slot[compact_level_index],
+        kind=state.compact_backward_edge_kind[compact_level_index],
+        prob=state.compact_backward_edge_prob[compact_level_index],
+        flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+        p0_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_infoset=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_slot=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+        p1_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_infoset=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_slot=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+    )
+    _compact_group_pass(
+        group,
         strategy_table,
         _COMPACT_MODE_REGRET,
         regrets=regrets,
@@ -572,9 +637,32 @@ def forward_pass_compact_group(
     node_range_p0: torch.Tensor,
     node_range_p1: torch.Tensor,
 ) -> None:
-    _compact_pass(
-        state,
-        compact_level_index,
+    group = CompactEdgeGroup(
+        src=state.compact_level_edge_src[compact_level_index],
+        dst=state.compact_level_edge_dst[compact_level_index],
+        infoset=state.compact_level_edge_infoset[compact_level_index],
+        slot=state.compact_level_edge_slot[compact_level_index],
+        kind=state.compact_level_edge_kind[compact_level_index],
+        prob=state.compact_level_edge_prob[compact_level_index],
+        flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+        p0_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_infoset=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_slot=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+        p1_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_infoset=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_slot=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+    )
+    _compact_group_pass(
+        group,
         strategy_table,
         _COMPACT_MODE_FORWARD,
         node_range_p0=node_range_p0,
@@ -613,9 +701,32 @@ def backward_pass_compact_group(
     out_p0: torch.Tensor,
     out_p1: torch.Tensor,
 ) -> None:
-    _compact_pass(
-        state,
-        compact_level_index,
+    group = CompactEdgeGroup(
+        src=state.compact_backward_edge_src[compact_level_index],
+        dst=state.compact_backward_edge_dst[compact_level_index],
+        infoset=state.compact_backward_edge_infoset[compact_level_index],
+        slot=state.compact_backward_edge_slot[compact_level_index],
+        kind=state.compact_backward_edge_kind[compact_level_index],
+        prob=state.compact_backward_edge_prob[compact_level_index],
+        flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        chance_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+        p0_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_infoset=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_slot=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p0_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+        p1_src=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_dst=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_infoset=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_slot=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_flat=torch.empty(0, dtype=torch.int64, device=state.regrets.device),
+        p1_prob=torch.empty(0, dtype=torch.float32, device=state.regrets.device),
+    )
+    _compact_group_pass(
+        group,
         strategy_table,
         _COMPACT_MODE_BACKWARD,
         out_p0=out_p0,

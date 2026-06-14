@@ -172,16 +172,17 @@ def scatter_leaf_values(
     node_values_player1: NDArray[np.float32],
     node_values_player2: NDArray[np.float32] | None = None,
 ) -> None:
+    ev0 = np.asarray(values.ev_player0, dtype=np.float32)
+    ev1 = np.asarray(values.ev_player1, dtype=np.float32)
+    ev2 = np.asarray(values.ev_player2, dtype=np.float32) if values.ev_player2 is not None else None
     for batch_index, node_index in enumerate(node_indices):
-        node_values_player0[node_index] = values.ev_player0[batch_index]
-        node_values_player1[node_index] = values.ev_player1[batch_index]
+        node_values_player0[node_index] = ev0[batch_index]
+        node_values_player1[node_index] = ev1[batch_index]
         if node_values_player2 is not None:
-            if values.ev_player2 is not None:
-                node_values_player2[node_index] = values.ev_player2[batch_index]
+            if ev2 is not None:
+                node_values_player2[node_index] = ev2[batch_index]
             else:
-                node_values_player2[node_index] = -(
-                    values.ev_player0[batch_index] + values.ev_player1[batch_index]
-                )
+                node_values_player2[node_index] = -(ev0[batch_index] + ev1[batch_index])
 
 
 def evaluate_frontier_nodes(

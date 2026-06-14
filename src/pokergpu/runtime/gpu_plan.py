@@ -10,7 +10,7 @@ from pokergpu.tree import NodeType
 from pokergpu.tree.builder import BuiltPublicTree
 
 from .gpu_schedule import build_infoset_blocks, compact_level_schedule
-from .gpu_types import BatchedGpuPlan
+from .gpu_types import BatchedGpuPlan, CompactEdgeGroup
 
 
 def concat_level_edges(
@@ -186,12 +186,6 @@ def build_batched_gpu_plan(
         forward_levels.append(build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
         backward_levels.append(build_level_plan(tree, level, actions_by_node, device=device))
-    compact_level_edge_src = [_concat_level_tensors(level_edge_src, level_indices, device=device) for level_indices in compact_forward_levels]
-    compact_level_edge_dst = [_concat_level_tensors(level_edge_dst, level_indices, device=device) for level_indices in compact_forward_levels]
-    compact_level_edge_infoset = [_concat_level_tensors(level_edge_infoset, level_indices, device=device) for level_indices in compact_forward_levels]
-    compact_level_edge_slot = [_concat_level_tensors(level_edge_slot, level_indices, device=device) for level_indices in compact_forward_levels]
-    compact_level_edge_kind = [_concat_level_tensors(level_edge_kind, level_indices, device=device) for level_indices in compact_forward_levels]
-    compact_level_edge_prob = [_concat_level_tensors(level_edge_prob, level_indices, device=device) for level_indices in compact_forward_levels]
     compact_level_edge_src_chance: list[torch.Tensor] = []
     compact_level_edge_dst_chance: list[torch.Tensor] = []
     compact_level_edge_prob_chance: list[torch.Tensor] = []
@@ -228,13 +222,13 @@ def build_batched_gpu_plan(
     backward_edge_slot_p1: list[torch.Tensor] = []
     backward_edge_flat_p1: list[torch.Tensor] = []
     backward_edge_prob_p1: list[torch.Tensor] = []
-    for block_index, _level_indices in enumerate(compact_forward_levels):
-        src = compact_level_edge_src[block_index]
-        dst = compact_level_edge_dst[block_index]
-        infoset = compact_level_edge_infoset[block_index]
-        slot = compact_level_edge_slot[block_index]
-        kind = compact_level_edge_kind[block_index]
-        prob = compact_level_edge_prob[block_index]
+    for level_indices in compact_forward_levels:
+        src = _concat_level_tensors(level_edge_src, level_indices, device=device)
+        dst = _concat_level_tensors(level_edge_dst, level_indices, device=device)
+        infoset = _concat_level_tensors(level_edge_infoset, level_indices, device=device)
+        slot = _concat_level_tensors(level_edge_slot, level_indices, device=device)
+        kind = _concat_level_tensors(level_edge_kind, level_indices, device=device)
+        prob = _concat_level_tensors(level_edge_prob, level_indices, device=device)
         chance_mask = kind == 0
         p0_mask = kind == 1
         p1_mask = kind == 2
@@ -295,6 +289,66 @@ def build_batched_gpu_plan(
         backward_edge_slot_p1.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
         backward_edge_flat_p1.append(torch.as_tensor([flat_view.edge_infoset_id[i] * max_actions + flat_view.edge_action_slot[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
         backward_edge_prob_p1.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in backward_p1_idx], dtype=torch.float32, device=device))
+    compact_forward_groups: list[CompactEdgeGroup] = [
+        CompactEdgeGroup(
+            src=_concat_level_tensors(level_edge_src, level_indices, device=device),
+            dst=_concat_level_tensors(level_edge_dst, level_indices, device=device),
+            infoset=_concat_level_tensors(level_edge_infoset, level_indices, device=device),
+            slot=_concat_level_tensors(level_edge_slot, level_indices, device=device),
+            kind=_concat_level_tensors(level_edge_kind, level_indices, device=device),
+            prob=_concat_level_tensors(level_edge_prob, level_indices, device=device),
+            flat=torch.empty(0, dtype=torch.int64, device=device),
+            chance_src=torch.empty(0, dtype=torch.int64, device=device),
+            chance_dst=torch.empty(0, dtype=torch.int64, device=device),
+            chance_prob=torch.empty(0, dtype=torch.float32, device=device),
+            p0_src=torch.empty(0, dtype=torch.int64, device=device),
+            p0_dst=torch.empty(0, dtype=torch.int64, device=device),
+            p0_infoset=torch.empty(0, dtype=torch.int64, device=device),
+            p0_slot=torch.empty(0, dtype=torch.int64, device=device),
+            p0_flat=torch.empty(0, dtype=torch.int64, device=device),
+            p0_prob=torch.empty(0, dtype=torch.float32, device=device),
+            p1_src=torch.empty(0, dtype=torch.int64, device=device),
+            p1_dst=torch.empty(0, dtype=torch.int64, device=device),
+            p1_infoset=torch.empty(0, dtype=torch.int64, device=device),
+            p1_slot=torch.empty(0, dtype=torch.int64, device=device),
+            p1_flat=torch.empty(0, dtype=torch.int64, device=device),
+            p1_prob=torch.empty(0, dtype=torch.float32, device=device),
+        )
+        for level_indices in compact_forward_levels
+    ]
+    compact_backward_groups = [
+        CompactEdgeGroup(
+            src=_concat_level_tensors(backward_edge_src, level_indices, device=device),
+            dst=_concat_level_tensors(backward_edge_dst, level_indices, device=device),
+            infoset=_concat_level_tensors(backward_edge_infoset, level_indices, device=device),
+            slot=_concat_level_tensors(backward_edge_slot, level_indices, device=device),
+            kind=_concat_level_tensors(backward_edge_kind, level_indices, device=device),
+            prob=_concat_level_tensors(backward_edge_prob, level_indices, device=device),
+            flat=_concat_level_tensors(backward_edge_flat_p0, level_indices, device=device),
+            chance_src=_concat_level_tensors(backward_edge_src_chance, level_indices, device=device),
+            chance_dst=_concat_level_tensors(backward_edge_dst_chance, level_indices, device=device),
+            chance_prob=_concat_level_tensors(backward_edge_prob_chance, level_indices, device=device),
+            p0_src=_concat_level_tensors(backward_edge_src_p0, level_indices, device=device),
+            p0_dst=_concat_level_tensors(backward_edge_dst_p0, level_indices, device=device),
+            p0_infoset=_concat_level_tensors(backward_edge_infoset_p0, level_indices, device=device),
+            p0_slot=_concat_level_tensors(backward_edge_slot_p0, level_indices, device=device),
+            p0_flat=_concat_level_tensors(backward_edge_flat_p0, level_indices, device=device),
+            p0_prob=_concat_level_tensors(backward_edge_prob_p0, level_indices, device=device),
+            p1_src=_concat_level_tensors(backward_edge_src_p1, level_indices, device=device),
+            p1_dst=_concat_level_tensors(backward_edge_dst_p1, level_indices, device=device),
+            p1_infoset=_concat_level_tensors(backward_edge_infoset_p1, level_indices, device=device),
+            p1_slot=_concat_level_tensors(backward_edge_slot_p1, level_indices, device=device),
+            p1_flat=_concat_level_tensors(backward_edge_flat_p1, level_indices, device=device),
+            p1_prob=_concat_level_tensors(backward_edge_prob_p1, level_indices, device=device),
+        )
+        for level_indices in compact_backward_levels
+    ]
+    compact_level_edge_src = [group.src for group in compact_forward_groups]
+    compact_level_edge_dst = [group.dst for group in compact_forward_groups]
+    compact_level_edge_infoset = [group.infoset for group in compact_forward_groups]
+    compact_level_edge_slot = [group.slot for group in compact_forward_groups]
+    compact_level_edge_kind = [group.kind for group in compact_forward_groups]
+    compact_level_edge_prob = [group.prob for group in compact_forward_groups]
     def _filter_backward_triplet(
         src_list: list[torch.Tensor],
         dst_list: list[torch.Tensor],
@@ -400,12 +454,12 @@ def build_batched_gpu_plan(
         compact_level_edge_slot_p1=tuple(compact_level_edge_slot_p1),
         compact_level_edge_flat_p1=tuple(compact_level_edge_flat_p1),
         compact_level_edge_prob_p1=tuple(compact_level_edge_prob_p1),
-        compact_backward_edge_src=tuple(backward_edge_src),
-        compact_backward_edge_dst=tuple(backward_edge_dst),
-        compact_backward_edge_infoset=tuple(backward_edge_infoset),
-        compact_backward_edge_slot=tuple(backward_edge_slot),
-        compact_backward_edge_kind=tuple(backward_edge_kind),
-        compact_backward_edge_prob=tuple(backward_edge_prob),
+        compact_backward_edge_src=tuple(group.src for group in compact_backward_groups),
+        compact_backward_edge_dst=tuple(group.dst for group in compact_backward_groups),
+        compact_backward_edge_infoset=tuple(group.infoset for group in compact_backward_groups),
+        compact_backward_edge_slot=tuple(group.slot for group in compact_backward_groups),
+        compact_backward_edge_kind=tuple(group.kind for group in compact_backward_groups),
+        compact_backward_edge_prob=tuple(group.prob for group in compact_backward_groups),
         compact_backward_edge_src_chance=tuple(backward_edge_src_chance),
         compact_backward_edge_dst_chance=tuple(backward_edge_dst_chance),
         compact_backward_edge_prob_chance=tuple(backward_edge_prob_chance),
