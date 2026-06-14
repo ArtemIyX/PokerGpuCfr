@@ -1122,52 +1122,62 @@ def _forward_pass_gpu_batched(
     _propagate_node_ranges(state)
     for index, level_indices in enumerate(state.compact_forward_levels):
         started = time.monotonic()
-        edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
-            state, level_indices
-        )
-        valid = (
-            (edge_infoset >= 0)
-            & (edge_infoset < strategy_table.shape[0])
-            & (edge_slot >= 0)
-            & (edge_slot < strategy_table.shape[1])
-        )
-        if not bool(valid.any()):
-            continue
-        edge_src = edge_src[valid]
-        edge_dst = edge_dst[valid]
-        edge_infoset = edge_infoset[valid]
-        edge_slot = edge_slot[valid]
-        edge_kind = edge_kind[valid]
-        edge_prob = edge_prob[valid]
-        chance_mask = edge_kind == 0
-        if bool(chance_mask.any()):
-            src = edge_src[chance_mask]
-            dst = edge_dst[chance_mask]
-            probs = edge_prob[chance_mask]
-            weights = probs.unsqueeze(1)
-            node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-            node_range_p1.index_add_(0, dst, node_range_p1[src] * weights)
-        player_mask = edge_kind == 1
-        if bool(player_mask.any()):
-            src = edge_src[player_mask]
-            dst = edge_dst[player_mask]
-            infosets = edge_infoset[player_mask]
-            slots = edge_slot[player_mask]
-            probs = strategy_table[infosets, slots]
-            weights = probs.unsqueeze(1)
-            node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-            node_range_p1.index_add_(0, dst, node_range_p1[src])
-        player_mask = edge_kind == 2
-        if bool(player_mask.any()):
-            src = edge_src[player_mask]
-            dst = edge_dst[player_mask]
-            infosets = edge_infoset[player_mask]
-            slots = edge_slot[player_mask]
-            probs = strategy_table[infosets, slots]
-            node_range_p0.index_add_(0, dst, node_range_p0[src])
-            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
+        _forward_pass_compact_group(state, level_indices, strategy_table, node_range_p0, node_range_p1)
         if timings is not None and index < len(timings):
             timings[index] += time.monotonic() - started
+
+
+def _forward_pass_compact_group(
+    state: PackedGpuSolveState,
+    level_indices: tuple[int, ...],
+    strategy_table: torch.Tensor,
+    node_range_p0: torch.Tensor,
+    node_range_p1: torch.Tensor,
+) -> None:
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
+        state, level_indices
+    )
+    valid = (
+        (edge_infoset >= 0)
+        & (edge_infoset < strategy_table.shape[0])
+        & (edge_slot >= 0)
+        & (edge_slot < strategy_table.shape[1])
+    )
+    if not bool(valid.any()):
+        return
+    edge_src = edge_src[valid]
+    edge_dst = edge_dst[valid]
+    edge_infoset = edge_infoset[valid]
+    edge_slot = edge_slot[valid]
+    edge_kind = edge_kind[valid]
+    edge_prob = edge_prob[valid]
+    chance_mask = edge_kind == 0
+    if bool(chance_mask.any()):
+        src = edge_src[chance_mask]
+        dst = edge_dst[chance_mask]
+        probs = edge_prob[chance_mask]
+        weights = probs.unsqueeze(1)
+        node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
+        node_range_p1.index_add_(0, dst, node_range_p1[src] * weights)
+    player_mask = edge_kind == 1
+    if bool(player_mask.any()):
+        src = edge_src[player_mask]
+        dst = edge_dst[player_mask]
+        infosets = edge_infoset[player_mask]
+        slots = edge_slot[player_mask]
+        probs = strategy_table[infosets, slots]
+        weights = probs.unsqueeze(1)
+        node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
+        node_range_p1.index_add_(0, dst, node_range_p1[src])
+    player_mask = edge_kind == 2
+    if bool(player_mask.any()):
+        src = edge_src[player_mask]
+        dst = edge_dst[player_mask]
+        infosets = edge_infoset[player_mask]
+        slots = edge_slot[player_mask]
+        probs = strategy_table[infosets, slots]
+        node_range_p0.index_add_(0, dst, node_range_p0[src])
+        node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
 
 
 def _backward_pass_gpu(*args: Any) -> None:
