@@ -132,10 +132,10 @@ def average_strategy_from_gpu(
     cached_count: int | None = None,
     cached_start: int | None = None,
 ) -> torch.Tensor:
-    count = cached_count if cached_count is not None else int(action_counts[infoset_index].item())
-    start = cached_start if cached_start is not None else int(action_offsets[infoset_index].item())
+    count = cached_count if cached_count is not None else int(action_counts[infoset_index])
+    start = cached_start if cached_start is not None else int(action_offsets[infoset_index])
     values = strategy_sums.narrow(0, start, count)
-    total = float(values.sum().item())
+    total = float(values.sum())
     if total <= 0.0 and count > 0:
         return torch.full_like(values, 1.0 / count)
     if total <= 0.0:

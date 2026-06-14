@@ -593,11 +593,13 @@ def _run_gpu_solve(
     root_ev_p0 = float(_summarize_root_ev(root_strategy, root_action_ev_p0))
     root_ev_p1 = -root_ev_p0
     if spec.cache_state is not None:
+        regrets_cpu = regrets.detach().cpu().numpy()
+        strategy_sums_cpu = strategy_sums.detach().cpu().numpy()
         spec.cache_state.store_warm_start(
             _gpu_plan_key(spec, template=packed.tree.template),
             make_warm_start_state(
-                regret=tuple(float(value) for value in regrets.detach().cpu().numpy().tolist()),
-                strategy_sum=tuple(float(value) for value in strategy_sums.detach().cpu().numpy().tolist()),
+                regret=tuple(float(value) for value in regrets_cpu),
+                strategy_sum=tuple(float(value) for value in strategy_sums_cpu),
                 source_key=_gpu_plan_key(spec, template=packed.tree.template),
                 blend_alpha=1.0,
             ),
