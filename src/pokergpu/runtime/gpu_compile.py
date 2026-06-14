@@ -8,6 +8,7 @@ except Exception as exc:  # pragma: no cover
     raise RuntimeError(f"torch is required for GPU subtree compilation: {exc}") from exc
 
 from pokergpu.cfr.traversal import build_leaf_feature_batch
+from pokergpu.abstraction.hands import private_hand_mask
 from pokergpu.eval.tensor_builder import build_gpu_leaf_tensors
 from pokergpu.tree import NodeType
 from pokergpu.tree.builder import BuiltPublicTree
@@ -73,7 +74,7 @@ def compile_packed_subtree(
     if action_infoset_index.numel() != action_slot_index.numel():
         raise ValueError("packed action maps must have matching lengths")
     legal_action_mask = torch.ones_like(action_infoset_index, dtype=torch.bool, device=device)
-    card_removal_mask = torch.ones((tree.tree.node_count,), dtype=torch.bool, device=device)
+    card_removal_mask = _build_card_removal_mask(tree, device=device)
     root_infoset = int(infoset_ids[0].item()) if infoset_ids.numel() else -1
     max_actions = max((len(actions) for actions in tree.actions_by_node), default=0)
     infoset_count = len(infoset_remap)
@@ -146,3 +147,15 @@ def _action_maps(
         torch.as_tensor(infoset_index, dtype=torch.int64, device=device),
         torch.as_tensor(action_slot, dtype=torch.int64, device=device),
     )
+
+
+def _build_card_removal_mask(tree: BuiltPublicTree, *, device: str) -> torch.Tensor:
+    flat = tree.flat_view
+    hand_count = 1326
+    masks: list[torch.Tensor] = []
+    for node_state in tree.node_states:
+        board_cards = tuple(node_state.board.cards)
+        masks.append(torch.as_tensor(private_hand_mask(board_cards), dtype=torch.bool, device=device))
+    if not masks:
+        return torch.zeros((0, hand_count), dtype=torch.bool, device=device)
+    return torch.stack(masks, dim=0)

@@ -12,11 +12,7 @@ from pokergpu.abstraction.actions import (
     make_postflop_threeway_profile,
 )
 from pokergpu.abstraction.hands import (
-    PlayerRangeVectors,
     RangeVector,
-    apply_board_dead_cards,
-    propagate_player_ranges,
-    propagate_player_ranges_for_state,
 )
 from pokergpu.cfr import (
     InfosetLayout,
@@ -244,7 +240,6 @@ def resolve_postflop_hu(
         if warm_start is not None:
             _apply_warm_start(store, warm_start)
 
-    root_ranges = _apply_root_ranges(spec.state, ranges)
     terminal_values_player0 = np.array(
         [
             np.float32(_terminal_value_player0(node_state))
@@ -264,8 +259,8 @@ def resolve_postflop_hu(
         forward = compute_reach_probabilities(
             tree.tree,
             store,
-            root_player0_reach=root_ranges[0].total_weight(),
-            root_player1_reach=root_ranges[1].total_weight(),
+            root_player0_reach=ranges[0].total_weight(),
+            root_player1_reach=ranges[1].total_weight(),
             min_reach_prob=spec.min_reach_prob,
         )
         backward = compute_counterfactual_values(
@@ -282,14 +277,14 @@ def resolve_postflop_hu(
             store,
             backward,
             active_player=0,
-            strategy_weight=root_ranges[0].total_weight(),
+            strategy_weight=ranges[0].total_weight(),
         )
         update_regrets_from_traversal(
             tree.tree,
             store,
             backward,
             active_player=1,
-            strategy_weight=root_ranges[1].total_weight(),
+            strategy_weight=ranges[1].total_weight(),
         )
         iterations += 1
         if target_iterations > 0 and iterations >= target_iterations:
@@ -403,7 +398,6 @@ def resolve_postflop_multi(
             leaf_count=hu.leaf_count,
         )
 
-    root_ranges = _apply_root_ranges(spec.state, ranges)
     terminal_values_player0 = np.array(
         [
             np.float32(_terminal_value_player0(node_state))
@@ -422,8 +416,8 @@ def resolve_postflop_multi(
         forward = compute_reach_probabilities(
             tree.tree,
             store,
-            root_player0_reach=root_ranges[0].total_weight(),
-            root_player1_reach=root_ranges[1].total_weight(),
+            root_player0_reach=ranges[0].total_weight(),
+            root_player1_reach=ranges[1].total_weight(),
             min_reach_prob=spec.min_reach_prob,
         )
         backward = compute_counterfactual_values(
@@ -440,14 +434,14 @@ def resolve_postflop_multi(
             store,
             backward,
             active_player=0,
-            strategy_weight=root_ranges[0].total_weight(),
+            strategy_weight=ranges[0].total_weight(),
         )
         update_regrets_from_traversal(
             tree.tree,
             store,
             backward,
             active_player=1,
-            strategy_weight=root_ranges[1].total_weight(),
+            strategy_weight=ranges[1].total_weight(),
         )
         iterations += 1
         if target_iterations > 0 and iterations >= target_iterations:
@@ -502,35 +496,6 @@ def _resolve_spec_ranges(spec: PostflopResolveSpec) -> tuple[RangeVector, ...]:
     if spec.range_p2 is not None:
         ranges.append(spec.range_p2)
     return tuple(ranges)
-
-
-def _apply_root_ranges(
-    state: GameState,
-    ranges: tuple[RangeVector, ...],
-) -> tuple[RangeVector, ...]:
-    dead_cards: list[Card] = []
-    for player in state.players:
-        if player.hole_cards is not None:
-            dead_cards.extend(player.hole_cards)
-    player_ranges = PlayerRangeVectors.from_values(
-        tuple(apply_board_dead_cards(range_vector, state.board) for range_vector in ranges)
-    )
-    return propagate_player_ranges(player_ranges, dead_cards).values
-
-
-def _propagate_ranges_for_tree(
-    tree: BuiltPublicTree,
-    root_ranges: tuple[RangeVector, ...],
-) -> tuple[tuple[RangeVector, ...], ...]:
-    propagated: list[tuple[RangeVector, ...]] = []
-    root_state = tree.node_states[0]
-    root_player_ranges = PlayerRangeVectors.from_values(root_ranges)
-    for node_state in tree.node_states:
-        if node_state.current_street is root_state.current_street and node_state.board.cards == root_state.board.cards:
-            propagated.append(root_player_ranges.values)
-            continue
-        propagated.append(propagate_player_ranges_for_state(root_player_ranges, node_state).values)
-    return tuple(propagated)
 
 
 def _mccfr_sample_update(
