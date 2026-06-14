@@ -213,8 +213,8 @@ def build_batched_gpu_plan(
         level_edge_kind.append(torch.as_tensor([flat_view.edge_player[i] for i in edge_indices], dtype=torch.int64, device=device))
         level_edge_prob.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in edge_indices], dtype=torch.float32, device=device))
     for level in levels.backward_levels:
-        child_set = set(int(i) for i in level)
-        edge_indices = [i for i, child in enumerate(flat_view.edge_child) if child in child_set]
+        level_set = set(int(i) for i in level)
+        edge_indices = [i for i, parent in enumerate(flat_view.edge_parent) if parent in level_set]
         backward_edge_src.append(torch.as_tensor([flat_view.edge_parent[i] for i in edge_indices], dtype=torch.int64, device=device))
         backward_edge_dst.append(torch.as_tensor([flat_view.edge_child[i] for i in edge_indices], dtype=torch.int64, device=device))
         backward_edge_infoset.append(torch.as_tensor([flat_view.edge_infoset_id[i] for i in edge_indices], dtype=torch.int64, device=device))

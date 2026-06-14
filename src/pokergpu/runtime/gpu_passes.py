@@ -373,10 +373,11 @@ def run_compact_iteration_gpu(
         if int(nonzero.numel()) == 0:
             print("warn::backward_p0_all_zero")
         if root_children is not None and int(root_children.numel()) > 0 and len(state.compact_backward_edge_dst) > 0:
-            edge_dst0_back = state.compact_backward_edge_dst[-1]
-            hits = torch.isin(root_children, edge_dst0_back)
+            hits = torch.zeros(root_children.shape[0], dtype=torch.bool, device=root_children.device)
+            for edge_dst_block in state.compact_backward_edge_dst:
+                hits = hits | torch.isin(root_children, edge_dst_block)
             if not bool(hits.any()):
-                print("warn::root_children_missing_from_last_edge_dst")
+                print("warn::root_children_missing_from_backward_blocks")
 
 
 def propagate_node_ranges_compact(
