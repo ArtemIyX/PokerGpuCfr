@@ -269,12 +269,42 @@ class PackedGpuSolveState:
     compact_level_edge_slot: Any
     compact_level_edge_kind: Any
     compact_level_edge_prob: Any
+    compact_level_edge_src_chance: Any
+    compact_level_edge_dst_chance: Any
+    compact_level_edge_prob_chance: Any
+    compact_level_edge_src_p0: Any
+    compact_level_edge_dst_p0: Any
+    compact_level_edge_infoset_p0: Any
+    compact_level_edge_slot_p0: Any
+    compact_level_edge_flat_p0: Any
+    compact_level_edge_prob_p0: Any
+    compact_level_edge_src_p1: Any
+    compact_level_edge_dst_p1: Any
+    compact_level_edge_infoset_p1: Any
+    compact_level_edge_slot_p1: Any
+    compact_level_edge_flat_p1: Any
+    compact_level_edge_prob_p1: Any
     compact_backward_edge_src: Any
     compact_backward_edge_dst: Any
     compact_backward_edge_infoset: Any
     compact_backward_edge_slot: Any
     compact_backward_edge_kind: Any
     compact_backward_edge_prob: Any
+    compact_backward_edge_src_chance: Any
+    compact_backward_edge_dst_chance: Any
+    compact_backward_edge_prob_chance: Any
+    compact_backward_edge_src_p0: Any
+    compact_backward_edge_dst_p0: Any
+    compact_backward_edge_infoset_p0: Any
+    compact_backward_edge_slot_p0: Any
+    compact_backward_edge_flat_p0: Any
+    compact_backward_edge_prob_p0: Any
+    compact_backward_edge_src_p1: Any
+    compact_backward_edge_dst_p1: Any
+    compact_backward_edge_infoset_p1: Any
+    compact_backward_edge_slot_p1: Any
+    compact_backward_edge_flat_p1: Any
+    compact_backward_edge_prob_p1: Any
     compact_forward_levels: Any
     compact_backward_levels: Any
     infoset_blocks: Any

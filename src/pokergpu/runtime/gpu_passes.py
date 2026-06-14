@@ -140,16 +140,15 @@ def _regret_matching_table_inplace_impl(
     out.index_put_((infosets, slots), values, accumulate=False)
     totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
     totals.scatter_add_(0, infosets, values)
-    nonzero = totals > 0
-    if bool(nonzero.any()):
-        out[nonzero] = out[nonzero] / totals[nonzero].unsqueeze(1)
-    zero_rows = ~nonzero
+    totals_safe = totals.clamp_min(1.0).unsqueeze(1)
+    out /= totals_safe
+    zero_rows = totals <= 0
     if bool(zero_rows.any()):
-        counts = action_counts[zero_rows].clamp_min(1).to(torch.float32)
-        out[zero_rows] = 0.0
-        idx = torch.nonzero(zero_rows, as_tuple=False).flatten()
-        for i, count in zip(idx.tolist(), counts.tolist(), strict=False):
-            out[i, : int(count)] = 1.0 / float(count)
+        max_actions = out.shape[1]
+        slots_mask = torch.arange(max_actions, device=out.device).unsqueeze(0)
+        counts = action_counts.clamp_min(1).to(out.device).unsqueeze(1)
+        uniform = (slots_mask < counts).to(out.dtype) / counts.to(out.dtype)
+        out[zero_rows] = uniform[zero_rows]
     return out
 
 
@@ -236,70 +235,39 @@ def _run_compact_iteration_core(
         node_range_p0[0].fill_(1.0)
         node_range_p1[0].fill_(1.0)
     for index in range(compact_level_count):
-        edge_src = state.compact_level_edge_src[index]
-        edge_dst = state.compact_level_edge_dst[index]
-        edge_infoset = state.compact_level_edge_infoset[index]
-        edge_slot = state.compact_level_edge_slot[index]
-        edge_kind = state.compact_level_edge_kind[index]
-        edge_prob = state.compact_level_edge_prob[index]
-        if edge_src.numel() == 0:
-            continue
         _compact_pass_impl(
-            edge_src,
-            edge_dst,
-            edge_infoset,
-            edge_slot,
-            edge_kind,
-            edge_prob,
+            state.compact_level_edge_src[index],
+            state.compact_level_edge_dst[index],
+            state.compact_level_edge_infoset[index],
+            state.compact_level_edge_slot[index],
+            None,
+            state.compact_level_edge_prob[index],
             strategy_table,
             _COMPACT_MODE_FORWARD,
             node_range_p0=node_range_p0,
             node_range_p1=node_range_p1,
         )
-    node_types = state.packed.node_type
-    first_child = state.packed.first_child
-    child_count = state.packed.child_count
-    edge_child = state.packed.children
-    edge_chance_prob = state.packed.chance_prob
-    for node_index in range(int(node_types.numel()) - 1, -1, -1):
-        start = int(first_child[node_index])
-        count = int(child_count[node_index])
-        if count <= 0:
-            continue
-        child_slice = edge_child[start : start + count]
-        child_p0 = out_p0[child_slice]
-        child_p1 = out_p1[child_slice]
-        node_type = int(node_types[node_index].item())
-        if node_type == 0:
-            probs = edge_chance_prob[start : start + count]
-            out_p0[node_index] = torch.sum(probs * child_p0)
-            out_p1[node_index] = torch.sum(probs * child_p1)
-            continue
-        if node_type == 1 or node_type == 2:
-            infoset = int(state.packed.infoset_ids[node_index].item())
-            slots = torch.arange(count, device=strategy_table.device, dtype=torch.int64)
-            probs = strategy_table[infoset, slots]
-            out_p0[node_index] = torch.sum(probs * child_p0)
-            out_p1[node_index] = torch.sum(probs * child_p1)
-            continue
-        if node_type == 4:
-            continue
     for index in range(compact_backward_level_count):
-        edge_src = state.compact_backward_edge_src[index]
-        edge_dst = state.compact_backward_edge_dst[index]
-        edge_infoset = state.compact_backward_edge_infoset[index]
-        edge_slot = state.compact_backward_edge_slot[index]
-        edge_kind = state.compact_backward_edge_kind[index]
-        edge_prob = state.compact_backward_edge_prob[index]
-        if edge_src.numel() == 0:
-            continue
         _compact_pass_impl(
-            edge_src,
-            edge_dst,
-            edge_infoset,
-            edge_slot,
-            edge_kind,
-            edge_prob,
+            state.compact_backward_edge_src[index],
+            state.compact_backward_edge_dst[index],
+            state.compact_backward_edge_infoset[index],
+            state.compact_backward_edge_slot[index],
+            None,
+            state.compact_backward_edge_prob[index],
+            strategy_table,
+            _COMPACT_MODE_BACKWARD,
+            out_p0=out_p0,
+            out_p1=out_p1,
+        )
+    for index in range(compact_backward_level_count):
+        _compact_pass_impl(
+            state.compact_backward_edge_src[index],
+            state.compact_backward_edge_dst[index],
+            state.compact_backward_edge_infoset[index],
+            state.compact_backward_edge_slot[index],
+            None,
+            state.compact_backward_edge_prob[index],
             strategy_table,
             _COMPACT_MODE_REGRET,
             regrets=regrets,
@@ -409,9 +377,9 @@ _COMPACT_MODE_REGRET = 2
 def _compact_pass_impl(
     edge_src: torch.Tensor,
     edge_dst: torch.Tensor,
-    edge_infoset: torch.Tensor,
-    edge_slot: torch.Tensor,
-    edge_kind: torch.Tensor,
+    edge_infoset: torch.Tensor | None,
+    edge_slot: torch.Tensor | None,
+    edge_flat: torch.Tensor | None,
     edge_prob: torch.Tensor,
     strategy_table: torch.Tensor,
     mode: int,
@@ -432,52 +400,39 @@ def _compact_pass_impl(
     if mode == _COMPACT_MODE_FORWARD:
         if node_range_p0 is None or node_range_p1 is None:
             return
-        chance_mask = edge_kind == 0
-        if bool(chance_mask.any()):
-            src = edge_src[chance_mask]
-            dst = edge_dst[chance_mask]
-            probs = edge_prob[chance_mask].unsqueeze(1)
-            node_range_p0.index_add_(0, dst, node_range_p0[src] * probs)
-            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs)
-        player_mask = edge_kind == 1
-        if bool(player_mask.any()):
-            src = edge_src[player_mask]
-            dst = edge_dst[player_mask]
-            infosets = edge_infoset[player_mask]
-            slots = edge_slot[player_mask]
-            probs = strategy_table[infosets, slots]
-            weights = probs.unsqueeze(1)
-            node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-            node_range_p1.index_add_(0, dst, node_range_p1[src])
-        player_mask = edge_kind == 2
-        if bool(player_mask.any()):
-            src = edge_src[player_mask]
-            dst = edge_dst[player_mask]
-            infosets = edge_infoset[player_mask]
-            slots = edge_slot[player_mask]
-            probs = strategy_table[infosets, slots]
-            node_range_p0.index_add_(0, dst, node_range_p0[src])
-            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
+        if edge_infoset is None or edge_slot is None:
+            probs = edge_prob.unsqueeze(1)
+            node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * probs)
+            node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * probs)
+            return
+        if edge_flat is None:
+            probs = strategy_table[edge_infoset, edge_slot]
+        else:
+            probs = strategy_table.view(-1).index_select(0, edge_flat)
+        weights = probs.unsqueeze(1)
+        node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * weights)
+        node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * weights)
         return
     if mode == _COMPACT_MODE_BACKWARD:
         if out_p0 is None or out_p1 is None:
             return
+        valid = (edge_dst >= 0) & (edge_dst < out_p0.numel())
+        if not bool(valid.any()):
+            return
+        edge_src = edge_src[valid]
+        edge_dst = edge_dst[valid]
         child_p0 = out_p0[edge_dst]
         child_p1 = out_p1[edge_dst]
-        chance_mask = edge_kind == 0
-        if bool(chance_mask.any()):
-            out_p0.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p0[chance_mask])
-            out_p1.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p1[chance_mask])
-        player_mask = edge_kind == 1
-        if bool(player_mask.any()):
-            probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
-            out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
-            out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
-        player_mask = edge_kind == 2
-        if bool(player_mask.any()):
-            probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
-            out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
-            out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
+        if edge_infoset is None or edge_slot is None:
+            out_p0.index_add_(0, edge_src, edge_prob * child_p0)
+            out_p1.index_add_(0, edge_src, edge_prob * child_p1)
+            return
+        if edge_flat is None:
+            probs = strategy_table[edge_infoset, edge_slot]
+        else:
+            probs = strategy_table.view(-1).index_select(0, edge_flat)
+        out_p0.index_add_(0, edge_src, probs * child_p0)
+        out_p1.index_add_(0, edge_src, probs * child_p1)
         return
     if mode == _COMPACT_MODE_REGRET:
         if (
@@ -489,21 +444,20 @@ def _compact_pass_impl(
             or action_counts is None
         ):
             return
-        valid = (
-            (edge_infoset >= 0)
-            & (edge_infoset < action_counts.numel())
-            & (edge_slot >= 0)
-            & (edge_slot < strategy_table.shape[1])
-        )
+        if edge_flat is None:
+            return
+        if edge_infoset is None or edge_slot is None:
+            return
+        valid = (edge_flat >= 0) & (edge_flat < strategy_table.numel()) & (edge_dst >= 0) & (edge_dst < node_values_p0.numel())
         if not bool(valid.any()):
             return
+        edge_src = edge_src[valid]
+        edge_dst = edge_dst[valid]
         edge_infoset = edge_infoset[valid]
         edge_slot = edge_slot[valid]
-        edge_dst = edge_dst[valid]
-        edge_kind = edge_kind[valid]
         flat = action_offsets[edge_infoset] + edge_slot
-        child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
-        strat = strategy_table[edge_infoset, edge_slot]
+        child_values = node_values_p0[edge_dst]
+        strat = strategy_table.view(-1).index_select(0, flat)
         infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
         infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
         regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])

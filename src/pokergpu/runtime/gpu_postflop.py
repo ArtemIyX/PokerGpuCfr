@@ -319,6 +319,21 @@ def _make_gpu_state(
     compact_level_edge_slot = plan.compact_level_edge_slot if plan is not None else tuple()
     compact_level_edge_kind = plan.compact_level_edge_kind if plan is not None else tuple()
     compact_level_edge_prob = plan.compact_level_edge_prob if plan is not None else tuple()
+    compact_level_edge_src_chance = plan.compact_level_edge_src_chance if plan is not None else tuple()
+    compact_level_edge_dst_chance = plan.compact_level_edge_dst_chance if plan is not None else tuple()
+    compact_level_edge_prob_chance = plan.compact_level_edge_prob_chance if plan is not None else tuple()
+    compact_level_edge_src_p0 = plan.compact_level_edge_src_p0 if plan is not None else tuple()
+    compact_level_edge_dst_p0 = plan.compact_level_edge_dst_p0 if plan is not None else tuple()
+    compact_level_edge_infoset_p0 = plan.compact_level_edge_infoset_p0 if plan is not None else tuple()
+    compact_level_edge_slot_p0 = plan.compact_level_edge_slot_p0 if plan is not None else tuple()
+    compact_level_edge_flat_p0 = plan.compact_level_edge_flat_p0 if plan is not None else tuple()
+    compact_level_edge_prob_p0 = plan.compact_level_edge_prob_p0 if plan is not None else tuple()
+    compact_level_edge_src_p1 = plan.compact_level_edge_src_p1 if plan is not None else tuple()
+    compact_level_edge_dst_p1 = plan.compact_level_edge_dst_p1 if plan is not None else tuple()
+    compact_level_edge_infoset_p1 = plan.compact_level_edge_infoset_p1 if plan is not None else tuple()
+    compact_level_edge_slot_p1 = plan.compact_level_edge_slot_p1 if plan is not None else tuple()
+    compact_level_edge_flat_p1 = plan.compact_level_edge_flat_p1 if plan is not None else tuple()
+    compact_level_edge_prob_p1 = plan.compact_level_edge_prob_p1 if plan is not None else tuple()
     infoset_blocks = plan.infoset_blocks if plan is not None else tuple()
     frontier_leaf_tensors = build_gpu_leaf_tensors(packed.leaf_feature_batch, device) if packed.leaf_feature_batch.size > 0 else None
     if frontier_leaf_tensors is not None:
@@ -379,12 +394,42 @@ def _make_gpu_state(
         compact_level_edge_slot=compact_level_edge_slot,
         compact_level_edge_kind=compact_level_edge_kind,
         compact_level_edge_prob=compact_level_edge_prob,
+        compact_level_edge_src_chance=compact_level_edge_src_chance,
+        compact_level_edge_dst_chance=compact_level_edge_dst_chance,
+        compact_level_edge_prob_chance=compact_level_edge_prob_chance,
+        compact_level_edge_src_p0=compact_level_edge_src_p0,
+        compact_level_edge_dst_p0=compact_level_edge_dst_p0,
+        compact_level_edge_infoset_p0=compact_level_edge_infoset_p0,
+        compact_level_edge_slot_p0=compact_level_edge_slot_p0,
+        compact_level_edge_flat_p0=compact_level_edge_flat_p0,
+        compact_level_edge_prob_p0=compact_level_edge_prob_p0,
+        compact_level_edge_src_p1=compact_level_edge_src_p1,
+        compact_level_edge_dst_p1=compact_level_edge_dst_p1,
+        compact_level_edge_infoset_p1=compact_level_edge_infoset_p1,
+        compact_level_edge_slot_p1=compact_level_edge_slot_p1,
+        compact_level_edge_flat_p1=compact_level_edge_flat_p1,
+        compact_level_edge_prob_p1=compact_level_edge_prob_p1,
         compact_backward_edge_src=plan.compact_backward_edge_src if plan is not None else tuple(),
         compact_backward_edge_dst=plan.compact_backward_edge_dst if plan is not None else tuple(),
         compact_backward_edge_infoset=plan.compact_backward_edge_infoset if plan is not None else tuple(),
         compact_backward_edge_slot=plan.compact_backward_edge_slot if plan is not None else tuple(),
         compact_backward_edge_kind=plan.compact_backward_edge_kind if plan is not None else tuple(),
         compact_backward_edge_prob=plan.compact_backward_edge_prob if plan is not None else tuple(),
+        compact_backward_edge_src_chance=plan.compact_backward_edge_src_chance if plan is not None else tuple(),
+        compact_backward_edge_dst_chance=plan.compact_backward_edge_dst_chance if plan is not None else tuple(),
+        compact_backward_edge_prob_chance=plan.compact_backward_edge_prob_chance if plan is not None else tuple(),
+        compact_backward_edge_src_p0=plan.compact_backward_edge_src_p0 if plan is not None else tuple(),
+        compact_backward_edge_dst_p0=plan.compact_backward_edge_dst_p0 if plan is not None else tuple(),
+        compact_backward_edge_infoset_p0=plan.compact_backward_edge_infoset_p0 if plan is not None else tuple(),
+        compact_backward_edge_slot_p0=plan.compact_backward_edge_slot_p0 if plan is not None else tuple(),
+        compact_backward_edge_flat_p0=plan.compact_backward_edge_flat_p0 if plan is not None else tuple(),
+        compact_backward_edge_prob_p0=plan.compact_backward_edge_prob_p0 if plan is not None else tuple(),
+        compact_backward_edge_src_p1=plan.compact_backward_edge_src_p1 if plan is not None else tuple(),
+        compact_backward_edge_dst_p1=plan.compact_backward_edge_dst_p1 if plan is not None else tuple(),
+        compact_backward_edge_infoset_p1=plan.compact_backward_edge_infoset_p1 if plan is not None else tuple(),
+        compact_backward_edge_slot_p1=plan.compact_backward_edge_slot_p1 if plan is not None else tuple(),
+        compact_backward_edge_flat_p1=plan.compact_backward_edge_flat_p1 if plan is not None else tuple(),
+        compact_backward_edge_prob_p1=plan.compact_backward_edge_prob_p1 if plan is not None else tuple(),
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
         infoset_blocks=infoset_blocks,
@@ -705,17 +750,11 @@ def _root_action_values_from_backward(
     backward_p1: torch.Tensor,
     root_infoset: int,
 ) -> np.ndarray:
-    root_node = 0
-    start = int(tree.first_child[root_node])
-    count = int(tree.child_count[root_node])
-    limit = min(count, int(plan.root_child_nodes.numel()))
+    del tree, root_infoset
+    limit = int(plan.root_child_nodes.numel())
     if limit <= 0:
         return np.zeros(0, dtype=np.float32)
-    child_nodes = torch.as_tensor(
-        [int(tree.children[start + action_index].child) for action_index in range(limit)],
-        dtype=torch.int64,
-        device=backward_p0.device,
-    )
+    child_nodes = plan.root_child_nodes[:limit].to(device=backward_p0.device)
     valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
     values = torch.zeros(limit, dtype=torch.float32, device=backward_p0.device)
     if bool(valid.any()):

@@ -181,6 +181,7 @@ def build_batched_gpu_plan(
     compact_forward_levels = compact_level_schedule(levels.forward_levels)
     compact_backward_levels = compact_level_schedule(levels.backward_levels)
     infoset_blocks = build_infoset_blocks(layout, device=device)
+    max_actions = max(layout.action_counts) if layout.action_counts else 1
     for level in levels.forward_levels:
         forward_levels.append(build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
@@ -191,12 +192,67 @@ def build_batched_gpu_plan(
     compact_level_edge_slot = [_concat_level_tensors(level_edge_slot, level_indices, device=device) for level_indices in compact_forward_levels]
     compact_level_edge_kind = [_concat_level_tensors(level_edge_kind, level_indices, device=device) for level_indices in compact_forward_levels]
     compact_level_edge_prob = [_concat_level_tensors(level_edge_prob, level_indices, device=device) for level_indices in compact_forward_levels]
+    compact_level_edge_src_chance: list[torch.Tensor] = []
+    compact_level_edge_dst_chance: list[torch.Tensor] = []
+    compact_level_edge_prob_chance: list[torch.Tensor] = []
+    compact_level_edge_src_p0: list[torch.Tensor] = []
+    compact_level_edge_dst_p0: list[torch.Tensor] = []
+    compact_level_edge_infoset_p0: list[torch.Tensor] = []
+    compact_level_edge_slot_p0: list[torch.Tensor] = []
+    compact_level_edge_flat_p0: list[torch.Tensor] = []
+    compact_level_edge_prob_p0: list[torch.Tensor] = []
+    compact_level_edge_src_p1: list[torch.Tensor] = []
+    compact_level_edge_dst_p1: list[torch.Tensor] = []
+    compact_level_edge_infoset_p1: list[torch.Tensor] = []
+    compact_level_edge_slot_p1: list[torch.Tensor] = []
+    compact_level_edge_flat_p1: list[torch.Tensor] = []
+    compact_level_edge_prob_p1: list[torch.Tensor] = []
     backward_edge_src: list[torch.Tensor] = []
     backward_edge_dst: list[torch.Tensor] = []
     backward_edge_infoset: list[torch.Tensor] = []
     backward_edge_slot: list[torch.Tensor] = []
     backward_edge_kind: list[torch.Tensor] = []
     backward_edge_prob: list[torch.Tensor] = []
+    backward_edge_src_chance: list[torch.Tensor] = []
+    backward_edge_dst_chance: list[torch.Tensor] = []
+    backward_edge_prob_chance: list[torch.Tensor] = []
+    backward_edge_src_p0: list[torch.Tensor] = []
+    backward_edge_dst_p0: list[torch.Tensor] = []
+    backward_edge_infoset_p0: list[torch.Tensor] = []
+    backward_edge_slot_p0: list[torch.Tensor] = []
+    backward_edge_flat_p0: list[torch.Tensor] = []
+    backward_edge_prob_p0: list[torch.Tensor] = []
+    backward_edge_src_p1: list[torch.Tensor] = []
+    backward_edge_dst_p1: list[torch.Tensor] = []
+    backward_edge_infoset_p1: list[torch.Tensor] = []
+    backward_edge_slot_p1: list[torch.Tensor] = []
+    backward_edge_flat_p1: list[torch.Tensor] = []
+    backward_edge_prob_p1: list[torch.Tensor] = []
+    for block_index, _level_indices in enumerate(compact_forward_levels):
+        src = compact_level_edge_src[block_index]
+        dst = compact_level_edge_dst[block_index]
+        infoset = compact_level_edge_infoset[block_index]
+        slot = compact_level_edge_slot[block_index]
+        kind = compact_level_edge_kind[block_index]
+        prob = compact_level_edge_prob[block_index]
+        chance_mask = kind == 0
+        p0_mask = kind == 1
+        p1_mask = kind == 2
+        compact_level_edge_src_chance.append(src[chance_mask])
+        compact_level_edge_dst_chance.append(dst[chance_mask])
+        compact_level_edge_prob_chance.append(prob[chance_mask])
+        compact_level_edge_src_p0.append(src[p0_mask])
+        compact_level_edge_dst_p0.append(dst[p0_mask])
+        compact_level_edge_infoset_p0.append(infoset[p0_mask])
+        compact_level_edge_slot_p0.append(slot[p0_mask])
+        compact_level_edge_flat_p0.append(infoset[p0_mask] * max_actions + slot[p0_mask])
+        compact_level_edge_prob_p0.append(prob[p0_mask])
+        compact_level_edge_src_p1.append(src[p1_mask])
+        compact_level_edge_dst_p1.append(dst[p1_mask])
+        compact_level_edge_infoset_p1.append(infoset[p1_mask])
+        compact_level_edge_slot_p1.append(slot[p1_mask])
+        compact_level_edge_flat_p1.append(infoset[p1_mask] * max_actions + slot[p1_mask])
+        compact_level_edge_prob_p1.append(prob[p1_mask])
     for level_tensor in level_nodes:
         level_set = set(int(i) for i in level_tensor.tolist())
         level_frontier_mask.append(torch.as_tensor([flat_view.is_frontier[int(i)] for i in level_tensor.tolist()], dtype=torch.bool, device=device))
@@ -210,17 +266,35 @@ def build_batched_gpu_plan(
         level_edge_dst.append(torch.as_tensor([flat_view.edge_child[i] for i in edge_indices], dtype=torch.int64, device=device))
         level_edge_infoset.append(torch.as_tensor([flat_view.edge_infoset_id[i] for i in edge_indices], dtype=torch.int64, device=device))
         level_edge_slot.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in edge_indices], dtype=torch.int64, device=device))
-        level_edge_kind.append(torch.as_tensor([flat_view.edge_player[i] for i in edge_indices], dtype=torch.int64, device=device))
+        level_edge_kind.append(torch.as_tensor([node_type_code(flat_view.node_type[parent]) for parent in (flat_view.edge_parent[i] for i in edge_indices)], dtype=torch.int64, device=device))
         level_edge_prob.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in edge_indices], dtype=torch.float32, device=device))
     for level in levels.backward_levels:
         level_set = set(int(i) for i in level)
-        edge_indices = [i for i, parent in enumerate(flat_view.edge_parent) if parent in level_set]
+        edge_indices = [i for i, child in enumerate(flat_view.edge_child) if child in level_set]
         backward_edge_src.append(torch.as_tensor([flat_view.edge_parent[i] for i in edge_indices], dtype=torch.int64, device=device))
         backward_edge_dst.append(torch.as_tensor([flat_view.edge_child[i] for i in edge_indices], dtype=torch.int64, device=device))
         backward_edge_infoset.append(torch.as_tensor([flat_view.edge_infoset_id[i] for i in edge_indices], dtype=torch.int64, device=device))
         backward_edge_slot.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in edge_indices], dtype=torch.int64, device=device))
-        backward_edge_kind.append(torch.as_tensor([flat_view.edge_player[i] for i in edge_indices], dtype=torch.int64, device=device))
+        backward_edge_kind.append(torch.as_tensor([node_type_code(flat_view.node_type[flat_view.edge_parent[i]]) for i in edge_indices], dtype=torch.int64, device=device))
         backward_edge_prob.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in edge_indices], dtype=torch.float32, device=device))
+        backward_chance_idx = [i for i in edge_indices if flat_view.node_type[flat_view.edge_parent[i]] is NodeType.CHANCE]
+        backward_p0_idx = [i for i in edge_indices if flat_view.node_type[flat_view.edge_parent[i]] is NodeType.PLAYER0]
+        backward_p1_idx = [i for i in edge_indices if flat_view.node_type[flat_view.edge_parent[i]] is NodeType.PLAYER1]
+        backward_edge_src_chance.append(torch.as_tensor([flat_view.edge_parent[i] for i in backward_chance_idx], dtype=torch.int64, device=device))
+        backward_edge_dst_chance.append(torch.as_tensor([flat_view.edge_child[i] for i in backward_chance_idx], dtype=torch.int64, device=device))
+        backward_edge_prob_chance.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in backward_chance_idx], dtype=torch.float32, device=device))
+        backward_edge_src_p0.append(torch.as_tensor([flat_view.edge_parent[i] for i in backward_p0_idx], dtype=torch.int64, device=device))
+        backward_edge_dst_p0.append(torch.as_tensor([flat_view.edge_child[i] for i in backward_p0_idx], dtype=torch.int64, device=device))
+        backward_edge_infoset_p0.append(torch.as_tensor([flat_view.edge_infoset_id[i] for i in backward_p0_idx], dtype=torch.int64, device=device))
+        backward_edge_slot_p0.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in backward_p0_idx], dtype=torch.int64, device=device))
+        backward_edge_flat_p0.append(torch.as_tensor([flat_view.edge_infoset_id[i] * max_actions + flat_view.edge_action_slot[i] for i in backward_p0_idx], dtype=torch.int64, device=device))
+        backward_edge_prob_p0.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in backward_p0_idx], dtype=torch.float32, device=device))
+        backward_edge_src_p1.append(torch.as_tensor([flat_view.edge_parent[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
+        backward_edge_dst_p1.append(torch.as_tensor([flat_view.edge_child[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
+        backward_edge_infoset_p1.append(torch.as_tensor([flat_view.edge_infoset_id[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
+        backward_edge_slot_p1.append(torch.as_tensor([flat_view.edge_action_slot[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
+        backward_edge_flat_p1.append(torch.as_tensor([flat_view.edge_infoset_id[i] * max_actions + flat_view.edge_action_slot[i] for i in backward_p1_idx], dtype=torch.int64, device=device))
+        backward_edge_prob_p1.append(torch.as_tensor([flat_view.edge_chance_prob[i] for i in backward_p1_idx], dtype=torch.float32, device=device))
     for node_index in range(tree.tree.node_count):
         node_type = tree.tree.node_types[node_index]
         node_player.append(0 if node_type is NodeType.PLAYER0 else 1 if node_type is NodeType.PLAYER1 else -1)
@@ -264,12 +338,42 @@ def build_batched_gpu_plan(
         compact_level_edge_slot=tuple(compact_level_edge_slot),
         compact_level_edge_kind=tuple(compact_level_edge_kind),
         compact_level_edge_prob=tuple(compact_level_edge_prob),
+        compact_level_edge_src_chance=tuple(compact_level_edge_src_chance),
+        compact_level_edge_dst_chance=tuple(compact_level_edge_dst_chance),
+        compact_level_edge_prob_chance=tuple(compact_level_edge_prob_chance),
+        compact_level_edge_src_p0=tuple(compact_level_edge_src_p0),
+        compact_level_edge_dst_p0=tuple(compact_level_edge_dst_p0),
+        compact_level_edge_infoset_p0=tuple(compact_level_edge_infoset_p0),
+        compact_level_edge_slot_p0=tuple(compact_level_edge_slot_p0),
+        compact_level_edge_flat_p0=tuple(compact_level_edge_flat_p0),
+        compact_level_edge_prob_p0=tuple(compact_level_edge_prob_p0),
+        compact_level_edge_src_p1=tuple(compact_level_edge_src_p1),
+        compact_level_edge_dst_p1=tuple(compact_level_edge_dst_p1),
+        compact_level_edge_infoset_p1=tuple(compact_level_edge_infoset_p1),
+        compact_level_edge_slot_p1=tuple(compact_level_edge_slot_p1),
+        compact_level_edge_flat_p1=tuple(compact_level_edge_flat_p1),
+        compact_level_edge_prob_p1=tuple(compact_level_edge_prob_p1),
         compact_backward_edge_src=tuple(backward_edge_src),
         compact_backward_edge_dst=tuple(backward_edge_dst),
         compact_backward_edge_infoset=tuple(backward_edge_infoset),
         compact_backward_edge_slot=tuple(backward_edge_slot),
         compact_backward_edge_kind=tuple(backward_edge_kind),
         compact_backward_edge_prob=tuple(backward_edge_prob),
+        compact_backward_edge_src_chance=tuple(backward_edge_src_chance),
+        compact_backward_edge_dst_chance=tuple(backward_edge_dst_chance),
+        compact_backward_edge_prob_chance=tuple(backward_edge_prob_chance),
+        compact_backward_edge_src_p0=tuple(backward_edge_src_p0),
+        compact_backward_edge_dst_p0=tuple(backward_edge_dst_p0),
+        compact_backward_edge_infoset_p0=tuple(backward_edge_infoset_p0),
+        compact_backward_edge_slot_p0=tuple(backward_edge_slot_p0),
+        compact_backward_edge_flat_p0=tuple(backward_edge_flat_p0),
+        compact_backward_edge_prob_p0=tuple(backward_edge_prob_p0),
+        compact_backward_edge_src_p1=tuple(backward_edge_src_p1),
+        compact_backward_edge_dst_p1=tuple(backward_edge_dst_p1),
+        compact_backward_edge_infoset_p1=tuple(backward_edge_infoset_p1),
+        compact_backward_edge_slot_p1=tuple(backward_edge_slot_p1),
+        compact_backward_edge_flat_p1=tuple(backward_edge_flat_p1),
+        compact_backward_edge_prob_p1=tuple(backward_edge_prob_p1),
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
         infoset_blocks=infoset_blocks,
