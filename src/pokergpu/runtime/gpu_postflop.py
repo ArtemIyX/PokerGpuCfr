@@ -21,6 +21,7 @@ from pokergpu.core.board import Street
 from pokergpu.core.canonical import canonical_board_key
 from pokergpu.core.payouts import compute_payouts
 from pokergpu.core.state import GameState, HandPhase
+from pokergpu.eval.cpu_stub import CpuStubLeafEvaluator
 from pokergpu.eval import LeafEvaluator
 from pokergpu.eval.types import LeafFeatureBatch, LeafValueBatch
 from pokergpu.eval.tensor_builder import build_gpu_leaf_tensors
@@ -46,7 +47,6 @@ from .gpu_types import (
 )
 from .gpu_schedule import build_infoset_blocks, compact_level_schedule
 from .postflop import PostflopResolveResult, PostflopResolveSpec, _summarize_root_ev
-from .value_network import default_postflop_leaf_evaluator
 
 __all__ = [
     "BatchedGpuPlan",
@@ -99,7 +99,7 @@ def resolve_postflop_gpu_batch_inputs(
 ) -> tuple[PostflopResolveResult, ...]:
     if not items:
         return ()
-    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
+    evaluator_impl = evaluator or CpuStubLeafEvaluator()
     groups = _group_batched_gpu_inputs(items)
     results: dict[int, PostflopResolveResult] = {}
     for group_items in groups.values():
@@ -314,6 +314,10 @@ def _make_gpu_state(
         frontier_leaf_tensors["range_p0"] = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
         frontier_leaf_tensors["range_p1"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
         frontier_leaf_tensors["range_p2"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
+    frontier_range_nodes = packed.frontier_nodes
+    frontier_range_p0 = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
+    frontier_range_p1 = torch.zeros_like(frontier_range_p0)
+    frontier_range_p2 = torch.zeros_like(frontier_range_p0)
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -368,6 +372,10 @@ def _make_gpu_state(
         compact_backward_levels=compact_backward_levels,
         infoset_blocks=infoset_blocks,
         frontier_leaf_tensors=frontier_leaf_tensors,
+        frontier_range_nodes=frontier_range_nodes,
+        frontier_range_p0=frontier_range_p0,
+        frontier_range_p1=frontier_range_p1,
+        frontier_range_p2=frontier_range_p2,
         root_child_nodes=tuple(),
     )
 
@@ -700,7 +708,7 @@ def debug_first_gpu_cpu_divergence(
     *,
     evaluator: LeafEvaluator | None = None,
 ) -> None:
-    evaluator_impl = evaluator or default_postflop_leaf_evaluator()
+    evaluator_impl = evaluator or CpuStubLeafEvaluator()
     packed = _prepare_gpu_solve(spec)
     trace = _run_gpu_solve(packed, evaluator_impl)
     tree = packed.tree

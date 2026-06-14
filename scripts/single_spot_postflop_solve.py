@@ -24,12 +24,12 @@ from pokergpu.core.betting import (
 from pokergpu.core.board import Board
 from pokergpu.core.cards import Card, card_from_str
 from pokergpu.core.state import GameState, PlayerState
+from pokergpu.eval.cpu_stub import CpuStubLeafEvaluator
 from pokergpu.runtime.gpu_postflop import _prepare_gpu_solve, _run_gpu_solve
 from pokergpu.runtime.postflop import PostflopResolveSpec
-from pokergpu.runtime.value_network import default_postflop_leaf_evaluator
 
 import torch
-from torch.profiler import ProfilerActivity, profile
+from torch.profiler import ProfilerActivity, profile, record_function
 
 
 def main() -> None:
@@ -69,7 +69,7 @@ def main() -> None:
         min_reach_prob=args.min_reach_prob,
     )
 
-    evaluator = default_postflop_leaf_evaluator()
+    evaluator = CpuStubLeafEvaluator()
     started_at = time.monotonic()
     packed = _prepare_gpu_solve(spec)
     if args.profile:
@@ -78,7 +78,8 @@ def main() -> None:
             record_shapes=True,
             profile_memory=False,
         ) as prof:
-            trace = _run_gpu_solve(packed, evaluator)
+            with record_function("solve::run_gpu_solve"):
+                trace = _run_gpu_solve(packed, evaluator)
         print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
     else:
         trace = _run_gpu_solve(packed, evaluator)

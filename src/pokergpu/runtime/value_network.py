@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+try:
+    from torch.profiler import record_function
+except Exception:  # pragma: no cover
+    from contextlib import nullcontext as record_function
+import torch
 
 from pokergpu.eval import (
     CpuStubLeafEvaluator,
@@ -54,36 +59,41 @@ class PostflopRuntimeValueNetworkEvaluator(LeafEvaluator):
         )
 
     def evaluate_tensors(self, tensors: dict[str, object]) -> LeafValueBatch:
-        def to_np(name: str, dtype: np.dtype[Any] | type[np.generic]) -> np.ndarray:
-            value = tensors[name]
-            if hasattr(value, "detach"):
-                value = value.detach().cpu().numpy()
-            return np.asarray(value, dtype=dtype)
-        features = np.zeros((int(to_np("street", np.int32).shape[0]), self._input_dim), dtype=np.float32)
-        offset = 0
+        with record_function("vnet::build_features"):
+            def to_tensor(name: str, dtype: torch.dtype) -> torch.Tensor:
+                value = tensors[name]
+                if isinstance(value, torch.Tensor):
+                    return value.to(dtype=dtype)
+                return torch.as_tensor(value, dtype=dtype)
+            batch_size = int(to_tensor("street", torch.int64).shape[0])
+            features = torch.zeros((batch_size, self._input_dim), dtype=torch.float32)
+            offset = 0
 
-        def put(column: np.ndarray) -> None:
-            nonlocal offset
-            if offset >= self._input_dim:
-                return
-            features[:, offset] = column
-            offset += 1
+            def put(column: torch.Tensor) -> None:
+                nonlocal offset
+                if offset >= self._input_dim:
+                    return
+                features[:, offset] = column.to(dtype=torch.float32)
+                offset += 1
 
-        put(to_np("street", np.int32))
-        put(to_np("pot", np.float32))
-        put(to_np("stack_p0", np.float32))
-        put(to_np("stack_p1", np.float32))
-        put(to_np("board_size", np.int32))
-        put(to_np("player_to_act", np.int32))
-        put(to_np("terminal_payoff", np.float32))
-        put(to_np("is_terminal", np.bool_).astype(np.float32))
-        put(to_np("is_frontier", np.bool_).astype(np.float32))
-        put(np.clip(to_np("infoset_id", np.int32), -1, 1_000_000))
-        put(to_np("range_p0", np.float32))
-        put(to_np("range_p1", np.float32))
-        put(to_np("range_p2", np.float32))
-        normalized = normalize_feature_batch(ValueFeatureBatch(features), self._normalizer).values
-        values = infer_value(self._model, normalized)
+            put(to_tensor("street", torch.int64))
+            put(to_tensor("pot", torch.float32))
+            put(to_tensor("stack_p0", torch.float32))
+            put(to_tensor("stack_p1", torch.float32))
+            put(to_tensor("board_size", torch.int64))
+            put(to_tensor("player_to_act", torch.int64))
+            put(to_tensor("terminal_payoff", torch.float32))
+            put(to_tensor("is_terminal", torch.bool).to(dtype=torch.float32))
+            put(to_tensor("is_frontier", torch.bool).to(dtype=torch.float32))
+            put(torch.clamp(to_tensor("infoset_id", torch.int64), min=-1, max=1_000_000))
+            put(to_tensor("range_p0", torch.float32))
+            put(to_tensor("range_p1", torch.float32))
+            put(to_tensor("range_p2", torch.float32))
+        with record_function("vnet::normalize_and_infer"):
+            mean = torch.as_tensor(self._normalizer.mean, dtype=torch.float32, device=features.device)
+            std = torch.as_tensor(self._normalizer.std, dtype=torch.float32, device=features.device)
+            normalized = (features - mean) / std
+            values = infer_value(self._model, normalized.detach().cpu().numpy())
         return LeafValueBatch(
             values=np.asarray(values, dtype=np.float32),
             ev_player0=np.asarray(values[:, 0], dtype=np.float32),

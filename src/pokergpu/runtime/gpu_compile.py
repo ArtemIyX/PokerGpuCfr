@@ -29,6 +29,16 @@ def compile_packed_subtree(
     device: str = "cuda",
 ) -> PackedGpuSubtree:
     flat = tree.flat_view
+    frontier_node_list = [
+        index
+        for level in tree.level_schedule.forward_levels
+        for index in level
+        if flat.is_frontier[index] and flat.node_type[index] is not NodeType.TERMINAL
+    ]
+    frontier_set = set(frontier_node_list)
+    non_frontier_nodes = [index for index in range(tree.tree.node_count) if index not in frontier_set]
+    node_order = non_frontier_nodes + frontier_node_list
+    node_remap = {old_index: new_index for new_index, old_index in enumerate(node_order)}
     infoset_remap: dict[int, int] = {}
     compact_infoset_ids: list[int] = []
     for infoset in flat.infoset_id:
@@ -39,27 +49,22 @@ def compile_packed_subtree(
         compact_index = infoset_remap.setdefault(infoset_int, len(infoset_remap))
         compact_infoset_ids.append(compact_index)
     node_type = torch.as_tensor(
-        [_node_type_code(node_type) for node_type in flat.node_type],
+        [_node_type_code(flat.node_type[old_index]) for old_index in node_order],
         dtype=torch.int64,
         device=device,
     )
-    is_frontier = torch.as_tensor(flat.is_frontier, dtype=torch.bool, device=device)
-    first_child = torch.as_tensor(flat.first_child, dtype=torch.int64, device=device)
-    child_count = torch.as_tensor(flat.child_count, dtype=torch.int64, device=device)
-    infoset_ids = torch.as_tensor(compact_infoset_ids, dtype=torch.int64, device=device)
-    terminal_payoffs = torch.as_tensor(flat.terminal_payoff, dtype=torch.float32, device=device)
-    node_depth = torch.as_tensor(flat.node_depth, dtype=torch.int64, device=device)
-    street = torch.as_tensor(flat.street, dtype=torch.int64, device=device)
-    action_slot = torch.as_tensor(flat.edge_action_slot, dtype=torch.int64, device=device)
-    chance_prob = torch.as_tensor(flat.edge_chance_prob, dtype=torch.float32, device=device)
-    children = torch.as_tensor(flat.edge_child, dtype=torch.int64, device=device)
+    is_frontier = torch.as_tensor([flat.is_frontier[old_index] for old_index in node_order], dtype=torch.bool, device=device)
+    first_child = torch.as_tensor([flat.first_child[old_index] for old_index in node_order], dtype=torch.int64, device=device)
+    child_count = torch.as_tensor([flat.child_count[old_index] for old_index in node_order], dtype=torch.int64, device=device)
+    infoset_ids = torch.as_tensor([compact_infoset_ids[old_index] for old_index in node_order], dtype=torch.int64, device=device)
+    terminal_payoffs = torch.as_tensor([flat.terminal_payoff[old_index] for old_index in node_order], dtype=torch.float32, device=device)
+    node_depth = torch.as_tensor([flat.node_depth[old_index] for old_index in node_order], dtype=torch.int64, device=device)
+    street = torch.as_tensor([flat.street[old_index] for old_index in node_order], dtype=torch.int64, device=device)
+    action_slot = torch.as_tensor([flat.edge_action_slot[i] for i in range(len(flat.edge_action_slot))], dtype=torch.int64, device=device)
+    chance_prob = torch.as_tensor([flat.edge_chance_prob[i] for i in range(len(flat.edge_chance_prob))], dtype=torch.float32, device=device)
+    children = torch.as_tensor([node_remap[int(flat.edge_child[i])] for i in range(len(flat.edge_child))], dtype=torch.int64, device=device)
     frontier_nodes = torch.as_tensor(
-        tuple(
-            index
-            for level in tree.level_schedule.forward_levels
-            for index in level
-            if flat.is_frontier[index] and flat.node_type[index] is not NodeType.TERMINAL
-        ),
+        tuple(range(len(non_frontier_nodes), len(node_order))),
         dtype=torch.int64,
         device=device,
     )
