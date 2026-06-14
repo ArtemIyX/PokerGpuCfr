@@ -144,3 +144,4 @@ docs/_build/
 scratch/
 tmp/
 local/
+.triton-cache

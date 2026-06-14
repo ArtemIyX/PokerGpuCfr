@@ -25,6 +25,7 @@ from pokergpu.tree import NodeType, PublicTree
 
 from .gpu_plan import concat_compact_level_edges, concat_level_edges
 from .gpu_types import CompactEdgeGroup
+from .triton_launch import launch_backward_compact, launch_forward_compact, launch_regret_matching
 
 def record_function(name: str) -> ContextManager[None]:
     profiler = _get_record_function()
@@ -68,6 +69,8 @@ def regret_matching_table_inplace(
     legal_action_mask: torch.Tensor | None = None,
     infoset_blocks: tuple[torch.Tensor, ...] | None = None,
 ) -> torch.Tensor:
+    if launch_regret_matching(regrets, out, action_infoset_index, action_slot_index, action_counts):
+        return out
     return _regret_matching_table_inplace_impl(
         out,
         regrets,
@@ -189,10 +192,32 @@ def _run_compact_iteration_core(
             node_range_p0[0].fill_(1.0)
             node_range_p1[0].fill_(1.0)
         for group in state.compact_forward_groups:
-            _compact_group_pass(group, strategy_table, _COMPACT_MODE_FORWARD, node_range_p0=node_range_p0, node_range_p1=node_range_p1)
+            if not launch_forward_compact(
+                group.src,
+                group.dst,
+                group.prob,
+                group.flat,
+                strategy_table,
+                node_range_p0,
+                node_range_p1,
+                node_range_p0,
+                node_range_p1,
+            ):
+                _compact_group_pass(group, strategy_table, _COMPACT_MODE_FORWARD, node_range_p0=node_range_p0, node_range_p1=node_range_p1)
     with record_function("solve::backward"):
         for group in state.compact_backward_groups:
-            _compact_group_pass(group, strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
+            if not launch_backward_compact(
+                group.src,
+                group.dst,
+                group.prob,
+                group.flat,
+                strategy_table,
+                out_p0,
+                out_p1,
+                node_values_p0,
+                node_values_p1,
+            ):
+                _compact_group_pass(group, strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
     with record_function("solve::regret"):
         for group in state.compact_backward_groups:
             _compact_group_pass(group, strategy_table, _COMPACT_MODE_REGRET, regrets=regrets, strategy_sums=strategy_sums, node_values_p0=node_values_p0, node_values_p1=node_values_p1)
