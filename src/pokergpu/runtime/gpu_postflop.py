@@ -341,7 +341,7 @@ def _make_gpu_state(
         frontier_leaf_tensors["range_p1"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
         frontier_leaf_tensors["range_p2"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
     frontier_range_nodes = packed.frontier_nodes
-    frontier_start = int(frontier_range_nodes[0].item()) if frontier_range_nodes.numel() > 0 else 0
+    frontier_start = int(frontier_range_nodes[0].detach().cpu().item()) if frontier_range_nodes.numel() > 0 else 0
     frontier_count = int(frontier_range_nodes.numel())
     frontier_range_p0 = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
     frontier_range_p1 = torch.zeros_like(frontier_range_p0)
@@ -518,7 +518,7 @@ def _run_gpu_solve(
     }
     level_node_counts = tuple(int(level.numel()) for level in packed.plan.level_nodes)
     level_edge_counts = tuple(int(level.numel()) for level in packed.plan.level_edge_dst)
-    level_frontier_counts = tuple(int(mask.sum().item()) for mask in packed.plan.level_frontier_mask)
+    level_frontier_counts = tuple(int(mask.numel()) for mask in packed.plan.level_frontier_mask)
     compact_forward_level_sizes = tuple(len(level) for level in packed.plan.compact_forward_levels)
     compact_backward_level_sizes = tuple(len(level) for level in packed.plan.compact_backward_levels)
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
@@ -565,7 +565,7 @@ def _run_gpu_solve(
         buffer=state.root_action_ev_buffer,
     )
     if debug:
-        print("debug::root_action_raw", root_action_ev_p0.tolist())
+        print("debug::root_action_raw", root_action_ev_p0)
     phase_seconds["finalize"] += time.monotonic() - started_phase
     root_action_ev_p1 = -root_action_ev_p0
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
@@ -579,8 +579,8 @@ def _run_gpu_solve(
         spec.cache_state.store_warm_start(
             _gpu_plan_key(spec, template=packed.tree.template),
             make_warm_start_state(
-                regret=tuple(float(value) for value in regrets.detach().cpu().tolist()),
-                strategy_sum=tuple(float(value) for value in strategy_sums.detach().cpu().tolist()),
+                regret=tuple(float(value) for value in regrets.detach().cpu().numpy().tolist()),
+                strategy_sum=tuple(float(value) for value in strategy_sums.detach().cpu().numpy().tolist()),
                 source_key=_gpu_plan_key(spec, template=packed.tree.template),
                 blend_alpha=1.0,
             ),

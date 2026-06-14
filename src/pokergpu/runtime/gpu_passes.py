@@ -126,10 +126,10 @@ def average_strategy_from_gpu(
     action_offsets: torch.Tensor,
     infoset_index: int,
 ) -> np.ndarray:
-    count = int(action_counts[infoset_index].item())
-    start = int(action_offsets[infoset_index].item())
+    count = int(action_counts[infoset_index].detach().cpu().item())
+    start = int(action_offsets[infoset_index].detach().cpu().item())
     values = strategy_sums.narrow(0, start, count)
-    total = float(values.sum().item())
+    total = float(values.sum().detach().cpu().item())
     if total <= 0.0 and count > 0:
         return np.full(count, 1.0 / count, dtype=np.float32)
     if total <= 0.0:
@@ -252,8 +252,8 @@ def run_compact_iteration_gpu(
                 ev0 = torch.as_tensor(ev0, dtype=torch.float32, device=out_p0.device)
             if not isinstance(ev1, torch.Tensor):
                 ev1 = torch.as_tensor(ev1, dtype=torch.float32, device=out_p1.device)
-            out_p0[leaf_slice].copy_(ev0.to(device=out_p0.device, dtype=torch.float32, non_blocking=True))
-            out_p1[leaf_slice].copy_(ev1.to(device=out_p1.device, dtype=torch.float32, non_blocking=True))
+            out_p0[leaf_slice].copy_(ev0.to(device=out_p0.device, dtype=torch.float32))
+            out_p1[leaf_slice].copy_(ev1.to(device=out_p1.device, dtype=torch.float32))
             if debug:
                 print(
                     "debug::leaf",
@@ -449,8 +449,6 @@ def _compact_pass_impl(
         src_valid = (edge_src >= 0) & (edge_src < out_p0.numel())
         dst_valid = (edge_dst >= 0) & (edge_dst < out_p0.numel())
         valid = src_valid & dst_valid
-        if not bool(valid.any()):
-            return
         edge_src_valid = edge_src[valid]
         edge_dst_valid = edge_dst[valid]
         child_p0 = out_p0[edge_dst_valid]
@@ -475,8 +473,6 @@ def _compact_pass_impl(
             & (edge_slot_valid < slot_limit)
             & flat_valid
         )
-        if not bool(strat_valid.any()):
-            return
         edge_src_valid = edge_src_valid[strat_valid]
         child_p0 = child_p0[strat_valid]
         child_p1 = child_p1[strat_valid]
@@ -511,8 +507,6 @@ def _compact_pass_impl(
         dst_valid = (edge_dst >= 0) & (edge_dst < node_values_p0.numel())
         infoset_valid = (edge_infoset >= 0) & (edge_infoset < infoset_limit) & (edge_infoset < action_limit)
         valid = slot_valid & dst_valid & infoset_valid
-        if not bool(valid.any()):
-            return
         edge_dst_valid = edge_dst[valid]
         edge_infoset_valid = edge_infoset_safe[valid]
         edge_slot_valid = edge_slot[valid]
