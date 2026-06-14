@@ -305,6 +305,12 @@ def _make_gpu_state(
     level_edge_slot = plan.level_edge_slot if plan is not None else tuple()
     level_edge_kind = plan.level_edge_kind if plan is not None else tuple()
     level_edge_prob = plan.level_edge_prob if plan is not None else tuple()
+    compact_level_edge_src = plan.compact_level_edge_src if plan is not None else tuple()
+    compact_level_edge_dst = plan.compact_level_edge_dst if plan is not None else tuple()
+    compact_level_edge_infoset = plan.compact_level_edge_infoset if plan is not None else tuple()
+    compact_level_edge_slot = plan.compact_level_edge_slot if plan is not None else tuple()
+    compact_level_edge_kind = plan.compact_level_edge_kind if plan is not None else tuple()
+    compact_level_edge_prob = plan.compact_level_edge_prob if plan is not None else tuple()
     infoset_blocks = plan.infoset_blocks if plan is not None else tuple()
     return PackedGpuSolveState(
         packed=packed,
@@ -350,6 +356,12 @@ def _make_gpu_state(
         level_edge_slot=level_edge_slot,
         level_edge_kind=level_edge_kind,
         level_edge_prob=level_edge_prob,
+        compact_level_edge_src=compact_level_edge_src,
+        compact_level_edge_dst=compact_level_edge_dst,
+        compact_level_edge_infoset=compact_level_edge_infoset,
+        compact_level_edge_slot=compact_level_edge_slot,
+        compact_level_edge_kind=compact_level_edge_kind,
+        compact_level_edge_prob=compact_level_edge_prob,
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
         infoset_blocks=infoset_blocks,
@@ -446,6 +458,7 @@ def _run_gpu_solve(
             state.action_slot_index,
             state.action_counts,
             state.packed.legal_action_mask,
+            state.infoset_blocks,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
@@ -498,6 +511,7 @@ def _run_gpu_solve(
         state.action_slot_index,
         state.action_counts,
         state.packed.legal_action_mask,
+        state.infoset_blocks,
     )
     propagate_node_ranges(state)
     forward_pass_gpu(
