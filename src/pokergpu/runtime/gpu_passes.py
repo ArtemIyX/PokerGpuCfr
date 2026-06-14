@@ -101,42 +101,9 @@ def _regret_matching_table_inplace_impl(
     valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
     if legal_action_mask is not None and legal_action_mask.numel() >= limit:
         valid = valid & legal_action_mask[:limit]
-    if not bool(valid.any()):
-        return out
-    if infoset_blocks is not None and len(infoset_blocks) == num_infosets:
-        for infoset_index, block in enumerate(infoset_blocks):
-            if block.numel() == 0:
-                continue
-            block = block.to(device=out.device)
-            block_limit = min(int(block.numel()), max_actions)
-            flat = block[:block_limit]
-            if flat.numel() == 0:
-                continue
-            block_infosets = action_infoset_index[flat]
-            block_slots = action_slot_index[flat]
-            block_regrets = torch.clamp(regrets[flat], min=0.0)
-            block_valid = (
-                (block_infosets == infoset_index)
-                & (block_slots >= 0)
-                & (block_slots < max_actions)
-            )
-            if legal_action_mask is not None and legal_action_mask.numel() >= limit:
-                block_valid = block_valid & legal_action_mask[flat]
-            if not bool(block_valid.any()):
-                continue
-            slots = block_slots[block_valid]
-            values = block_regrets[block_valid]
-            out[infoset_index, slots] = values
-            total = float(values.sum().item())
-            if total > 0.0:
-                out[infoset_index, : max_actions] = out[infoset_index, : max_actions] / total
-            else:
-                count = int(action_counts[infoset_index].clamp_min(1).item())
-                out[infoset_index, :count] = 1.0 / float(count)
-        return out
-    infosets = action_infoset_index[valid]
-    slots = action_slot_index[valid]
-    values = torch.clamp(regrets[valid], min=0.0)
+    infosets = action_infoset_index.clamp(0, num_infosets - 1)
+    slots = action_slot_index.clamp(0, max_actions - 1)
+    values = torch.clamp(regrets, min=0.0) * valid.to(regrets.dtype)
     out.index_put_((infosets, slots), values, accumulate=False)
     totals = torch.zeros(num_infosets, dtype=torch.float32, device=out.device)
     totals.scatter_add_(0, infosets, values)
@@ -337,8 +304,7 @@ def run_compact_iteration_gpu(
             print("warn::missing_compact_edge_block", len(state.compact_backward_edge_src), len(state.compact_backward_edge_dst))
         if root_children is None or int(root_children.numel()) == 0:
             print("warn::missing_root_children")
-        nonzero = torch.nonzero(out_p0 != 0, as_tuple=False).flatten()
-        if int(nonzero.numel()) == 0:
+        if float(torch.sum(torch.abs(out_p0)).item()) == 0.0:
             print("warn::backward_p0_all_zero")
         if root_children is not None and int(root_children.numel()) > 0 and len(state.compact_backward_edge_dst) > 0:
             hits = torch.zeros(root_children.shape[0], dtype=torch.bool, device=root_children.device)
@@ -402,6 +368,7 @@ def _compact_pass_impl(
             return
         if edge_infoset is None or edge_slot is None:
             probs = edge_prob.unsqueeze(1)
+            edge_dst = edge_dst.clamp(0, node_range_p0.numel() - 1)
             node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * probs)
             node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * probs)
             return
@@ -410,6 +377,7 @@ def _compact_pass_impl(
         else:
             probs = strategy_table.view(-1).index_select(0, edge_flat)
         weights = probs.unsqueeze(1)
+        edge_dst = edge_dst.clamp(0, node_range_p0.numel() - 1)
         node_range_p0.index_add_(0, edge_dst, node_range_p0[edge_src] * weights)
         node_range_p1.index_add_(0, edge_dst, node_range_p1[edge_src] * weights)
         return
@@ -417,12 +385,9 @@ def _compact_pass_impl(
         if out_p0 is None or out_p1 is None:
             return
         valid = (edge_dst >= 0) & (edge_dst < out_p0.numel())
-        if not bool(valid.any()):
-            return
-        edge_src = edge_src[valid]
-        edge_dst = edge_dst[valid]
-        child_p0 = out_p0[edge_dst]
-        child_p1 = out_p1[edge_dst]
+        edge_dst = edge_dst.clamp(0, out_p0.numel() - 1)
+        child_p0 = out_p0[edge_dst] * valid.to(out_p0.dtype)
+        child_p1 = out_p1[edge_dst] * valid.to(out_p1.dtype)
         if edge_infoset is None or edge_slot is None:
             out_p0.index_add_(0, edge_src, edge_prob * child_p0)
             out_p1.index_add_(0, edge_src, edge_prob * child_p1)
@@ -449,18 +414,14 @@ def _compact_pass_impl(
         if edge_infoset is None or edge_slot is None:
             return
         valid = (edge_flat >= 0) & (edge_flat < strategy_table.numel()) & (edge_dst >= 0) & (edge_dst < node_values_p0.numel())
-        if not bool(valid.any()):
-            return
-        edge_src = edge_src[valid]
-        edge_dst = edge_dst[valid]
-        edge_infoset = edge_infoset[valid]
-        edge_slot = edge_slot[valid]
-        flat = action_offsets[edge_infoset] + edge_slot
-        child_values = node_values_p0[edge_dst]
-        strat = strategy_table.view(-1).index_select(0, flat)
+        edge_dst = edge_dst.clamp(0, node_values_p0.numel() - 1)
+        child_values = node_values_p0[edge_dst] * valid.to(node_values_p0.dtype)
+        flat = (action_offsets[edge_infoset.clamp(0, action_offsets.numel() - 1)] + edge_slot).clamp(0, strategy_table.numel() - 1)
+        strat = strategy_table.view(-1).index_select(0, flat) * valid.to(strategy_table.dtype)
         infoset_values = torch.zeros(action_counts.numel(), dtype=torch.float32, device=regrets.device)
-        infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
-        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
+        infoset_values.scatter_add_(0, edge_infoset.clamp(0, action_counts.numel() - 1), strat * child_values)
+        edge_infoset_safe = edge_infoset.clamp(0, action_counts.numel() - 1)
+        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset_safe])
         strategy_sums.index_add_(0, flat, strat)
 
 

@@ -756,9 +756,8 @@ def _root_action_values_from_backward(
         return np.zeros(0, dtype=np.float32)
     child_nodes = plan.root_child_nodes[:limit].to(device=backward_p0.device)
     valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
-    values = torch.zeros(limit, dtype=torch.float32, device=backward_p0.device)
-    if bool(valid.any()):
-        values[valid] = backward_p0[child_nodes[valid]]
+    safe_child_nodes = child_nodes.clamp(0, max(0, backward_p0.numel() - 1))
+    values = backward_p0[safe_child_nodes] * valid.to(backward_p0.dtype)
     return values.detach().cpu().numpy().astype(np.float32, copy=False)
 
 
