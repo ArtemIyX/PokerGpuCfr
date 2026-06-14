@@ -149,7 +149,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=64)
     parser.add_argument("--time-budget-sec", type=float, default=0.0)
     parser.add_argument("--max-depth", type=int, default=2)
-    parser.add_argument("--max-nodes", type=int, default=64)
+    parser.add_argument("--max-nodes", type=int, default=256)
     parser.add_argument("--min-reach-prob", type=float, default=0.0)
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--debug", action="store_true")

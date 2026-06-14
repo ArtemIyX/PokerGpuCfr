@@ -222,13 +222,23 @@ def run_compact_iteration_gpu(
 ) -> None:
     with record_function("solve::leaf_eval"):
         frontier_count = state.frontier_count
+        leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
         if frontier_count > 0:
             leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
-            leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
             ev0 = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
             ev1 = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
             out_p0[leaf_slice].copy_(ev0)
             out_p1[leaf_slice].copy_(ev1)
+        chance_count = int(state.packed.chance_child_nodes.numel())
+        if chance_count > 0:
+            chance_values = evaluator.evaluate(state.packed.chance_leaf_feature_batch)
+            chance_nodes = state.packed.chance_child_nodes
+            ev0 = torch.as_tensor(chance_values.ev_player0, dtype=torch.float32, device=out_p0.device)
+            ev1 = torch.as_tensor(chance_values.ev_player1, dtype=torch.float32, device=out_p1.device)
+            valid = (chance_nodes >= 0) & (chance_nodes < out_p0.numel())
+            if bool(valid.any()):
+                out_p0.index_copy_(0, chance_nodes[valid], ev0[valid])
+                out_p1.index_copy_(0, chance_nodes[valid], ev1[valid])
             if debug:
                 print(
                     "debug::leaf",

@@ -152,6 +152,7 @@ class BatchedGpuPlan:
     infoset_blocks: tuple[torch.Tensor, ...]
     frontier_nodes: torch.Tensor
     frontier_leaf_batch: LeafFeatureBatch
+    root_branch_nodes: torch.Tensor
     root_child_nodes: torch.Tensor
     root_child_parent_infoset: int
     action_counts: torch.Tensor

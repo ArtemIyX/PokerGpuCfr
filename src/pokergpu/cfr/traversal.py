@@ -209,6 +209,31 @@ def evaluate_frontier_nodes(
     return frontier_nodes, evaluator.evaluate(batch)
 
 
+def evaluate_chance_children(
+    tree: PublicTree,
+    evaluator: LeafEvaluator,
+    *,
+    node_states: tuple[GameState, ...] | None = None,
+) -> tuple[tuple[int, ...], LeafValueBatch]:
+    chance_children: list[int] = []
+    for node_index in range(tree.node_count):
+        if tree.node_types[node_index] is not NodeType.CHANCE:
+            continue
+        links = tree.child_links(NodeId(node_index))
+        for link in links:
+            chance_children.append(int(link.child))
+    if not chance_children:
+        return (), evaluator.evaluate(
+            build_leaf_feature_batch(tree, (), node_states=node_states)
+        )
+    batch = build_leaf_feature_batch(
+        tree,
+        tuple(chance_children),
+        node_states=node_states,
+    )
+    return tuple(chance_children), evaluator.evaluate(batch)
+
+
 def compute_reach_probabilities(
     tree: PublicTree,
     store: InfosetStore,

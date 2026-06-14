@@ -35,6 +35,11 @@ def compile_packed_subtree(
         for index in level
         if flat.is_frontier[index] and flat.node_type[index] is not NodeType.TERMINAL
     ]
+    chance_child_list = [
+        int(flat.edge_child[i])
+        for i in range(len(flat.edge_child))
+        if flat.node_type[flat.edge_parent[i]] is NodeType.CHANCE
+    ]
     infoset_remap: dict[int, int] = {}
     compact_infoset_ids: list[int] = []
     for infoset in flat.infoset_id:
@@ -60,10 +65,16 @@ def compile_packed_subtree(
     chance_prob = torch.as_tensor([flat.edge_chance_prob[i] for i in range(len(flat.edge_chance_prob))], dtype=torch.float32, device=device)
     children = torch.as_tensor([int(flat.edge_child[i]) for i in range(len(flat.edge_child))], dtype=torch.int64, device=device)
     frontier_nodes = torch.as_tensor(tuple(frontier_node_list), dtype=torch.int64, device=device)
+    chance_child_nodes = torch.as_tensor(tuple(chance_child_list), dtype=torch.int64, device=device)
     frontier_node_indices = tuple(int(index) for index in frontier_nodes.tolist())
     leaf_feature_batch = build_leaf_feature_batch(
         tree.tree,
         frontier_node_indices,
+        node_states=tree.node_states,
+    )
+    chance_leaf_feature_batch = build_leaf_feature_batch(
+        tree.tree,
+        tuple(chance_child_list),
         node_states=tree.node_states,
     )
     leaf_feature_tensors = build_gpu_leaf_tensors(leaf_feature_batch, torch.device(device))
@@ -89,7 +100,9 @@ def compile_packed_subtree(
         action_slot=action_slot,
         chance_prob=chance_prob,
         frontier_nodes=frontier_nodes,
+        chance_child_nodes=chance_child_nodes,
         leaf_feature_batch=leaf_feature_batch,
+        chance_leaf_feature_batch=chance_leaf_feature_batch,
         leaf_feature_tensors=leaf_feature_tensors,
         action_infoset_index=action_infoset_index,
         action_slot_index=action_slot_index,

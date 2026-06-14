@@ -76,6 +76,10 @@ def root_child_nodes(tree: BuiltPublicTree) -> tuple[int, ...]:
     return tuple(int(tree.tree.children[start + index].child) for index in range(count))
 
 
+def root_branch_nodes(tree: BuiltPublicTree) -> tuple[int, ...]:
+    return root_child_nodes(tree)
+
+
 def node_type_code(node_type: NodeType) -> int:
     if node_type is NodeType.CHANCE:
         return 0
@@ -482,6 +486,7 @@ def build_batched_gpu_plan(
         infoset_blocks=infoset_blocks,
         frontier_nodes=torch.as_tensor(frontier_nodes, dtype=torch.int64, device=device),
         frontier_leaf_batch=frontier_leaf_batch,
+        root_branch_nodes=torch.as_tensor(root_children, dtype=torch.int64, device=device),
         root_child_nodes=torch.as_tensor(root_children, dtype=torch.int64, device=device),
         root_child_parent_infoset=int(tree.tree.infoset_ids[0] or 0),
         action_counts=action_counts,

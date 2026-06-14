@@ -191,7 +191,9 @@ class PackedGpuSubtree:
     action_slot: Any
     chance_prob: Any
     frontier_nodes: Any
+    chance_child_nodes: Any
     leaf_feature_batch: Any
+    chance_leaf_feature_batch: Any
     leaf_feature_tensors: Any
     action_infoset_index: Any
     action_slot_index: Any
@@ -317,6 +319,7 @@ class PackedGpuSolveState:
     frontier_range_p0: Any
     frontier_range_p1: Any
     frontier_range_p2: Any
+    root_branch_nodes: Any
     root_child_nodes: Any
     root_action_ev_buffer: Any
     root_child_parent_infoset: int = -1

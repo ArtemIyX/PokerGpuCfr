@@ -446,7 +446,8 @@ def _make_gpu_state(
         frontier_range_p0=frontier_range_p0,
         frontier_range_p1=frontier_range_p1,
         frontier_range_p2=frontier_range_p2,
-        root_child_nodes=plan.root_child_nodes if plan is not None else tuple(),
+        root_branch_nodes=plan.root_branch_nodes if plan is not None else torch.zeros(0, dtype=torch.int64, device=device),
+        root_child_nodes=plan.root_child_nodes if plan is not None else torch.zeros(0, dtype=torch.int64, device=device),
         root_action_ev_buffer=root_action_ev_buffer,
     )
 
@@ -767,7 +768,7 @@ def _root_action_values_from_backward(
     limit = int(plan.root_child_nodes.numel())
     if limit <= 0:
         return np.zeros(0, dtype=np.float32)
-    child_nodes = plan.root_child_nodes[:limit]
+    child_nodes = plan.root_branch_nodes[:limit]
     valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
     safe_child_nodes = child_nodes.clamp(0, max(0, backward_p0.numel() - 1))
     values = backward_p0[safe_child_nodes] * valid.to(backward_p0.dtype)
