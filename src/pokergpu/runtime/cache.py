@@ -275,6 +275,7 @@ class PackedGpuSolveState:
     compact_level_edge_slot: Any
     compact_level_edge_kind: Any
     compact_level_edge_prob: Any
+    compact_level_edge_flat: Any
     compact_level_edge_src_chance: Any
     compact_level_edge_dst_chance: Any
     compact_level_edge_prob_chance: Any
@@ -298,6 +299,7 @@ class PackedGpuSolveState:
     compact_backward_edge_slot: Any
     compact_backward_edge_kind: Any
     compact_backward_edge_prob: Any
+    compact_backward_edge_flat: Any
     compact_backward_edge_src_chance: Any
     compact_backward_edge_dst_chance: Any
     compact_backward_edge_prob_chance: Any

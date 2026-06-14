@@ -335,6 +335,7 @@ def _make_gpu_state(
     compact_level_edge_slot_p1 = plan.compact_level_edge_slot_p1 if plan is not None else tuple()
     compact_level_edge_flat_p1 = plan.compact_level_edge_flat_p1 if plan is not None else tuple()
     compact_level_edge_prob_p1 = plan.compact_level_edge_prob_p1 if plan is not None else tuple()
+    compact_level_edge_flat = plan.compact_level_edge_flat if plan is not None else tuple()
     infoset_blocks = plan.infoset_blocks if plan is not None else tuple()
     frontier_leaf_tensors = build_gpu_leaf_tensors(packed.leaf_feature_batch, device) if packed.leaf_feature_batch.size > 0 else None
     if frontier_leaf_tensors is not None:
@@ -402,6 +403,7 @@ def _make_gpu_state(
         compact_level_edge_slot=compact_level_edge_slot,
         compact_level_edge_kind=compact_level_edge_kind,
         compact_level_edge_prob=compact_level_edge_prob,
+        compact_level_edge_flat=compact_level_edge_flat,
         compact_level_edge_src_chance=compact_level_edge_src_chance,
         compact_level_edge_dst_chance=compact_level_edge_dst_chance,
         compact_level_edge_prob_chance=compact_level_edge_prob_chance,
@@ -423,6 +425,7 @@ def _make_gpu_state(
         compact_backward_edge_slot=plan.compact_backward_edge_slot if plan is not None else tuple(),
         compact_backward_edge_kind=plan.compact_backward_edge_kind if plan is not None else tuple(),
         compact_backward_edge_prob=plan.compact_backward_edge_prob if plan is not None else tuple(),
+        compact_backward_edge_flat=plan.compact_backward_edge_flat if plan is not None else tuple(),
         compact_backward_edge_src_chance=plan.compact_backward_edge_src_chance if plan is not None else tuple(),
         compact_backward_edge_dst_chance=plan.compact_backward_edge_dst_chance if plan is not None else tuple(),
         compact_backward_edge_prob_chance=plan.compact_backward_edge_prob_chance if plan is not None else tuple(),

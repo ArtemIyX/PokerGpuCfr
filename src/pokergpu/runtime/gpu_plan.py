@@ -205,6 +205,7 @@ def build_batched_gpu_plan(
     compact_level_edge_slot_p1: list[torch.Tensor] = []
     compact_level_edge_flat_p1: list[torch.Tensor] = []
     compact_level_edge_prob_p1: list[torch.Tensor] = []
+    compact_level_edge_flat: list[torch.Tensor] = []
     backward_edge_src: list[torch.Tensor] = []
     backward_edge_dst: list[torch.Tensor] = []
     backward_edge_infoset: list[torch.Tensor] = []
@@ -251,6 +252,7 @@ def build_batched_gpu_plan(
         compact_level_edge_slot_p1.append(slot[p1_mask])
         compact_level_edge_flat_p1.append(infoset[p1_mask] * max_actions + slot[p1_mask])
         compact_level_edge_prob_p1.append(prob[p1_mask])
+        compact_level_edge_flat.append(infoset * max_actions + slot)
     for level_tensor in level_nodes:
         level_set = set(int(i) for i in level_tensor.tolist())
         level_frontier_mask.append(torch.as_tensor([flat_view.is_frontier[int(i)] for i in level_tensor.tolist()], dtype=torch.bool, device=device))
@@ -301,7 +303,7 @@ def build_batched_gpu_plan(
             slot=_concat_level_tensors(level_edge_slot, level_indices, device=device),
             kind=_concat_level_tensors(level_edge_kind, level_indices, device=device),
             prob=_concat_level_tensors(level_edge_prob, level_indices, device=device),
-            flat=torch.empty(0, dtype=torch.int64, device=device),
+            flat=_concat_level_tensors(compact_level_edge_flat, level_indices, device=device),
             chance_src=torch.empty(0, dtype=torch.int64, device=device),
             chance_dst=torch.empty(0, dtype=torch.int64, device=device),
             chance_prob=torch.empty(0, dtype=torch.float32, device=device),
@@ -445,6 +447,7 @@ def build_batched_gpu_plan(
         compact_level_edge_slot=tuple(compact_level_edge_slot),
         compact_level_edge_kind=tuple(compact_level_edge_kind),
         compact_level_edge_prob=tuple(compact_level_edge_prob),
+        compact_level_edge_flat=tuple(compact_level_edge_flat),
         compact_level_edge_src_chance=tuple(compact_level_edge_src_chance),
         compact_level_edge_dst_chance=tuple(compact_level_edge_dst_chance),
         compact_level_edge_prob_chance=tuple(compact_level_edge_prob_chance),
@@ -466,6 +469,7 @@ def build_batched_gpu_plan(
         compact_backward_edge_slot=tuple(group.slot for group in compact_backward_groups),
         compact_backward_edge_kind=tuple(group.kind for group in compact_backward_groups),
         compact_backward_edge_prob=tuple(group.prob for group in compact_backward_groups),
+        compact_backward_edge_flat=tuple(group.flat for group in compact_backward_groups),
         compact_backward_edge_src_chance=tuple(backward_edge_src_chance),
         compact_backward_edge_dst_chance=tuple(backward_edge_dst_chance),
         compact_backward_edge_prob_chance=tuple(backward_edge_prob_chance),
