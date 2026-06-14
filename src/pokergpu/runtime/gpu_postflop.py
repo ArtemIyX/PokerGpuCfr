@@ -472,10 +472,8 @@ def _make_gpu_state(
     node_range_p3 = torch.zeros_like(node_range_p0)
     node_range_p4 = torch.zeros_like(node_range_p0)
     node_range_p5 = torch.zeros_like(node_range_p0)
-    forward_reach_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
-    forward_reach_p1 = torch.zeros_like(forward_reach_p0)
-    backward_p0 = torch.zeros_like(forward_reach_p0)
-    backward_p1 = torch.zeros_like(forward_reach_p0)
+    backward_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
+    backward_p1 = torch.zeros_like(backward_p0)
     leaf_values_p0 = torch.zeros(packed.leaf_count, dtype=torch.float32, device=device)
     leaf_values_p1 = torch.zeros_like(leaf_values_p0)
     root_action_ev_p0 = torch.zeros(packed.max_actions, dtype=torch.float32, device=device)
@@ -503,8 +501,6 @@ def _make_gpu_state(
         action_slot_index=packed.action_slot_index,
         action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
         action_counts=torch.as_tensor(layout.action_counts, dtype=torch.int64, device=device),
-        forward_reach_p0=forward_reach_p0,
-        forward_reach_p1=forward_reach_p1,
         backward_p0=backward_p0,
         backward_p1=backward_p1,
         leaf_values_p0=leaf_values_p0,
@@ -633,8 +629,6 @@ def _run_gpu_solve(
     regrets = state.regrets
     strategy_sums = state.strategy_sums
     strategy_table = state.strategy_table
-    forward_reach_p0 = state.forward_reach_p0
-    forward_reach_p1 = state.forward_reach_p1
     backward_p0 = state.backward_p0
     backward_p1 = state.backward_p1
 
@@ -665,11 +659,7 @@ def _run_gpu_solve(
 
         started_phase = time.monotonic()
         _propagate_node_ranges(state)
-        forward_reach_p0.zero_()
-        forward_reach_p1.zero_()
-        forward_reach_p0[0] = 1.0
-        forward_reach_p1[0] = 1.0
-        _forward_pass_gpu(state, strategy_table, forward_reach_p0, forward_reach_p1)
+        _forward_pass_gpu(state, strategy_table, state.node_range_p0, state.node_range_p1)
         phase_seconds["forward"] += time.monotonic() - started_phase
 
         started_phase = time.monotonic()
@@ -710,11 +700,7 @@ def _run_gpu_solve(
         state.packed.legal_action_mask,
     )
     _propagate_node_ranges(state)
-    forward_reach_p0.zero_()
-    forward_reach_p1.zero_()
-    forward_reach_p0[0] = 1.0
-    forward_reach_p1[0] = 1.0
-    _forward_pass_gpu(state, strategy_table, forward_reach_p0, forward_reach_p1)
+    _forward_pass_gpu(state, strategy_table, state.node_range_p0, state.node_range_p1)
     backward_p0.zero_()
     backward_p1.zero_()
     _backward_pass_gpu(

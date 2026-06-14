@@ -241,8 +241,6 @@ class PackedGpuSolveState:
     action_slot_index: Any
     action_offsets: Any
     action_counts: Any
-    forward_reach_p0: Any
-    forward_reach_p1: Any
     backward_p0: Any
     backward_p1: Any
     leaf_values_p0: Any
