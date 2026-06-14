@@ -490,14 +490,7 @@ def _compact_pass_impl(
 
 
 def _compiled_compact_pass_impl() -> Any:
-    if not _COMPACT_COMPILE_ENABLED:
-        return _compact_pass_impl
-    if not hasattr(torch, "compile"):
-        return _compact_pass_impl
-    try:
-        return torch.compile(_compact_pass_impl, fullgraph=False, dynamic=True)
-    except Exception:
-        return _compact_pass_impl
+    return _compact_pass_impl
 
 
 _COMPACT_PASS_IMPL = _compiled_compact_pass_impl()
