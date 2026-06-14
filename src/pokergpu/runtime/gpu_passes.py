@@ -323,7 +323,6 @@ def run_compact_iteration_gpu(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
     evaluator: LeafEvaluator,
-    timings: dict[str, list[float]] | None = None,
 ) -> None:
     state.node_range_p0.zero_()
     state.node_range_p1.zero_()

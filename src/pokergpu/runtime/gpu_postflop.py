@@ -440,9 +440,6 @@ def _run_gpu_solve(
     compact_forward_level_sizes = tuple(len(level) for level in packed.plan.compact_forward_levels)
     compact_backward_level_sizes = tuple(len(level) for level in packed.plan.compact_backward_levels)
     infoset_block_sizes = tuple(int(block.numel()) for block in packed.plan.infoset_blocks)
-    compact_forward_phase_seconds = [0.0 for _ in packed.plan.compact_forward_levels]
-    compact_backward_phase_seconds = [0.0 for _ in packed.plan.compact_backward_levels]
-    compact_regret_phase_seconds = [0.0 for _ in packed.plan.compact_backward_levels]
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     target_iterations = max(0, int(spec.iterations))
     while (
@@ -462,11 +459,6 @@ def _run_gpu_solve(
             node_values_p0=backward_p0,
             node_values_p1=backward_p1,
             evaluator=evaluator_impl,
-            timings={
-                "forward": compact_forward_phase_seconds,
-                "backward": compact_backward_phase_seconds,
-                "regret": compact_regret_phase_seconds,
-            },
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
         iterations += 1
@@ -476,26 +468,6 @@ def _run_gpu_solve(
             break
 
     started_phase = time.monotonic()
-    run_compact_iteration_gpu(
-        state,
-        strategy_table,
-        node_range_p0=state.node_range_p0,
-        node_range_p1=state.node_range_p1,
-        out_p0=backward_p0,
-        out_p1=backward_p1,
-        regrets=regrets,
-        strategy_sums=strategy_sums,
-        node_values_p0=backward_p0,
-        node_values_p1=backward_p1,
-        evaluator=evaluator_impl,
-        timings={
-            "forward": compact_forward_phase_seconds,
-            "backward": compact_backward_phase_seconds,
-            "regret": compact_regret_phase_seconds,
-        },
-    )
-    phase_seconds["finalize"] += time.monotonic() - started_phase
-
     root_strategy = average_strategy_from_gpu(
         strategy_sums,
         state.action_counts,
@@ -509,6 +481,7 @@ def _run_gpu_solve(
         backward_p1,
         root_infoset,
     )
+    phase_seconds["finalize"] += time.monotonic() - started_phase
     root_action_ev_p1 = -root_action_ev_p0
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
     if bb_scale <= 0.0:
@@ -538,11 +511,7 @@ def _run_gpu_solve(
         compact_forward_level_sizes=compact_forward_level_sizes,
         compact_backward_level_sizes=compact_backward_level_sizes,
         infoset_block_sizes=infoset_block_sizes,
-        compact_phase_seconds={
-            "forward": tuple(compact_forward_phase_seconds),
-            "backward": tuple(compact_backward_phase_seconds),
-            "regret": tuple(compact_regret_phase_seconds),
-        },
+        compact_phase_seconds={},
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,

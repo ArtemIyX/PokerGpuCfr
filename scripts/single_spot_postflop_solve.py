@@ -28,6 +28,9 @@ from pokergpu.runtime.gpu_postflop import _prepare_gpu_solve, _run_gpu_solve
 from pokergpu.runtime.postflop import PostflopResolveSpec
 from pokergpu.runtime.value_network import default_postflop_leaf_evaluator
 
+import torch
+from torch.profiler import ProfilerActivity, profile
+
 
 def main() -> None:
     args = _parse_args()
@@ -69,7 +72,16 @@ def main() -> None:
     evaluator = default_postflop_leaf_evaluator()
     started_at = time.monotonic()
     packed = _prepare_gpu_solve(spec)
-    trace = _run_gpu_solve(packed, evaluator)
+    if args.profile:
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=False,
+        ) as prof:
+            trace = _run_gpu_solve(packed, evaluator)
+        print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+    else:
+        trace = _run_gpu_solve(packed, evaluator)
     total_seconds = time.monotonic() - started_at
 
     print(
@@ -132,6 +144,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-depth", type=int, default=2)
     parser.add_argument("--max-nodes", type=int, default=64)
     parser.add_argument("--min-reach-prob", type=float, default=0.0)
+    parser.add_argument("--profile", action="store_true")
     return parser.parse_args()
 
 
