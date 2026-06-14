@@ -72,7 +72,7 @@ def main() -> None:
     evaluator = CpuStubLeafEvaluator()
     started_at = time.monotonic()
     packed = _prepare_gpu_solve(spec)
-    warmup_trace = _run_gpu_solve(packed, evaluator)
+    warmup_trace = _run_gpu_solve(packed, evaluator, debug=args.debug)
     if args.profile:
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -80,7 +80,7 @@ def main() -> None:
             profile_memory=False,
         ) as prof:
             with record_function("solve::run_gpu_solve"):
-                trace = _run_gpu_solve(packed, evaluator)
+                trace = _run_gpu_solve(packed, evaluator, debug=args.debug)
         print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
     else:
         trace = warmup_trace
@@ -105,7 +105,6 @@ def main() -> None:
                     "level_frontier_counts": list(trace.level_frontier_counts),
                     "compact_forward_level_sizes": list(trace.compact_forward_level_sizes),
                     "compact_backward_level_sizes": list(trace.compact_backward_level_sizes),
-                    "infoset_block_sizes": list(trace.infoset_block_sizes),
                     "frontier_batch_size": int(packed.plan.frontier_nodes.numel()),
                 },
                 "timing": {
@@ -147,6 +146,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-nodes", type=int, default=64)
     parser.add_argument("--min-reach-prob", type=float, default=0.0)
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
 

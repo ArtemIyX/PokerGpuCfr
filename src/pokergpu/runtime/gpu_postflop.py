@@ -35,6 +35,7 @@ from .gpu_compile import compile_packed_subtree
 from .gpu_passes import (
     average_strategy_from_gpu,
     make_cpu_store,
+    regret_matching_table_inplace,
     run_compact_iteration_gpu,
 )
 from .gpu_plan import build_batched_gpu_plan, init_gpu_ranges
@@ -215,6 +216,16 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         ),
     )
     _load_warm_start_into_gpu_state(packed, spec)
+    state = packed.gpu_state
+    if state is None:
+        raise RuntimeError("gpu state must be initialized")
+    regret_matching_table_inplace(
+        state.strategy_table,
+        state.regrets,
+        state.action_infoset_index,
+        state.action_slot_index,
+        state.action_counts,
+    )
     _GPU_PLAN_CACHE.put(cache_key, packed)
     if spec.cache_state is not None:
         spec.cache_state.store_tree_template(_tree_template_cache_key(spec), tree.template)
@@ -368,6 +379,12 @@ def _make_gpu_state(
         compact_level_edge_slot=compact_level_edge_slot,
         compact_level_edge_kind=compact_level_edge_kind,
         compact_level_edge_prob=compact_level_edge_prob,
+        compact_backward_edge_src=plan.compact_backward_edge_src if plan is not None else tuple(),
+        compact_backward_edge_dst=plan.compact_backward_edge_dst if plan is not None else tuple(),
+        compact_backward_edge_infoset=plan.compact_backward_edge_infoset if plan is not None else tuple(),
+        compact_backward_edge_slot=plan.compact_backward_edge_slot if plan is not None else tuple(),
+        compact_backward_edge_kind=plan.compact_backward_edge_kind if plan is not None else tuple(),
+        compact_backward_edge_prob=plan.compact_backward_edge_prob if plan is not None else tuple(),
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
         infoset_blocks=infoset_blocks,
@@ -376,7 +393,7 @@ def _make_gpu_state(
         frontier_range_p0=frontier_range_p0,
         frontier_range_p1=frontier_range_p1,
         frontier_range_p2=frontier_range_p2,
-        root_child_nodes=tuple(),
+        root_child_nodes=plan.root_child_nodes if plan is not None else tuple(),
     )
 
 
@@ -403,6 +420,8 @@ def _finish_gpu_solve(
 def _run_gpu_solve(
     packed: PackedGpuSolve,
     evaluator_impl: LeafEvaluator,
+    *,
+    debug: bool = False,
 ) -> GpuSolveTrace:
     spec = packed.spec
     tree = packed.tree
@@ -451,7 +470,6 @@ def _run_gpu_solve(
     level_frontier_counts = tuple(int(mask.sum().item()) for mask in packed.plan.level_frontier_mask)
     compact_forward_level_sizes = tuple(len(level) for level in packed.plan.compact_forward_levels)
     compact_backward_level_sizes = tuple(len(level) for level in packed.plan.compact_backward_levels)
-    infoset_block_sizes = tuple(int(block.numel()) for block in packed.plan.infoset_blocks)
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     target_iterations = max(0, int(spec.iterations))
     while (
@@ -471,6 +489,7 @@ def _run_gpu_solve(
             node_values_p0=backward_p0,
             node_values_p1=backward_p1,
             evaluator=evaluator_impl,
+            debug=debug,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
         iterations += 1
@@ -493,6 +512,8 @@ def _run_gpu_solve(
         backward_p1,
         root_infoset,
     )
+    if debug:
+        print("debug::root_action_raw", root_action_ev_p0.tolist())
     phase_seconds["finalize"] += time.monotonic() - started_phase
     root_action_ev_p1 = -root_action_ev_p0
     bb_scale = float(spec.state.betting_round.blinds.big_blind)
@@ -522,7 +543,6 @@ def _run_gpu_solve(
         level_frontier_counts=level_frontier_counts,
         compact_forward_level_sizes=compact_forward_level_sizes,
         compact_backward_level_sizes=compact_backward_level_sizes,
-        infoset_block_sizes=infoset_block_sizes,
         compact_phase_seconds={},
         node_count=node_count,
         leaf_count=leaf_count,

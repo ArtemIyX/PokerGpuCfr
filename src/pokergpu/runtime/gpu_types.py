@@ -83,6 +83,12 @@ class BatchedGpuPlan:
     compact_level_edge_slot: tuple[torch.Tensor, ...]
     compact_level_edge_kind: tuple[torch.Tensor, ...]
     compact_level_edge_prob: tuple[torch.Tensor, ...]
+    compact_backward_edge_src: tuple[torch.Tensor, ...]
+    compact_backward_edge_dst: tuple[torch.Tensor, ...]
+    compact_backward_edge_infoset: tuple[torch.Tensor, ...]
+    compact_backward_edge_slot: tuple[torch.Tensor, ...]
+    compact_backward_edge_kind: tuple[torch.Tensor, ...]
+    compact_backward_edge_prob: tuple[torch.Tensor, ...]
     compact_forward_levels: tuple[tuple[int, ...], ...]
     compact_backward_levels: tuple[tuple[int, ...], ...]
     infoset_blocks: tuple[torch.Tensor, ...]
@@ -105,7 +111,6 @@ class GpuSolveTrace:
     level_frontier_counts: tuple[int, ...]
     compact_forward_level_sizes: tuple[int, ...]
     compact_backward_level_sizes: tuple[int, ...]
-    infoset_block_sizes: tuple[int, ...]
     compact_phase_seconds: dict[str, tuple[float, ...]]
     node_count: int
     leaf_count: int

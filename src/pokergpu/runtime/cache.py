@@ -269,6 +269,12 @@ class PackedGpuSolveState:
     compact_level_edge_slot: Any
     compact_level_edge_kind: Any
     compact_level_edge_prob: Any
+    compact_backward_edge_src: Any
+    compact_backward_edge_dst: Any
+    compact_backward_edge_infoset: Any
+    compact_backward_edge_slot: Any
+    compact_backward_edge_kind: Any
+    compact_backward_edge_prob: Any
     compact_forward_levels: Any
     compact_backward_levels: Any
     infoset_blocks: Any
