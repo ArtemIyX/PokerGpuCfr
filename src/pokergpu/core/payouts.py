@@ -50,7 +50,10 @@ def compute_payouts(
     evaluator_instance = evaluator or TreysHandEvaluator()
     contenders = tuple(player for player in active_players(state) if player.hole_cards)
     if not contenders:
-        raise ValueError("showdown requires at least one player with hole cards")
+        return tuple(
+            Payout(player=player.player, amount=zero_payouts[player.player])
+            for player in state.players
+        )
 
     scores: dict[PlayerIndex, int] = {}
     for player in contenders:

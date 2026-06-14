@@ -115,6 +115,7 @@ class GpuSolveTrace:
     level_frontier_counts: tuple[int, ...]
     compact_forward_level_sizes: tuple[int, ...]
     compact_backward_level_sizes: tuple[int, ...]
+    compact_phase_seconds: dict[str, tuple[float, ...]]
     node_count: int
     leaf_count: int
     root_strategy: np.ndarray
@@ -260,8 +261,8 @@ def _build_batched_gpu_plan(
     level_edge_slot: list[torch.Tensor] = []
     level_edge_kind: list[torch.Tensor] = []
     level_edge_prob: list[torch.Tensor] = []
-    compact_forward_levels = _merge_level_schedule(levels.forward_levels)
-    compact_backward_levels = _merge_level_schedule(levels.backward_levels)
+    compact_forward_levels = _compact_level_schedule(levels.forward_levels)
+    compact_backward_levels = _compact_level_schedule(levels.backward_levels)
     for level in levels.forward_levels:
         forward_levels.append(_build_level_plan(tree, level, actions_by_node, device=device))
     for level in levels.backward_levels:
@@ -368,6 +369,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
                 cached.packed_subtree,
                 cached.layout,
                 cached.root_ranges,
+                plan=cached.plan,
                 compact_forward_levels=cached.plan.compact_forward_levels,
                 compact_backward_levels=cached.plan.compact_backward_levels,
             ),
@@ -410,6 +412,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
             packed.packed_subtree,
             packed.layout,
             packed.root_ranges,
+            plan=plan,
             compact_forward_levels=plan.compact_forward_levels,
             compact_backward_levels=plan.compact_backward_levels,
         ),
@@ -479,6 +482,7 @@ def _make_gpu_state(
     layout: InfosetLayout,
     root_ranges: tuple[RangeVector, ...],
     *,
+    plan: BatchedGpuPlan | None = None,
     compact_forward_levels: tuple[tuple[int, ...], ...] = (),
     compact_backward_levels: tuple[tuple[int, ...], ...] = (),
 ) -> PackedGpuSolveState:
@@ -493,6 +497,14 @@ def _make_gpu_state(
     node_range_p2 = torch.zeros_like(node_range_p0)
     backward_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
     backward_p1 = torch.zeros_like(backward_p0)
+    level_edge_start = plan.level_edge_start if plan is not None else tuple()
+    level_edge_count = plan.level_edge_count if plan is not None else tuple()
+    level_edge_src = plan.level_edge_src if plan is not None else tuple()
+    level_edge_dst = plan.level_edge_dst if plan is not None else tuple()
+    level_edge_infoset = plan.level_edge_infoset if plan is not None else tuple()
+    level_edge_slot = plan.level_edge_slot if plan is not None else tuple()
+    level_edge_kind = plan.level_edge_kind if plan is not None else tuple()
+    level_edge_prob = plan.level_edge_prob if plan is not None else tuple()
     return PackedGpuSolveState(
         packed=packed,
         regrets=regrets,
@@ -529,14 +541,14 @@ def _make_gpu_state(
         level_player_mask=tuple(),
         level_legal_action_mask=tuple(),
         level_card_removal_mask=tuple(),
-        level_edge_start=tuple(),
-        level_edge_count=tuple(),
-        level_edge_src=tuple(),
-        level_edge_dst=tuple(),
-        level_edge_infoset=tuple(),
-        level_edge_slot=tuple(),
-        level_edge_kind=tuple(),
-        level_edge_prob=tuple(),
+        level_edge_start=level_edge_start,
+        level_edge_count=level_edge_count,
+        level_edge_src=level_edge_src,
+        level_edge_dst=level_edge_dst,
+        level_edge_infoset=level_edge_infoset,
+        level_edge_slot=level_edge_slot,
+        level_edge_kind=level_edge_kind,
+        level_edge_prob=level_edge_prob,
         compact_forward_levels=compact_forward_levels,
         compact_backward_levels=compact_backward_levels,
         root_child_nodes=tuple(),
@@ -553,12 +565,21 @@ def _regret_matching_table_inplace(
 ) -> torch.Tensor:
     out.zero_()
     num_infosets = int(action_counts.numel())
-    if num_infosets == 0 or action_infoset_index.numel() == 0:
+    limit = min(
+        int(regrets.numel()),
+        int(action_infoset_index.numel()),
+        int(action_slot_index.numel()),
+        int(legal_action_mask.numel()) if legal_action_mask is not None else int(action_infoset_index.numel()),
+    )
+    if num_infosets == 0 or limit == 0:
         return out
     max_actions = int(out.shape[1])
+    action_infoset_index = action_infoset_index[:limit]
+    action_slot_index = action_slot_index[:limit]
+    regrets = regrets[:limit]
     valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
-    if legal_action_mask is not None and legal_action_mask.numel() == valid.numel():
-        valid = valid & legal_action_mask
+    if legal_action_mask is not None and legal_action_mask.numel() >= limit:
+        valid = valid & legal_action_mask[:limit]
     if not bool(valid.any()):
         return out
     infosets = action_infoset_index[valid]
@@ -617,6 +638,7 @@ def _run_gpu_solve(
             packed.packed_subtree,
             packed.layout,
             packed.root_ranges,
+            plan=packed.plan,
             compact_forward_levels=packed.plan.compact_forward_levels,
             compact_backward_levels=packed.plan.compact_backward_levels,
         )
@@ -645,11 +667,14 @@ def _run_gpu_solve(
         "regret": 0.0,
         "finalize": 0.0,
     }
-    level_node_counts = tuple(int(level.numel()) for level in state.level_nodes)
-    level_edge_counts = tuple(int(level.numel()) for level in state.level_edge_dst)
-    level_frontier_counts = tuple(int(mask.sum().item()) for mask in state.level_frontier_mask)
+    level_node_counts = tuple(int(level.numel()) for level in packed.plan.level_nodes)
+    level_edge_counts = tuple(int(level.numel()) for level in packed.plan.level_edge_dst)
+    level_frontier_counts = tuple(int(mask.sum().item()) for mask in packed.plan.level_frontier_mask)
     compact_forward_level_sizes = tuple(len(level) for level in packed.plan.compact_forward_levels)
     compact_backward_level_sizes = tuple(len(level) for level in packed.plan.compact_backward_levels)
+    compact_forward_phase_seconds = [0.0 for _ in packed.plan.compact_forward_levels]
+    compact_backward_phase_seconds = [0.0 for _ in packed.plan.compact_backward_levels]
+    compact_regret_phase_seconds = [0.0 for _ in packed.plan.compact_backward_levels]
     deadline = time.monotonic() + max(0.0, spec.time_budget_sec)
     target_iterations = max(0, int(spec.iterations))
     while (
@@ -669,7 +694,13 @@ def _run_gpu_solve(
 
         started_phase = time.monotonic()
         _propagate_node_ranges(state)
-        _forward_pass_gpu(state, strategy_table, state.node_range_p0, state.node_range_p1)
+        _forward_pass_gpu(
+            state,
+            strategy_table,
+            state.node_range_p0,
+            state.node_range_p1,
+            compact_forward_phase_seconds,
+        )
         phase_seconds["forward"] += time.monotonic() - started_phase
 
         started_phase = time.monotonic()
@@ -681,6 +712,7 @@ def _run_gpu_solve(
             evaluator_impl,
             backward_p0,
             backward_p1,
+            compact_backward_phase_seconds,
         )
         phase_seconds["backward"] += time.monotonic() - started_phase
 
@@ -692,6 +724,7 @@ def _run_gpu_solve(
             strategy_table,
             backward_p0,
             backward_p1,
+            compact_regret_phase_seconds,
         )
         phase_seconds["regret"] += time.monotonic() - started_phase
         iterations += 1
@@ -710,7 +743,13 @@ def _run_gpu_solve(
         state.packed.legal_action_mask,
     )
     _propagate_node_ranges(state)
-    _forward_pass_gpu(state, strategy_table, state.node_range_p0, state.node_range_p1)
+    _forward_pass_gpu(
+        state,
+        strategy_table,
+        state.node_range_p0,
+        state.node_range_p1,
+        compact_forward_phase_seconds,
+    )
     backward_p0.zero_()
     backward_p1.zero_()
     _backward_pass_gpu(
@@ -719,6 +758,7 @@ def _run_gpu_solve(
         evaluator_impl,
         backward_p0,
         backward_p1,
+        compact_backward_phase_seconds,
     )
     phase_seconds["finalize"] += time.monotonic() - started_phase
 
@@ -763,6 +803,11 @@ def _run_gpu_solve(
         level_frontier_counts=level_frontier_counts,
         compact_forward_level_sizes=compact_forward_level_sizes,
         compact_backward_level_sizes=compact_backward_level_sizes,
+        compact_phase_seconds={
+            "forward": tuple(compact_forward_phase_seconds),
+            "backward": tuple(compact_backward_phase_seconds),
+            "regret": tuple(compact_regret_phase_seconds),
+        },
         node_count=node_count,
         leaf_count=leaf_count,
         root_strategy=root_strategy,
@@ -887,8 +932,12 @@ def _regret_matching_table(
     table = torch.zeros((num_infosets, max_actions), dtype=torch.float32, device=regrets.device)
     if num_infosets == 0:
         return table
-    if action_infoset_index.numel() == 0:
+    limit = min(int(regrets.numel()), int(action_infoset_index.numel()), int(action_slot_index.numel()))
+    if limit == 0:
         return table
+    action_infoset_index = action_infoset_index[:limit]
+    action_slot_index = action_slot_index[:limit]
+    regrets = regrets[:limit]
     valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
     if not bool(valid.any()):
         return table
@@ -950,8 +999,10 @@ def _update_regrets_gpu(
     strategy_table: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
+    timings: list[float] | None = None,
 ) -> None:
-    for level_indices in state.compact_backward_levels:
+    for index, level_indices in enumerate(state.compact_backward_levels):
+        started = time.monotonic()
         edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
             state, level_indices
         )
@@ -975,6 +1026,8 @@ def _update_regrets_gpu(
         infoset_value.scatter_add_(0, edge_infoset, strat * child_values)
         regrets.index_add_(0, flat, child_values - infoset_value[edge_infoset])
         strategy_sums.index_add_(0, flat, strat)
+        if timings is not None and index < len(timings):
+            timings[index] += time.monotonic() - started
 
 
 def _update_regrets_gpu_batched(
@@ -984,8 +1037,10 @@ def _update_regrets_gpu_batched(
     strategy_table: torch.Tensor,
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
+    timings: list[float] | None = None,
 ) -> None:
-    for level_indices in state.compact_backward_levels:
+    for index, level_indices in enumerate(state.compact_backward_levels):
+        started = time.monotonic()
         edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = _concat_level_edges(
             state, level_indices
         )
@@ -1009,12 +1064,18 @@ def _update_regrets_gpu_batched(
         infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
         strategy_sums.scatter_add_(0, flat, strat)
         regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
+        if timings is not None and index < len(timings):
+            timings[index] += time.monotonic() - started
 
 
 def _forward_pass_gpu(*args: Any) -> None:
     if len(args) == 4 and isinstance(args[0], PackedGpuSolveState):
         state, strategy_table, node_range_p0, node_range_p1 = args
         _forward_pass_gpu_batched(state, strategy_table, node_range_p0, node_range_p1)
+        return
+    if len(args) == 5 and isinstance(args[0], PackedGpuSolveState):
+        state, strategy_table, node_range_p0, node_range_p1, timings = args
+        _forward_pass_gpu_batched(state, strategy_table, node_range_p0, node_range_p1, timings)
         return
     raise TypeError("_forward_pass_gpu received unsupported arguments")
 
@@ -1024,9 +1085,11 @@ def _forward_pass_gpu_batched(
     strategy_table: torch.Tensor,
     node_range_p0: torch.Tensor,
     node_range_p1: torch.Tensor,
+    timings: list[float] | None = None,
 ) -> None:
     _propagate_node_ranges(state)
-    for level_indices in state.compact_forward_levels:
+    for index, level_indices in enumerate(state.compact_forward_levels):
+        started = time.monotonic()
         edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
             state, level_indices
         )
@@ -1049,8 +1112,9 @@ def _forward_pass_gpu_batched(
             src = edge_src[chance_mask]
             dst = edge_dst[chance_mask]
             probs = edge_prob[chance_mask]
-            node_range_p0.index_add_(0, dst, node_range_p0[src] * probs)
-            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs)
+            weights = probs.unsqueeze(1)
+            node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
+            node_range_p1.index_add_(0, dst, node_range_p1[src] * weights)
         player_mask = edge_kind == 1
         if bool(player_mask.any()):
             src = edge_src[player_mask]
@@ -1058,7 +1122,8 @@ def _forward_pass_gpu_batched(
             infosets = edge_infoset[player_mask]
             slots = edge_slot[player_mask]
             probs = strategy_table[infosets, slots]
-            node_range_p0.index_add_(0, dst, node_range_p0[src] * probs)
+            weights = probs.unsqueeze(1)
+            node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
             node_range_p1.index_add_(0, dst, node_range_p1[src])
         player_mask = edge_kind == 2
         if bool(player_mask.any()):
@@ -1068,13 +1133,19 @@ def _forward_pass_gpu_batched(
             slots = edge_slot[player_mask]
             probs = strategy_table[infosets, slots]
             node_range_p0.index_add_(0, dst, node_range_p0[src])
-            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs)
+            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
+        if timings is not None and index < len(timings):
+            timings[index] += time.monotonic() - started
 
 
 def _backward_pass_gpu(*args: Any) -> None:
     if len(args) == 5 and isinstance(args[0], PackedGpuSolveState):
         state, strategy_table, evaluator, out_p0, out_p1 = args
         _backward_pass_gpu_batched(state, strategy_table, evaluator, out_p0, out_p1)
+        return
+    if len(args) == 6 and isinstance(args[0], PackedGpuSolveState):
+        state, strategy_table, evaluator, out_p0, out_p1, timings = args
+        _backward_pass_gpu_batched(state, strategy_table, evaluator, out_p0, out_p1, timings)
         return
     raise TypeError("_backward_pass_gpu received unsupported arguments")
 
@@ -1085,6 +1156,7 @@ def _backward_pass_gpu_batched(
     evaluator: LeafEvaluator,
     out_p0: torch.Tensor,
     out_p1: torch.Tensor,
+    timings: list[float] | None = None,
 ) -> None:
     out_p0.zero_()
     out_p1.zero_()
@@ -1095,7 +1167,8 @@ def _backward_pass_gpu_batched(
         out_p0[frontier_nodes] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[frontier_nodes] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
 
-    for level_indices in reversed(state.compact_backward_levels):
+    for index, level_indices in enumerate(reversed(state.compact_backward_levels)):
+        started = time.monotonic()
         edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _concat_level_edges(
             state, level_indices
         )
@@ -1129,6 +1202,8 @@ def _backward_pass_gpu_batched(
             probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
             out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
             out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
+        if timings is not None and index < len(timings):
+            timings[index] += time.monotonic() - started
 
 
 def _evaluate_frontier_leaves(
@@ -1156,6 +1231,9 @@ def _evaluate_frontier_leaves(
             return cast(LeafValueBatch, evaluate_tensors(tensors))
         except Exception:
             pass
+    evaluate = getattr(evaluator, "evaluate", None)
+    if evaluate is not None:
+        return cast(LeafValueBatch, evaluate(state.packed.leaf_feature_batch))
     raise RuntimeError("GPU leaf evaluation requires evaluate_tensors support")
 
 
@@ -1175,6 +1253,10 @@ def _merge_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[in
     if pending:
         merged.append(tuple(pending))
     return tuple(merged)
+
+
+def _compact_level_schedule(levels: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
+    return _merge_level_schedule(levels)
 
 
 def _concat_level_edges(
@@ -1231,7 +1313,6 @@ def _propagate_node_ranges(state: PackedGpuSolveState) -> None:
                 state.node_range_p1[dst_i] = state.node_range_p1[src_i] * prob
                 state.node_range_p2[dst_i] = state.node_range_p2[src_i] * prob
             elif kind == 1:
-                probs = state.strategy_table[state.edge_infoset[dst_i] if dst_i < state.edge_infoset.numel() else 0]
                 state.node_range_p0[dst_i] = state.node_range_p0[src_i]
                 state.node_range_p1[dst_i] = state.node_range_p1[src_i]
                 state.node_range_p2[dst_i] = state.node_range_p2[src_i]
