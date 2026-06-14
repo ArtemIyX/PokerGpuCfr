@@ -1128,7 +1128,13 @@ def _evaluate_frontier_leaves(
     state: PackedGpuSolveState,
     evaluator: LeafEvaluator,
 ) -> LeafValueBatch:
-    tensors = state.frontier_leaf_tensors
+    tensors = dict(state.frontier_leaf_tensors)
+    masks = state.packed.card_removal_mask
+    if masks.ndim == 2 and int(masks.shape[0]) >= int(state.frontier_nodes.numel()):
+        frontier_masks = masks[state.frontier_nodes]
+        tensors["range_p0"] = state.range_p0.unsqueeze(0).expand_as(frontier_masks).to(dtype=torch.float32) * frontier_masks.to(dtype=torch.float32)
+        tensors["range_p1"] = state.range_p1.unsqueeze(0).expand_as(frontier_masks).to(dtype=torch.float32) * frontier_masks.to(dtype=torch.float32)
+        tensors["range_p2"] = state.range_p2.unsqueeze(0).expand_as(frontier_masks).to(dtype=torch.float32) * frontier_masks.to(dtype=torch.float32)
     evaluate_tensors = getattr(evaluator, "evaluate_tensors", None)
     if evaluate_tensors is not None:
         try:
