@@ -161,6 +161,118 @@ def update_regrets_gpu(
             timings[index] += time.monotonic() - started
 
 
+def _process_compact_edges(
+    state: PackedGpuSolveState,
+    compact_level_index: int,
+    strategy_table: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = concat_compact_level_edges(state, compact_level_index)
+    valid = (
+        (edge_infoset >= 0)
+        & (edge_infoset < strategy_table.shape[0])
+        & (edge_slot >= 0)
+        & (edge_slot < strategy_table.shape[1])
+    )
+    if not bool(valid.any()):
+        empty_i64 = torch.empty(0, dtype=torch.int64, device=strategy_table.device)
+        empty_f32 = torch.empty(0, dtype=torch.float32, device=strategy_table.device)
+        return empty_i64, empty_i64, empty_i64, empty_i64, empty_i64, empty_f32
+    return (
+        edge_src[valid],
+        edge_dst[valid],
+        edge_infoset[valid],
+        edge_slot[valid],
+        edge_kind[valid],
+        edge_prob[valid],
+    )
+
+
+_COMPACT_MODE_FORWARD = 0
+_COMPACT_MODE_BACKWARD = 1
+_COMPACT_MODE_REGRET = 2
+
+
+def _compact_pass(
+    state: PackedGpuSolveState,
+    compact_level_index: int,
+    strategy_table: torch.Tensor,
+    mode: int,
+    node_range_p0: torch.Tensor | None = None,
+    node_range_p1: torch.Tensor | None = None,
+    out_p0: torch.Tensor | None = None,
+    out_p1: torch.Tensor | None = None,
+    regrets: torch.Tensor | None = None,
+    strategy_sums: torch.Tensor | None = None,
+    node_values_p0: torch.Tensor | None = None,
+    node_values_p1: torch.Tensor | None = None,
+) -> None:
+    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = _process_compact_edges(
+        state, compact_level_index, strategy_table
+    )
+    if edge_src.numel() == 0:
+        return
+    if mode == _COMPACT_MODE_FORWARD:
+        if node_range_p0 is None or node_range_p1 is None:
+            return
+        chance_mask = edge_kind == 0
+        if bool(chance_mask.any()):
+            src = edge_src[chance_mask]
+            dst = edge_dst[chance_mask]
+            probs = edge_prob[chance_mask].unsqueeze(1)
+            node_range_p0.index_add_(0, dst, node_range_p0[src] * probs)
+            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs)
+        player_mask = edge_kind == 1
+        if bool(player_mask.any()):
+            src = edge_src[player_mask]
+            dst = edge_dst[player_mask]
+            infosets = edge_infoset[player_mask]
+            slots = edge_slot[player_mask]
+            probs = strategy_table[infosets, slots]
+            weights = probs.unsqueeze(1)
+            node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
+            node_range_p1.index_add_(0, dst, node_range_p1[src])
+        player_mask = edge_kind == 2
+        if bool(player_mask.any()):
+            src = edge_src[player_mask]
+            dst = edge_dst[player_mask]
+            infosets = edge_infoset[player_mask]
+            slots = edge_slot[player_mask]
+            probs = strategy_table[infosets, slots]
+            node_range_p0.index_add_(0, dst, node_range_p0[src])
+            node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
+        return
+    if mode == _COMPACT_MODE_BACKWARD:
+        if out_p0 is None or out_p1 is None:
+            return
+        child_p0 = out_p0[edge_dst]
+        child_p1 = out_p1[edge_dst]
+        chance_mask = edge_kind == 0
+        if bool(chance_mask.any()):
+            out_p0.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p0[chance_mask])
+            out_p1.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p1[chance_mask])
+        player_mask = edge_kind == 1
+        if bool(player_mask.any()):
+            probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
+            out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
+            out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
+        player_mask = edge_kind == 2
+        if bool(player_mask.any()):
+            probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
+            out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
+            out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
+        return
+    if mode == _COMPACT_MODE_REGRET:
+        if regrets is None or strategy_sums is None or node_values_p0 is None or node_values_p1 is None:
+            return
+        flat = state.action_offsets[edge_infoset] + edge_slot
+        child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
+        strat = strategy_table[edge_infoset, edge_slot]
+        infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
+        infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
+        regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
+        strategy_sums.index_add_(0, flat, strat)
+
+
 def update_regrets_compact_group(
     state: PackedGpuSolveState,
     compact_level_index: int,
@@ -170,27 +282,16 @@ def update_regrets_compact_group(
     node_values_p0: torch.Tensor,
     node_values_p1: torch.Tensor,
 ) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, _edge_prob = concat_compact_level_edges(state, compact_level_index)
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
+    _compact_pass(
+        state,
+        compact_level_index,
+        strategy_table,
+        _COMPACT_MODE_REGRET,
+        regrets=regrets,
+        strategy_sums=strategy_sums,
+        node_values_p0=node_values_p0,
+        node_values_p1=node_values_p1,
     )
-    if not bool(valid.any()):
-        return
-    edge_src = edge_src[valid]
-    edge_dst = edge_dst[valid]
-    edge_infoset = edge_infoset[valid]
-    edge_slot = edge_slot[valid]
-    edge_kind = edge_kind[valid]
-    flat = state.action_offsets[edge_infoset] + edge_slot
-    child_values = torch.where(edge_kind == 1, node_values_p0[edge_dst], node_values_p1[edge_dst])
-    strat = strategy_table[edge_infoset, edge_slot]
-    infoset_values = torch.zeros(state.action_counts.numel(), dtype=torch.float32, device=regrets.device)
-    infoset_values.scatter_add_(0, edge_infoset, strat * child_values)
-    regrets.index_add_(0, flat, child_values - infoset_values[edge_infoset])
-    strategy_sums.index_add_(0, flat, strat)
 
 
 def forward_pass_gpu(
@@ -215,48 +316,14 @@ def forward_pass_compact_group(
     node_range_p0: torch.Tensor,
     node_range_p1: torch.Tensor,
 ) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = concat_compact_level_edges(state, compact_level_index)
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
+    _compact_pass(
+        state,
+        compact_level_index,
+        strategy_table,
+        _COMPACT_MODE_FORWARD,
+        node_range_p0=node_range_p0,
+        node_range_p1=node_range_p1,
     )
-    if not bool(valid.any()):
-        return
-    edge_src = edge_src[valid]
-    edge_dst = edge_dst[valid]
-    edge_infoset = edge_infoset[valid]
-    edge_slot = edge_slot[valid]
-    edge_kind = edge_kind[valid]
-    edge_prob = edge_prob[valid]
-    chance_mask = edge_kind == 0
-    if bool(chance_mask.any()):
-        src = edge_src[chance_mask]
-        dst = edge_dst[chance_mask]
-        probs = edge_prob[chance_mask]
-        weights = probs.unsqueeze(1)
-        node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-        node_range_p1.index_add_(0, dst, node_range_p1[src] * weights)
-    player_mask = edge_kind == 1
-    if bool(player_mask.any()):
-        src = edge_src[player_mask]
-        dst = edge_dst[player_mask]
-        infosets = edge_infoset[player_mask]
-        slots = edge_slot[player_mask]
-        probs = strategy_table[infosets, slots]
-        weights = probs.unsqueeze(1)
-        node_range_p0.index_add_(0, dst, node_range_p0[src] * weights)
-        node_range_p1.index_add_(0, dst, node_range_p1[src])
-    player_mask = edge_kind == 2
-    if bool(player_mask.any()):
-        src = edge_src[player_mask]
-        dst = edge_dst[player_mask]
-        infosets = edge_infoset[player_mask]
-        slots = edge_slot[player_mask]
-        probs = strategy_table[infosets, slots]
-        node_range_p0.index_add_(0, dst, node_range_p0[src])
-        node_range_p1.index_add_(0, dst, node_range_p1[src] * probs.unsqueeze(1))
 
 
 def backward_pass_gpu(
@@ -288,37 +355,14 @@ def backward_pass_compact_group(
     out_p0: torch.Tensor,
     out_p1: torch.Tensor,
 ) -> None:
-    edge_src, edge_dst, edge_infoset, edge_slot, edge_kind, edge_prob = concat_compact_level_edges(state, compact_level_index)
-    valid = (
-        (edge_infoset >= 0)
-        & (edge_infoset < strategy_table.shape[0])
-        & (edge_slot >= 0)
-        & (edge_slot < strategy_table.shape[1])
+    _compact_pass(
+        state,
+        compact_level_index,
+        strategy_table,
+        _COMPACT_MODE_BACKWARD,
+        out_p0=out_p0,
+        out_p1=out_p1,
     )
-    if not bool(valid.any()):
-        return
-    edge_src = edge_src[valid]
-    edge_dst = edge_dst[valid]
-    edge_infoset = edge_infoset[valid]
-    edge_slot = edge_slot[valid]
-    edge_kind = edge_kind[valid]
-    edge_prob = edge_prob[valid]
-    child_p0 = out_p0[edge_dst]
-    child_p1 = out_p1[edge_dst]
-    chance_mask = edge_kind == 0
-    if bool(chance_mask.any()):
-        out_p0.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p0[chance_mask])
-        out_p1.index_add_(0, edge_src[chance_mask], edge_prob[chance_mask] * child_p1[chance_mask])
-    player_mask = edge_kind == 1
-    if bool(player_mask.any()):
-        probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
-        out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
-        out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
-    player_mask = edge_kind == 2
-    if bool(player_mask.any()):
-        probs = strategy_table[edge_infoset[player_mask], edge_slot[player_mask]]
-        out_p0.index_add_(0, edge_src[player_mask], probs * child_p0[player_mask])
-        out_p1.index_add_(0, edge_src[player_mask], probs * child_p1[player_mask])
 
 
 def evaluate_frontier_leaves(
