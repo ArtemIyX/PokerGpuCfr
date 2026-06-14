@@ -12,7 +12,10 @@ from pokergpu.abstraction.actions import (
     make_postflop_threeway_profile,
 )
 from pokergpu.abstraction.hands import (
+    PlayerRangeVectors,
     RangeVector,
+    apply_board_dead_cards,
+    propagate_player_ranges,
 )
 from pokergpu.cfr import (
     InfosetLayout,
@@ -620,6 +623,20 @@ def _terminal_value_player0(state: GameState) -> float:
     )
     other_payouts = sum(payout.amount for payout in payouts if payout.player != 0)
     return float(player0_payout - other_payouts)
+
+
+def _apply_root_ranges(
+    state: GameState,
+    ranges: tuple[RangeVector, ...],
+) -> tuple[RangeVector, ...]:
+    dead_cards: list[Card] = []
+    for player in state.players:
+        if player.hole_cards is not None:
+            dead_cards.extend(player.hole_cards)
+    player_ranges = PlayerRangeVectors.from_values(
+        tuple(apply_board_dead_cards(range_vector, state.board) for range_vector in ranges)
+    )
+    return propagate_player_ranges(player_ranges, dead_cards).values
 
 
 def _summarize_root_ev(

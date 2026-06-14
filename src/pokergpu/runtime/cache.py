@@ -225,6 +225,12 @@ class PackedGpuSolveState:
     strategy_sums: Any
     strategy_table: Any
     strategy_flat: Any
+    range_p0: Any
+    range_p1: Any
+    range_p2: Any
+    range_p3: Any
+    range_p4: Any
+    range_p5: Any
     action_infoset_index: Any
     action_slot_index: Any
     action_offsets: Any

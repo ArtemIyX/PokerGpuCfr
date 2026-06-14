@@ -16,6 +16,7 @@ from pokergpu.abstraction.actions import (
     BaselineActionAbstraction,
     make_postflop_mvp_profile,
 )
+from pokergpu.abstraction.hands import RangeVector
 from pokergpu.cfr import InfosetLayout, InfosetStore, TreeLevels, build_tree_levels
 from pokergpu.cfr.traversal import (
     build_leaf_feature_batch,
@@ -55,6 +56,7 @@ class PackedGpuSolve:
     root_actions: tuple[str, ...]
     packed_subtree: PackedGpuSubtree
     gpu_state: PackedGpuSolveState | None = None
+    root_ranges: tuple[RangeVector, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,7 +353,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
             root_infoset=cached.root_infoset,
             root_actions=cached.root_actions,
             packed_subtree=cached.packed_subtree,
-            gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout),
+            gpu_state=_make_gpu_state(cached.packed_subtree, cached.layout, cached.root_ranges),
         )
     tree = built
     packed_subtree = compile_packed_subtree(tree, spot_key=cache_key, device="cuda")
@@ -377,6 +379,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         root_infoset=int(root_infoset),
         root_actions=tuple(_format_action(action) for action in tree.actions_by_node[0]),
         packed_subtree=packed_subtree,
+        root_ranges=_spec_root_ranges(spec),
     )
     packed = PackedGpuSolve(
         spec=packed.spec,
@@ -386,7 +389,7 @@ def _prepare_gpu_solve(spec: PostflopResolveSpec, *, template: PublicTreeTemplat
         root_infoset=packed.root_infoset,
         root_actions=packed.root_actions,
         packed_subtree=packed.packed_subtree,
-        gpu_state=_make_gpu_state(packed.packed_subtree, packed.layout),
+        gpu_state=_make_gpu_state(packed.packed_subtree, packed.layout, packed.root_ranges),
     )
     _load_warm_start_into_gpu_state(packed, spec)
     _GPU_PLAN_CACHE.put(cache_key, packed)
@@ -448,13 +451,18 @@ def _rebuilt_tree_from_template(
     )
 
 
-def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGpuSolveState:
+def _make_gpu_state(
+    packed: PackedGpuSubtree,
+    layout: InfosetLayout,
+    root_ranges: tuple[RangeVector, ...],
+) -> PackedGpuSolveState:
     device = packed.node_type.device
     action_count = int(layout.total_actions)
     regrets = torch.zeros(action_count, dtype=torch.float32, device=device)
     strategy_sums = torch.zeros_like(regrets)
     strategy_table = torch.zeros((packed.infoset_count, max(packed.max_actions, 1)), dtype=torch.float32, device=device)
     strategy_flat = torch.zeros(action_count, dtype=torch.float32, device=device)
+    ranges = _init_gpu_ranges(root_ranges, device=device)
     forward_reach_p0 = torch.zeros(packed.node_count, dtype=torch.float32, device=device)
     forward_reach_p1 = torch.zeros_like(forward_reach_p0)
     backward_p0 = torch.zeros_like(forward_reach_p0)
@@ -470,6 +478,12 @@ def _make_gpu_state(packed: PackedGpuSubtree, layout: InfosetLayout) -> PackedGp
         strategy_sums=strategy_sums,
         strategy_table=strategy_table,
         strategy_flat=strategy_flat,
+        range_p0=ranges[0],
+        range_p1=ranges[1],
+        range_p2=ranges[2],
+        range_p3=ranges[3],
+        range_p4=ranges[4],
+        range_p5=ranges[5],
         action_infoset_index=packed.action_infoset_index,
         action_slot_index=packed.action_slot_index,
         action_offsets=torch.as_tensor(layout.offsets, dtype=torch.int64, device=device),
@@ -589,7 +603,7 @@ def _run_gpu_solve(
     node_count = tree.tree.node_count
     state = packed.gpu_state
     if state is None:
-        state = _make_gpu_state(packed.packed_subtree, packed.layout)
+        state = _make_gpu_state(packed.packed_subtree, packed.layout, packed.root_ranges)
         packed = PackedGpuSolve(
             spec=packed.spec,
             tree=packed.tree,
@@ -1122,6 +1136,28 @@ def _evaluate_frontier_leaves(
         except Exception:
             pass
     return evaluator.evaluate(state.frontier_leaf_batch)
+
+
+def _init_gpu_ranges(
+    root_ranges: tuple[RangeVector, ...],
+    *,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    tensors = []
+    for index in range(6):
+        if index < len(root_ranges):
+            values = root_ranges[index].values
+        else:
+            values = np.zeros(1326, dtype=np.float32)
+        tensors.append(torch.as_tensor(values, dtype=torch.float32, device=device))
+    return tensors[0], tensors[1], tensors[2], tensors[3], tensors[4], tensors[5]
+
+
+def _spec_root_ranges(spec: PostflopResolveSpec) -> tuple[RangeVector, ...]:
+    ranges = [spec.range_p0, spec.range_p1]
+    if spec.range_p2 is not None:
+        ranges.append(spec.range_p2)
+    return tuple(ranges)
 
 
 def _update_store_from_gpu(
