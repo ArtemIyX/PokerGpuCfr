@@ -349,6 +349,7 @@ def build_batched_gpu_plan(
         )
         for level_indices in compact_backward_levels
     ]
+    fused_backward_group = _fuse_compact_groups(compact_backward_groups, device=device)
     compact_level_edge_src = [group.src for group in compact_forward_groups]
     compact_level_edge_dst = [group.dst for group in compact_forward_groups]
     compact_level_edge_infoset = [group.infoset for group in compact_forward_groups]
@@ -441,6 +442,7 @@ def build_batched_gpu_plan(
         level_edge_prob=tuple(level_edge_prob),
         compact_forward_groups=tuple(compact_forward_groups),
         compact_backward_groups=tuple(compact_backward_groups),
+        fused_backward_group=fused_backward_group,
         compact_level_edge_src=tuple(compact_level_edge_src),
         compact_level_edge_dst=tuple(compact_level_edge_dst),
         compact_level_edge_infoset=tuple(compact_level_edge_infoset),
@@ -512,3 +514,37 @@ def _concat_level_tensors(
             return torch.empty(0, dtype=torch.int64, device=device)
         return torch.empty(0, dtype=tensors[0].dtype, device=device)
     return torch.cat(selected, dim=0)
+
+
+def _fuse_compact_groups(groups: list[CompactEdgeGroup], *, device: Any) -> CompactEdgeGroup | None:
+    if not groups:
+        return None
+    def _cat(attr: str, dtype: torch.dtype) -> torch.Tensor:
+        values = [getattr(group, attr) for group in groups if getattr(group, attr).numel() > 0]
+        if not values:
+            return torch.empty(0, dtype=dtype, device=device)
+        return torch.cat(values, dim=0)
+    return CompactEdgeGroup(
+        src=_cat("src", torch.int64),
+        dst=_cat("dst", torch.int64),
+        infoset=_cat("infoset", torch.int64),
+        slot=_cat("slot", torch.int64),
+        kind=_cat("kind", torch.int64),
+        prob=_cat("prob", torch.float32),
+        flat=_cat("flat", torch.int64),
+        chance_src=_cat("chance_src", torch.int64),
+        chance_dst=_cat("chance_dst", torch.int64),
+        chance_prob=_cat("chance_prob", torch.float32),
+        p0_src=_cat("p0_src", torch.int64),
+        p0_dst=_cat("p0_dst", torch.int64),
+        p0_infoset=_cat("p0_infoset", torch.int64),
+        p0_slot=_cat("p0_slot", torch.int64),
+        p0_flat=_cat("p0_flat", torch.int64),
+        p0_prob=_cat("p0_prob", torch.float32),
+        p1_src=_cat("p1_src", torch.int64),
+        p1_dst=_cat("p1_dst", torch.int64),
+        p1_infoset=_cat("p1_infoset", torch.int64),
+        p1_slot=_cat("p1_slot", torch.int64),
+        p1_flat=_cat("p1_flat", torch.int64),
+        p1_prob=_cat("p1_prob", torch.float32),
+    )

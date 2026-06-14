@@ -215,19 +215,7 @@ def _run_compact_iteration_core(
             ):
                 _compact_group_pass(group, strategy_table, _COMPACT_MODE_FORWARD, node_range_p0=node_range_p0, node_range_p1=node_range_p1)
     with record_function("solve::backward"):
-        for group in state.compact_backward_groups:
-            if not launch_backward_compact(
-                group.src,
-                group.dst,
-                group.prob,
-                group.flat,
-                strategy_table,
-                out_p0,
-                out_p1,
-                node_values_p0,
-                node_values_p1,
-            ):
-                _compact_group_pass(group, strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
+        _backward_pass_fused(state, strategy_table, out_p0, out_p1, node_values_p0, node_values_p1)
     with record_function("solve::regret"):
         for group in state.compact_backward_groups:
             _compact_group_pass(group, strategy_table, _COMPACT_MODE_REGRET, regrets=regrets, strategy_sums=strategy_sums, node_values_p0=node_values_p0, node_values_p1=node_values_p1)
@@ -667,10 +655,34 @@ def backward_pass_gpu(
         leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
         out_p0[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player0, dtype=np.float32)))
         out_p1[leaf_slice].copy_(torch.from_numpy(np.asarray(leaf_values.ev_player1, dtype=np.float32)))
-    for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):
-        backward_pass_compact_group(state, len(state.compact_backward_levels) - 1 - index, strategy_table, out_p0, out_p1)
+    _backward_pass_fused(state, strategy_table, out_p0, out_p1, out_p0, out_p1)
     if timings is not None:
         timings.append(time.monotonic() - started)
+
+
+def _backward_pass_fused(
+    state: PackedGpuSolveState,
+    strategy_table: torch.Tensor,
+    out_p0: torch.Tensor,
+    out_p1: torch.Tensor,
+    node_values_p0: torch.Tensor,
+    node_values_p1: torch.Tensor,
+) -> None:
+    group = state.fused_backward_group
+    if group is None or group.src.numel() == 0:
+        return
+    if not launch_backward_compact(
+        group.src,
+        group.dst,
+        group.prob,
+        group.flat,
+        strategy_table,
+        out_p0,
+        out_p1,
+        node_values_p0,
+        node_values_p1,
+    ):
+        _compact_group_pass(group, strategy_table, _COMPACT_MODE_BACKWARD, out_p0=out_p0, out_p1=out_p1)
 
 
 def backward_pass_compact_group(
