@@ -269,11 +269,10 @@ def run_compact_iteration_gpu(
     debug: bool = False,
 ) -> None:
     with record_function("solve::leaf_eval"):
-        if state.frontier_nodes.numel() > 0:
+        frontier_count = state.frontier_count
+        if frontier_count > 0:
             leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
-            leaf_start = int(state.frontier_nodes[0].item())
-            leaf_count = int(state.frontier_nodes.numel())
-            leaf_slice = slice(leaf_start, leaf_start + leaf_count)
+            leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
             out_p0[leaf_slice] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
             out_p1[leaf_slice] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
             if debug:
@@ -281,7 +280,7 @@ def run_compact_iteration_gpu(
                     "debug::leaf",
                     float(torch.sum(torch.abs(out_p0[leaf_slice])).item()),
                     float(torch.sum(torch.abs(out_p1[leaf_slice])).item()),
-                    int(leaf_count),
+                    int(frontier_count),
                 )
     with record_function("solve::cfr_core"):
         _COMPACT_ITERATION_CORE(
@@ -539,11 +538,10 @@ def backward_pass_gpu(
     out_p0.zero_()
     out_p1.zero_()
     frontier_nodes = state.frontier_nodes
-    if int(frontier_nodes.numel()) > 0:
+    frontier_count = state.frontier_count
+    if frontier_count > 0:
         leaf_values = evaluator.evaluate(state.packed.leaf_feature_batch)
-        leaf_start = int(frontier_nodes[0].item())
-        leaf_count = int(frontier_nodes.numel())
-        leaf_slice = slice(leaf_start, leaf_start + leaf_count)
+        leaf_slice = slice(state.frontier_start, state.frontier_start + frontier_count)
         out_p0[leaf_slice] = torch.as_tensor(leaf_values.ev_player0, dtype=torch.float32, device=out_p0.device)
         out_p1[leaf_slice] = torch.as_tensor(leaf_values.ev_player1, dtype=torch.float32, device=out_p1.device)
     for index, _level_indices in enumerate(reversed(state.compact_backward_levels)):

@@ -234,6 +234,8 @@ class PackedGpuSolveState:
     backward_p0: Any
     backward_p1: Any
     frontier_nodes: Any
+    frontier_start: int
+    frontier_count: int
     node_type: Any
     node_first_child: Any
     node_child_count: Any

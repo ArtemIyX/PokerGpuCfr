@@ -341,6 +341,8 @@ def _make_gpu_state(
         frontier_leaf_tensors["range_p1"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
         frontier_leaf_tensors["range_p2"] = torch.zeros_like(frontier_leaf_tensors["range_p0"])
     frontier_range_nodes = packed.frontier_nodes
+    frontier_start = int(frontier_range_nodes[0].item()) if frontier_range_nodes.numel() > 0 else 0
+    frontier_count = int(frontier_range_nodes.numel())
     frontier_range_p0 = torch.zeros((packed.frontier_nodes.numel(), _PRIVATE_HAND_COUNT), dtype=torch.float32, device=device)
     frontier_range_p1 = torch.zeros_like(frontier_range_p0)
     frontier_range_p2 = torch.zeros_like(frontier_range_p0)
@@ -359,6 +361,8 @@ def _make_gpu_state(
         backward_p0=backward_p0,
         backward_p1=backward_p1,
         frontier_nodes=packed.frontier_nodes,
+        frontier_start=frontier_start,
+        frontier_count=frontier_count,
         node_type=packed.node_type,
         node_first_child=packed.first_child,
         node_child_count=packed.child_count,
@@ -754,7 +758,7 @@ def _root_action_values_from_backward(
     limit = int(plan.root_child_nodes.numel())
     if limit <= 0:
         return np.zeros(0, dtype=np.float32)
-    child_nodes = plan.root_child_nodes[:limit].to(device=backward_p0.device)
+    child_nodes = plan.root_child_nodes[:limit]
     valid = (child_nodes >= 0) & (child_nodes < backward_p0.numel())
     safe_child_nodes = child_nodes.clamp(0, max(0, backward_p0.numel() - 1))
     values = backward_p0[safe_child_nodes] * valid.to(backward_p0.dtype)
