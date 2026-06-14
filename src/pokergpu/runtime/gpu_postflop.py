@@ -525,6 +525,7 @@ def _regret_matching_table_inplace(
     action_infoset_index: torch.Tensor,
     action_slot_index: torch.Tensor,
     action_counts: torch.Tensor,
+    legal_action_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     out.zero_()
     num_infosets = int(action_counts.numel())
@@ -532,6 +533,8 @@ def _regret_matching_table_inplace(
         return out
     max_actions = int(out.shape[1])
     valid = (action_infoset_index >= 0) & (action_infoset_index < num_infosets) & (action_slot_index >= 0) & (action_slot_index < max_actions)
+    if legal_action_mask is not None and legal_action_mask.numel() == valid.numel():
+        valid = valid & legal_action_mask
     if not bool(valid.any()):
         return out
     infosets = action_infoset_index[valid]
@@ -627,6 +630,7 @@ def _run_gpu_solve(
             state.action_infoset_index,
             state.action_slot_index,
             state.action_counts,
+            state.packed.legal_action_mask,
         )
         phase_seconds["strategy"] += time.monotonic() - started_phase
 
@@ -673,6 +677,7 @@ def _run_gpu_solve(
         state.action_infoset_index,
         state.action_slot_index,
         state.action_counts,
+        state.packed.legal_action_mask,
     )
     forward_reach_p0.zero_()
     forward_reach_p1.zero_()
