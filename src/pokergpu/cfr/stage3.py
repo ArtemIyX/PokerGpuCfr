@@ -186,10 +186,21 @@ def _brute_force_node_hand_reach(
         return ()
     if len(hand_total) == 0:
         return tuple(tuple() for _ in node_hand_reach_rows)
-    return tuple(
-        tuple(0.0 if hand_total[hand_index] <= 0.0 else value for hand_index, value in enumerate(row))
-        for row in node_hand_reach_rows
-    )
+
+    node_count = len(node_hand_reach_rows)
+    hand_width = len(hand_total)
+    for row in node_hand_reach_rows:
+        if len(row) != hand_width:
+            raise ValueError("hand reach rows must have consistent width")
+
+    exact_rows: list[list[float]] = [[0.0 for _ in range(hand_width)] for _ in range(node_count)]
+    for hand_index, total in enumerate(hand_total):
+        if total <= 0.0:
+            continue
+        for node_index, row in enumerate(node_hand_reach_rows):
+            exact_rows[node_index][hand_index] = row[hand_index] / total
+
+    return tuple(tuple(row) for row in exact_rows)
 
 
 def _validate_card_ratio_rows(node_card_ratio_rows: list[tuple[float, ...]]) -> None:
