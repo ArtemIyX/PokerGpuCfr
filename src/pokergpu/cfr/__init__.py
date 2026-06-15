@@ -2,9 +2,9 @@ from .stage1 import ForwardProfileResult, normalize_strategy, propagate_forward
 from .stage2 import AggregateProbSumResult, aggregate_prob_sum
 from .stage3 import OpponentReachResult, compute_opponent_reach
 from .stage4 import (
-    ShowdownEquityInput,
-    ShowdownEquityInputRow,
-    ShowdownEquityOutputRow,
+    ShowdownEquityBatchInput,
+    ShowdownEquityNodeInput,
+    ShowdownEquityNodeOutput,
     ShowdownEquityResult,
     build_showdown_equity_input,
     compute_showdown_equity,
@@ -23,9 +23,9 @@ __all__ = [
     "ForwardProfileResult",
     "AggregateProbSumResult",
     "OpponentReachResult",
-    "ShowdownEquityInput",
-    "ShowdownEquityInputRow",
-    "ShowdownEquityOutputRow",
+    "ShowdownEquityBatchInput",
+    "ShowdownEquityNodeInput",
+    "ShowdownEquityNodeOutput",
     "ShowdownEquityResult",
     "SolverIterationResult",
     "SolverState",

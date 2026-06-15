@@ -27,27 +27,54 @@ def test_build_showdown_equity_input_is_node_local() -> None:
         infoset_ids=(InfosetId(0), InfosetId(1), None),
         terminal_payoffs=(None, None, Chips(0)),
     )
+    board = Board.from_str("AhKdTc")
     forward = ForwardProfileResult(
         node_reach=(1.0, 0.5, 0.0),
         infoset_reach=(1.0, 0.5),
         action_reach=((1.0,), (1.0,), ()),
     )
-    aggregate = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
+    aggregate = aggregate_prob_sum(tree, forward, board)
     opponent = compute_opponent_reach(tree, aggregate)
 
-    result = build_showdown_equity_input(tree, aggregate, opponent, board=Board.from_str("AhKdTc"))
+    result = build_showdown_equity_input(tree, aggregate, opponent, board=board)
 
     assert len(result.rows) == 3
-    assert all(row.board == Board.from_str("AhKdTc") for row in result.rows)
+    assert all(row.board == board for row in result.rows)
     assert result.rows[0].node_id == 0
     assert result.rows[1].node_id == 1
     assert len(result.rows[0].opponent_reach) == 1326
     assert len(result.rows[0].live_hand_mask) == 1326
-    assert result.rows[0].node_share == pytest.approx(opponent.node_opponent_share[0])
-    assert result.rows[1].node_share == pytest.approx(opponent.node_opponent_share[1])
+    assert result.rows[0].pot_size == pytest.approx(1.0)
 
 
 def test_compute_showdown_equity_returns_node_aligned_output() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    board = Board.from_str("AhKdTc")
+    forward = ForwardProfileResult(
+        node_reach=(1.0,),
+        infoset_reach=(),
+        action_reach=((),),
+    )
+    aggregate = aggregate_prob_sum(tree, forward, board)
+    opponent = compute_opponent_reach(tree, aggregate)
+
+    result = compute_showdown_equity(tree, aggregate, opponent, board=board)
+
+    assert len(result.node_showdown_equity) == 1
+    assert len(result.node_showdown_equity_bb) == 1
+    assert result.output_rows[0].node_id == 0
+    assert result.output_rows[0].showdown_equity == result.node_showdown_equity[0]
+    assert result.output_rows[0].showdown_equity_bb == result.node_showdown_equity_bb[0]
+
+
+def test_compute_showdown_equity_rejects_preflop_board() -> None:
     tree = PublicTree(
         node_types=(NodeType.LEAF,),
         first_child=(0,),
@@ -64,10 +91,5 @@ def test_compute_showdown_equity_returns_node_aligned_output() -> None:
     aggregate = aggregate_prob_sum(tree, forward)
     opponent = compute_opponent_reach(tree, aggregate)
 
-    result = compute_showdown_equity(tree, aggregate, opponent)
-
-    assert result.node_showdown_equity == (0.0,)
-    assert result.node_showdown_equity_bb == (0.0,)
-    assert result.output_rows[0].node_id == 0
-    assert result.output_rows[0].showdown_equity == 0.0
-    assert result.output_rows[0].pot_size == 1.0
+    with pytest.raises(ValueError, match="postflop board"):
+        compute_showdown_equity(tree, aggregate, opponent)
