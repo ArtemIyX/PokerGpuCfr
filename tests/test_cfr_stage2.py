@@ -38,6 +38,7 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
     assert result.leaf_batch.rows[0].features.reach == 0.5
     assert result.leaf_batch.rows[0].features.share == 1.0
     assert result.leaf_batch.rows[0].features.street == 0
+    assert result.leaf_batch.rows[0].features.board_size == 0
 
 
 def test_aggregate_prob_sum_uses_board_street() -> None:
@@ -58,6 +59,7 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
     result = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
 
     assert result.leaf_batch.rows[0].features.street == 1
+    assert result.leaf_batch.rows[0].features.board_size == 3
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:

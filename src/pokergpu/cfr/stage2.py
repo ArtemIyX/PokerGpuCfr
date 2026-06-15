@@ -12,6 +12,7 @@ class LeafFeatures:
     reach: float
     share: float
     street: int
+    board_size: int
 
 
 @dataclass(slots=True, frozen=True)
@@ -49,7 +50,9 @@ def aggregate_prob_sum(
     )
     leaf_reach_sum = tuple(forward.node_reach[node_index] for node_index in leaf_node_ids)
     total_leaf_reach = sum(leaf_reach_sum)
-    street = _street_code(board.street if board is not None else Street.PREFLOP)
+    board_street = board.street if board is not None else Street.PREFLOP
+    street = _street_code(board_street)
+    board_size = len(board.cards) if board is not None else 0
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -59,6 +62,7 @@ def aggregate_prob_sum(
                     reach=forward.node_reach[node_index],
                     share=_safe_share(forward.node_reach[node_index], total_leaf_reach),
                     street=street,
+                    board_size=board_size,
                 ),
             )
             for node_index in leaf_node_ids
