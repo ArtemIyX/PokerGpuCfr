@@ -35,6 +35,7 @@ class LeafBatchInput:
 @dataclass(slots=True, frozen=True)
 class AggregateProbSumResult:
     node_reach_sum: tuple[float, ...]
+    node_card_reach: tuple[tuple[float, ...], ...]
     leaf_node_ids: tuple[int, ...]
     leaf_reach_sum: tuple[float, ...]
     leaf_batch: LeafBatchInput
@@ -48,6 +49,11 @@ def aggregate_prob_sum(
     if tree.node_count != len(forward.node_reach):
         raise ValueError("tree and forward pass must cover the same number of nodes")
 
+    board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
+    node_card_reach = tuple(
+        _node_card_reach_vector(node_reach, board_card_mask)
+        for node_reach in forward.node_reach
+    )
     leaf_node_ids = tuple(
         node_index
         for node_index, node_type in enumerate(tree.node_types)
@@ -59,7 +65,6 @@ def aggregate_prob_sum(
     street = _street_code(board_street)
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
-    board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -82,6 +87,7 @@ def aggregate_prob_sum(
 
     return AggregateProbSumResult(
         node_reach_sum=forward.node_reach,
+        node_card_reach=node_card_reach,
         leaf_node_ids=leaf_node_ids,
         leaf_reach_sum=leaf_reach_sum,
         leaf_batch=leaf_batch,
@@ -161,4 +167,12 @@ def _leaf_card_reach_vector(board_card_mask: tuple[bool, ...], board_size: int) 
     if live_card_count <= 0:
         return tuple(0.0 for _ in range(52))
     weight = 1.0 / live_card_count
+    return tuple(0.0 if blocked else weight for blocked in board_card_mask)
+
+
+def _node_card_reach_vector(node_reach: float, board_card_mask: tuple[bool, ...]) -> tuple[float, ...]:
+    live_count = sum(1 for blocked in board_card_mask if not blocked)
+    if live_count <= 0 or node_reach <= 0.0:
+        return tuple(0.0 for _ in range(52))
+    weight = node_reach / live_count
     return tuple(0.0 if blocked else weight for blocked in board_card_mask)
