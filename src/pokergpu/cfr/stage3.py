@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from collections.abc import Sequence
 
 from pokergpu.cfr.stage2 import AggregateProbSumResult
+from pokergpu.abstraction.hands import private_hand_count
 from pokergpu.tree.public_tree import NodeType, PublicTree
 
 
 @dataclass(slots=True, frozen=True)
 class OpponentReachResult:
+    """Blocking-aware opponent reach summaries for a single public tree."""
+
     infoset_opponent_reach: tuple[float, ...]
     infoset_card_opponent_reach: tuple[tuple[float, ...], ...]
     infoset_hand_opponent_reach: tuple[tuple[float, ...], ...]
@@ -31,6 +35,8 @@ def compute_opponent_reach(
 
     infoset_nodes = _collect_infoset_nodes(tree)
     hand_width = len(aggregate.node_aggregate.hand_reach[0])
+    if hand_width != private_hand_count():
+        raise ValueError("node hand reach vectors must match the private hand count")
 
     node_opponent_reach = tuple(aggregate.node_aggregate.reach)
     node_opponent_share = [0.0 for _ in range(tree.node_count)]
@@ -80,7 +86,7 @@ def compute_opponent_reach(
         card_total = tuple(card_reach)
         hand_total = tuple(hand_reach)
         node_card_ratio_rows = _normalize_card_reach_rows(node_card_reach_rows, card_total)
-        node_hand_ratio_rows = _normalize_card_reach_rows(node_hand_reach_rows, hand_total)
+        node_hand_ratio_rows = _normalize_blocking_reach_rows(node_hand_reach_rows, hand_total)
         _validate_card_ratio_rows(node_card_ratio_rows)
         _validate_hand_totals(node_hand_reach_rows, hand_total)
         _validate_hand_ratio_rows(node_hand_ratio_rows, hand_width)
@@ -146,6 +152,24 @@ def _normalize_card_reach_rows(
     return normalized_rows
 
 
+def _normalize_blocking_reach_rows(
+    node_reach_rows: list[tuple[float, ...]],
+    total_reach: tuple[float, ...],
+) -> tuple[tuple[float, ...], ...]:
+    if not node_reach_rows:
+        return ()
+    normalized_rows: list[tuple[float, ...]] = []
+    for row in node_reach_rows:
+        if len(row) != len(total_reach):
+            raise ValueError("reach rows must have consistent width")
+        ratios: list[float] = []
+        for index, value in enumerate(row):
+            total = total_reach[index]
+            ratios.append(0.0 if total <= 0.0 else value / total)
+        normalized_rows.append(tuple(ratios))
+    return tuple(normalized_rows)
+
+
 def _validate_card_ratio_rows(node_card_ratio_rows: list[tuple[float, ...]]) -> None:
     if not node_card_ratio_rows:
         return
@@ -169,7 +193,7 @@ def _validate_hand_totals(
 
 
 def _validate_hand_ratio_rows(
-    node_hand_ratio_rows: list[tuple[float, ...]],
+    node_hand_ratio_rows: Sequence[tuple[float, ...]],
     hand_width: int,
 ) -> None:
     for row in node_hand_ratio_rows:
