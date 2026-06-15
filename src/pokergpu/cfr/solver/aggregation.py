@@ -4,10 +4,12 @@ from pokergpu.tree.public_tree import NodeId, NodeType, PublicTree
 
 
 def aggregate_root_action_values(tree: PublicTree) -> tuple[float, ...]:
+    assert tree.node_count > 0, "public tree cannot be empty"
     return _child_action_values(tree, NodeId(0))
 
 
 def aggregate_action_values(tree: PublicTree, node: NodeId) -> tuple[float, ...]:
+    assert int(node) >= 0, "node id must be non-negative"
     return _child_action_values(tree, node)
 
 
@@ -24,6 +26,7 @@ def _child_action_values(tree: PublicTree, node: NodeId) -> tuple[float, ...]:
         stack.append((current, True))
         for link in tree.child_links(NodeId(current)):
             child_index = int(link.child)
+            assert 0 <= child_index < tree.node_count, "child id must be in bounds"
             child_type = tree.node_types[child_index]
             if child_type is NodeType.LEAF:
                 raise ValueError("toy solver cannot evaluate leaf nodes yet")
@@ -48,6 +51,7 @@ def _child_action_values(tree: PublicTree, node: NodeId) -> tuple[float, ...]:
 
         if not child_values:
             raise ValueError("non-terminal nodes must have at least one value")
+        assert child_values, "non-terminal nodes must aggregate at least one value"
         node_type = tree.node_types[current]
         if node_type is NodeType.CHANCE:
             total = 0.0

@@ -11,6 +11,7 @@ def apply_solver_strategy_update(
     *,
     reach_weight: float = 1.0,
 ) -> SolverIterationResult:
+    assert reach_weight >= 0.0, "reach weight must be non-negative"
     if not action_values:
         raise ValueError("action values cannot be empty")
     if len(state.regret_sums) != len(action_values):
@@ -19,6 +20,7 @@ def apply_solver_strategy_update(
         raise ValueError("state and action values must have the same length")
 
     strategy = normalize_strategy(regret_matching(state.regret_sums))
+    assert len(strategy) == len(action_values), "strategy and action values must align"
     node_value = sum(prob * value for prob, value in zip(strategy, action_values, strict=True))
     regret_sums = update_regret(state.regret_sums, action_values, node_value)
     strategy_sums = update_average_strategy(state.strategy_sums, strategy, reach_weight)

@@ -9,9 +9,11 @@ class DenseCfrState:
     strategy_sums: tuple[tuple[float, ...], ...]
 
     def __post_init__(self) -> None:
+        assert self.regret_sums or self.strategy_sums, "dense CFR tables cannot be empty"
         if len(self.regret_sums) != len(self.strategy_sums):
             raise ValueError("regret and strategy tables must have the same size")
         for regrets, strategy_sums in zip(self.regret_sums, self.strategy_sums, strict=True):
+            assert regrets, "regret rows cannot be empty"
             if len(regrets) != len(strategy_sums):
                 raise ValueError("regret and strategy rows must have the same width")
 
@@ -21,6 +23,11 @@ class SolverState:
     regret_sums: tuple[float, ...]
     strategy_sums: tuple[float, ...]
 
+    def __post_init__(self) -> None:
+        assert self.regret_sums or self.strategy_sums, "solver state cannot be empty"
+        if len(self.regret_sums) != len(self.strategy_sums):
+            raise ValueError("regret and strategy vectors must have the same length")
+
 
 @dataclass(slots=True, frozen=True)
 class SolverIterationResult:
@@ -28,3 +35,7 @@ class SolverIterationResult:
     strategy: tuple[float, ...]
     node_value: float
     action_values: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        assert self.strategy, "strategy cannot be empty"
+        assert self.action_values, "action values cannot be empty"

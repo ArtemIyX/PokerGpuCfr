@@ -16,6 +16,7 @@ class ReachResult:
 
 
 def normalize_strategy(weights: tuple[float, ...]) -> tuple[float, ...]:
+    assert weights, "strategy weights cannot be empty"
     if not weights:
         raise ValueError("strategy weights cannot be empty")
     total = sum(max(0.0, weight) for weight in weights)
@@ -32,6 +33,7 @@ def propagate_reach(
     infoset_table: DenseInfosetTable | None = None,
 ) -> ReachResult:
     table = infoset_table or build_dense_infoset_table(tree)
+    assert len(table.node_to_infoset) == tree.node_count, "infoset table must align with tree"
     strategies = infoset_strategies or {}
     node_reach = [0.0 for _ in range(tree.node_count)]
     infoset_reach_map: dict[int, float] = {}
@@ -39,6 +41,7 @@ def propagate_reach(
     action_reach: list[tuple[float, ...]] = [() for _ in range(tree.node_count)]
 
     node_reach[0] = root_reach
+    assert node_reach[0] >= 0.0, "root reach must be non-negative"
 
     for node_index in range(tree.node_count):
         current_reach = node_reach[node_index]
@@ -49,6 +52,7 @@ def propagate_reach(
         if node_type is NodeType.CHANCE:
             child_links = tree.child_links(NodeId(node_index))
             total_prob = sum(link.chance_prob or 0.0 for link in child_links)
+            assert child_links, "chance nodes must have children"
             if abs(total_prob - 1.0) > 1e-6:
                 raise ValueError("chance probabilities must sum to 1")
             for link in child_links:
@@ -71,6 +75,7 @@ def propagate_reach(
             raise ValueError("strategy length must match the node branching factor")
         if table.action_counts[infoset_id] != len(child_links):
             raise ValueError("infoset action count must match the node branching factor")
+        assert len(table.infoset_nodes[infoset_id]) >= 1, "infoset must have at least one node"
 
         infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
         action_reach[node_index] = strategy
@@ -99,6 +104,7 @@ def propagate_reach(
         for node_index in nodes[1:]:
             if tree.child_count[node_index] != node_branching:
                 raise ValueError("infoset nodes must share the same branching factor")
+            assert tree.node_types[node_index] in {NodeType.PLAYER0, NodeType.PLAYER1}
 
     return ReachResult(
         node_reach=tuple(node_reach),

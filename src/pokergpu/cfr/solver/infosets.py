@@ -18,6 +18,7 @@ class DenseInfosetTable:
 
 
 def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
+    assert tree.node_count > 0, "public tree cannot be empty"
     node_to_infoset = [-1 for _ in range(tree.node_count)]
     infoset_to_node: dict[int, int] = {}
     action_counts: dict[int, int] = {}
@@ -34,6 +35,7 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         infoset_to_node.setdefault(dense_id, node_index)
         action_counts[dense_id] = tree.child_count[node_index]
         infoset_nodes.setdefault(dense_id, []).append(node_index)
+        assert tree.child_count[node_index] > 0, "player infosets must have actions"
 
     if infoset_to_node:
         max_infoset = max(infoset_to_node)

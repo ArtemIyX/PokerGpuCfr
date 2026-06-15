@@ -13,6 +13,7 @@ def run_solver_iteration(
     *,
     reach_weight: float = 1.0,
 ) -> SolverIterationResult:
+    assert action_values, "action values cannot be empty"
     return apply_solver_strategy_update(
         state,
         action_values,
@@ -25,6 +26,7 @@ def run_tree_root_iteration(
     state: SolverState,
     reach_weight: float = 1.0,
 ) -> SolverIterationResult:
+    assert tree.node_count > 0, "public tree cannot be empty"
     return apply_solver_strategy_update(
         state,
         evaluate_root_action_values(tree),

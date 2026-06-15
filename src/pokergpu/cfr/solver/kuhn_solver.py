@@ -17,6 +17,7 @@ def run_kuhn_root_iteration(
     tree = make_kuhn_public_tree()
     reach = propagate_reach(tree)
     action_values = aggregate_action_values(tree, NodeId(1))
+    assert len(action_values) == len(state.regret_sums), "kuhn action values must match state width"
     return apply_solver_strategy_update(
         state,
         action_values,
