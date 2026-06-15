@@ -59,8 +59,7 @@ def aggregate_prob_sum(
     street = _street_code(board_street)
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
-    board_card_mask, board_card_vector = _board_card_features(board)
-    leaf_card_reach_vector = _leaf_card_reach_vector(board_card_mask, board_size)
+    board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -116,15 +115,20 @@ def _board_signature(board: Board | None) -> int:
     return signature
 
 
-def _board_card_features(board: Board | None) -> tuple[tuple[bool, ...], tuple[float, ...]]:
+def _board_card_features(
+    board: Board | None,
+) -> tuple[tuple[bool, ...], tuple[float, ...], tuple[float, ...]]:
     mask = [False] * 52
     if board is None:
         empty_mask = tuple(mask)
-        return empty_mask, tuple(0.0 for _ in empty_mask)
+        empty_vector = tuple(0.0 for _ in empty_mask)
+        return empty_mask, empty_vector, empty_vector
     for card in board.cards:
         mask[_card_index(card.rank, card.suit)] = True
     mask_tuple = tuple(mask)
-    return mask_tuple, tuple(1.0 if present else 0.0 for present in mask_tuple)
+    board_vector = tuple(1.0 if present else 0.0 for present in mask_tuple)
+    leaf_vector = _leaf_card_reach_vector(mask_tuple, len(board.cards))
+    return mask_tuple, board_vector, leaf_vector
 
 
 def _card_index(rank: Rank, suit: Suit) -> int:
@@ -152,10 +156,7 @@ def _card_index(rank: Rank, suit: Suit) -> int:
     return suit_index * 13 + rank_index
 
 
-def _leaf_card_reach_vector(
-    board_card_mask: tuple[bool, ...],
-    board_size: int,
-) -> tuple[float, ...]:
+def _leaf_card_reach_vector(board_card_mask: tuple[bool, ...], board_size: int) -> tuple[float, ...]:
     live_card_count = 52 - board_size
     if live_card_count <= 0:
         return tuple(0.0 for _ in range(52))
