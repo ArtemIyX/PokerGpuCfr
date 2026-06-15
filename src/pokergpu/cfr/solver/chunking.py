@@ -13,3 +13,11 @@ def chunk_indices(indices: tuple[int, ...] | list[int], max_workers: int | None)
         tuple(indices[index : index + chunk_size])
         for index in range(0, len(indices), chunk_size)
     )
+
+
+def chunk_count(count: int, max_workers: int | None) -> int:
+    if count <= 0:
+        return 0
+    if max_workers is None or max_workers <= 1 or count <= 1:
+        return 1
+    return min(max_workers, count)
