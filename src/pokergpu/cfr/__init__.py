@@ -1,6 +1,14 @@
 from .stage1 import ForwardProfileResult, normalize_strategy, propagate_forward
 from .stage2 import AggregateProbSumResult, aggregate_prob_sum
 from .stage3 import OpponentReachResult, compute_opponent_reach
+from .stage4 import (
+    ShowdownEquityInput,
+    ShowdownEquityInputRow,
+    ShowdownEquityOutputRow,
+    ShowdownEquityResult,
+    build_showdown_equity_input,
+    compute_showdown_equity,
+)
 from .solver import (
     DenseCfrState,
     SolverIterationResult,
@@ -15,11 +23,17 @@ __all__ = [
     "ForwardProfileResult",
     "AggregateProbSumResult",
     "OpponentReachResult",
+    "ShowdownEquityInput",
+    "ShowdownEquityInputRow",
+    "ShowdownEquityOutputRow",
+    "ShowdownEquityResult",
     "SolverIterationResult",
     "SolverState",
     "make_toy_public_tree",
     "aggregate_prob_sum",
     "compute_opponent_reach",
+    "build_showdown_equity_input",
+    "compute_showdown_equity",
     "normalize_strategy",
     "propagate_forward",
     "regret_matching",
