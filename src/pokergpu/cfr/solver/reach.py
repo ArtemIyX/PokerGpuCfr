@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from math import ceil
+from collections.abc import Mapping
 
 from pokergpu.tree.public_tree import InfosetId, NodeId, NodeType, PublicTree
 
@@ -31,7 +32,7 @@ def propagate_reach(
     tree: PublicTree,
     *,
     root_reach: float = 1.0,
-    infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
+    infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
     infoset_table: DenseInfosetTable | None = None,
     max_workers: int | None = None,
 ) -> ReachResult:
@@ -70,8 +71,9 @@ def propagate_reach(
         action_rows: list[tuple[int, tuple[float, ...]]] = []
         nodes = table.infoset_nodes[infoset_id]
         assert nodes, "infoset must have at least one node"
+        local_node_reach = {node_index: node_reach[node_index] for node_index in nodes}
         for node_index in nodes:
-            current_reach = node_reach[node_index]
+            current_reach = local_node_reach[node_index]
             if current_reach <= 0.0:
                 continue
             child_links = tree.child_links(NodeId(node_index))
@@ -91,6 +93,8 @@ def propagate_reach(
                 delta = current_reach * strategy[child_index]
                 cumulative[child_index] += delta
                 updates.append((int(link.child), delta))
+                if int(link.child) in local_node_reach:
+                    local_node_reach[int(link.child)] += delta
         return infoset_id, infoset_reach, tuple(cumulative or ()), updates, action_rows
 
     infoset_ids = list(table.infoset_order)

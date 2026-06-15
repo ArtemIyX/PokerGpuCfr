@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 
 from pokergpu.tree.public_tree import InfosetId, NodeId, NodeType, PublicTree
 
@@ -25,7 +26,7 @@ def propagate_forward(
     tree: PublicTree,
     *,
     root_reach: float = 1.0,
-    infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
+    infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
 ) -> ForwardProfileResult:
     strategies = infoset_strategies or {}
     node_reach = [0.0 for _ in range(tree.node_count)]
