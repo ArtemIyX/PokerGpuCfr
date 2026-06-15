@@ -16,6 +16,7 @@ class LeafFeatures:
     board_size: int
     board_signature: int
     board_card_mask: tuple[bool, ...]
+    board_card_vector: tuple[float, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -58,6 +59,7 @@ def aggregate_prob_sum(
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
     board_card_mask = _board_card_mask(board)
+    board_card_vector = tuple(1.0 if present else 0.0 for present in board_card_mask)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -70,6 +72,7 @@ def aggregate_prob_sum(
                     board_size=board_size,
                     board_signature=board_signature,
                     board_card_mask=board_card_mask,
+                    board_card_vector=board_card_vector,
                 ),
             )
             for node_index in leaf_node_ids

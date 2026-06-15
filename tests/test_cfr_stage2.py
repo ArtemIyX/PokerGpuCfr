@@ -42,6 +42,8 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
     assert result.leaf_batch.rows[0].features.board_signature == 0
     assert len(result.leaf_batch.rows[0].features.board_card_mask) == 52
     assert not any(result.leaf_batch.rows[0].features.board_card_mask)
+    assert len(result.leaf_batch.rows[0].features.board_card_vector) == 52
+    assert sum(result.leaf_batch.rows[0].features.board_card_vector) == 0.0
 
 
 def test_aggregate_prob_sum_uses_board_street() -> None:
@@ -65,6 +67,7 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
     assert result.leaf_batch.rows[0].features.board_size == 3
     assert result.leaf_batch.rows[0].features.board_signature != 0
     assert sum(result.leaf_batch.rows[0].features.board_card_mask) == 3
+    assert sum(result.leaf_batch.rows[0].features.board_card_vector) == 3.0
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
