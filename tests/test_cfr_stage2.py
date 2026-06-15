@@ -33,6 +33,7 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
     assert result.node_aggregate.reach == (1.0, 0.5, 0.25)
     assert len(result.node_aggregate.card_reach) == 3
     assert len(result.node_aggregate.card_reach[0]) == 52
+    assert result.node_aggregate.reach[0] == 1.0
     assert result.leaf_node_ids == (1,)
     assert result.leaf_reach_sum == (0.5,)
     assert result.leaf_batch.rows[0].node_id == 1
@@ -77,6 +78,29 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
         1 for value in result.leaf_batch.rows[0].features.leaf_card_reach_vector if value > 0.0
     ) == 49
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(1.0)
+
+
+def test_node_card_aggregate_holds_node_and_card_reach() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(2.0,),
+        infoset_reach=(),
+        action_reach=((),),
+    )
+
+    result = aggregate_prob_sum(tree, forward)
+
+    assert result.node_aggregate.reach == (2.0,)
+    assert len(result.node_aggregate.card_reach) == 1
+    assert len(result.node_aggregate.card_reach[0]) == 52
+    assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(2.0)
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
