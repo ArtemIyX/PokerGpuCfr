@@ -11,6 +11,7 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 class OpponentReachResult:
     infoset_opponent_reach: tuple[float, ...]
     infoset_card_opponent_reach: tuple[tuple[float, ...], ...]
+    infoset_node_card_ratio: tuple[tuple[tuple[float, ...], ...], ...]
     node_opponent_reach: tuple[float, ...]
     node_opponent_share: tuple[float, ...]
 
@@ -30,16 +31,18 @@ def compute_opponent_reach(
     node_opponent_share = [0.0 for _ in range(tree.node_count)]
     infoset_opponent_reach = [0.0 for _ in range(len(infoset_nodes))]
     infoset_card_opponent_reach = [tuple(0.0 for _ in range(52)) for _ in range(len(infoset_nodes))]
+    infoset_node_card_ratio: list[tuple[tuple[float, ...], ...]] = [tuple() for _ in range(len(infoset_nodes))]
 
     def process_infoset(
         infoset_id: int,
-    ) -> tuple[int, float, tuple[float, ...], list[tuple[int, float]]]:
+    ) -> tuple[int, float, tuple[float, ...], tuple[tuple[float, ...], ...], list[tuple[int, float]]]:
         nodes = infoset_nodes[infoset_id]
         if not nodes:
             raise ValueError("infoset must have at least one node")
 
         reach_total = 0.0
         card_reach = [0.0 for _ in range(52)]
+        node_card_reach_rows: list[tuple[float, ...]] = []
         for node_index in nodes:
             if tree.node_types[node_index] not in {NodeType.PLAYER0, NodeType.PLAYER1}:
                 raise ValueError("infoset nodes must be player nodes")
@@ -49,6 +52,16 @@ def compute_opponent_reach(
                 raise ValueError("node card reach vectors must have length 52")
             for card_index, value in enumerate(node_card_reach):
                 card_reach[card_index] += value
+            node_card_reach_rows.append(node_card_reach)
+
+        card_total = tuple(card_reach)
+        node_card_ratio_rows: list[tuple[float, ...]] = []
+        for node_card_reach in node_card_reach_rows:
+            ratios = []
+            for card_index, value in enumerate(node_card_reach):
+                total = card_total[card_index]
+                ratios.append(0.0 if total <= 0.0 else value / total)
+            node_card_ratio_rows.append(tuple(ratios))
 
         node_shares: list[tuple[int, float]] = []
         if reach_total > 0.0:
@@ -60,7 +73,7 @@ def compute_opponent_reach(
             for node_index in nodes:
                 node_shares.append((node_index, uniform_share))
 
-        return infoset_id, reach_total, tuple(card_reach), node_shares
+        return infoset_id, reach_total, card_total, tuple(node_card_ratio_rows), node_shares
 
     infoset_ids = list(range(len(infoset_nodes)))
     if max_workers is None or max_workers <= 1 or len(infoset_ids) <= 1:
@@ -69,15 +82,17 @@ def compute_opponent_reach(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(executor.map(process_infoset, infoset_ids))
 
-    for infoset_id, reach_total, card_reach, node_shares in results:
+    for infoset_id, reach_total, card_reach, node_card_ratios, node_shares in results:
         infoset_opponent_reach[infoset_id] = reach_total
         infoset_card_opponent_reach[infoset_id] = card_reach
+        infoset_node_card_ratio[infoset_id] = node_card_ratios
         for node_index, share in node_shares:
             node_opponent_share[node_index] = share
 
     return OpponentReachResult(
         infoset_opponent_reach=tuple(infoset_opponent_reach),
         infoset_card_opponent_reach=tuple(infoset_card_opponent_reach),
+        infoset_node_card_ratio=tuple(infoset_node_card_ratio),
         node_opponent_reach=node_opponent_reach,
         node_opponent_share=tuple(node_opponent_share),
     )
