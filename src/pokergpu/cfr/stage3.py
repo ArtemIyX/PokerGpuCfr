@@ -20,6 +20,7 @@ class OpponentReachResult:
     infoset_node_card_ratio: tuple[tuple[tuple[float, ...], ...], ...]
     node_opponent_reach: tuple[float, ...]
     node_opponent_share: tuple[float, ...]
+    node_hand_opponent_reach: tuple[tuple[float, ...], ...]
 
 
 def compute_opponent_reach(
@@ -40,6 +41,7 @@ def compute_opponent_reach(
 
     node_opponent_reach = tuple(aggregate.node_aggregate.reach)
     node_opponent_share = [0.0 for _ in range(tree.node_count)]
+    node_hand_opponent_reach = [tuple(0.0 for _ in range(hand_width)) for _ in range(tree.node_count)]
     infoset_opponent_reach = [0.0 for _ in range(len(infoset_nodes))]
     infoset_card_opponent_reach = [tuple(0.0 for _ in range(52)) for _ in range(len(infoset_nodes))]
     infoset_hand_opponent_reach = [tuple(0.0 for _ in range(hand_width)) for _ in range(len(infoset_nodes))]
@@ -53,6 +55,7 @@ def compute_opponent_reach(
         float,
         tuple[float, ...],
         tuple[float, ...],
+        tuple[tuple[float, ...], ...],
         tuple[tuple[float, ...], ...],
         tuple[tuple[float, ...], ...],
         list[tuple[int, float]],
@@ -91,6 +94,7 @@ def compute_opponent_reach(
         _validate_hand_totals(node_hand_reach_rows, hand_total)
         _validate_hand_ratio_rows(node_hand_ratio_rows, hand_width)
 
+        node_hand_rows = _brute_force_node_hand_reach(node_hand_reach_rows, hand_total)
         node_shares: list[tuple[int, float]] = []
         if reach_total > 0.0:
             for node_index in nodes:
@@ -107,6 +111,7 @@ def compute_opponent_reach(
             card_total,
             hand_total,
             tuple(node_hand_ratio_rows),
+            node_hand_rows,
             tuple(node_card_ratio_rows),
             node_shares,
         )
@@ -118,12 +123,14 @@ def compute_opponent_reach(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(executor.map(process_infoset, infoset_ids))
 
-    for infoset_id, reach_total, card_reach, hand_reach, node_hand_ratios, node_card_ratios, node_shares in results:
+    for infoset_id, reach_total, card_reach, hand_reach, node_hand_ratios, node_hand_rows, node_card_ratios, node_shares in results:
         infoset_opponent_reach[infoset_id] = reach_total
         infoset_card_opponent_reach[infoset_id] = card_reach
         infoset_hand_opponent_reach[infoset_id] = hand_reach
         infoset_node_hand_ratio[infoset_id] = node_hand_ratios
         infoset_node_card_ratio[infoset_id] = node_card_ratios
+        for node_index, node_hand_row in zip(infoset_nodes[infoset_id], node_hand_rows, strict=True):
+            node_hand_opponent_reach[node_index] = node_hand_row
         for node_index, share in node_shares:
             node_opponent_share[node_index] = share
 
@@ -135,6 +142,7 @@ def compute_opponent_reach(
         infoset_node_card_ratio=tuple(infoset_node_card_ratio),
         node_opponent_reach=node_opponent_reach,
         node_opponent_share=tuple(node_opponent_share),
+        node_hand_opponent_reach=tuple(node_hand_opponent_reach),
     )
 
 
@@ -168,6 +176,20 @@ def _normalize_blocking_reach_rows(
             ratios.append(0.0 if total <= 0.0 else value / total)
         normalized_rows.append(tuple(ratios))
     return tuple(normalized_rows)
+
+
+def _brute_force_node_hand_reach(
+    node_hand_reach_rows: list[tuple[float, ...]],
+    hand_total: tuple[float, ...],
+) -> tuple[tuple[float, ...], ...]:
+    if not node_hand_reach_rows:
+        return ()
+    if len(hand_total) == 0:
+        return tuple(tuple() for _ in node_hand_reach_rows)
+    return tuple(
+        tuple(0.0 if hand_total[hand_index] <= 0.0 else value for hand_index, value in enumerate(row))
+        for row in node_hand_reach_rows
+    )
 
 
 def _validate_card_ratio_rows(node_card_ratio_rows: list[tuple[float, ...]]) -> None:
