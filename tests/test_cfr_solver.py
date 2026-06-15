@@ -6,6 +6,7 @@ from pokergpu.core.betting import Chips
 from pokergpu.cfr.solver import (
     SolverState,
     aggregate_root_action_values,
+    make_toy_pipeline_tree,
     make_toy_public_tree,
     propagate_reach,
     propagate_opponent_reach,
@@ -22,6 +23,14 @@ def test_make_toy_public_tree_is_small_and_solved_like() -> None:
     assert tree.node_count == 3
     assert tree.node_types[0] is NodeType.PLAYER0
     assert tree.child_count[0] == 2
+
+
+def test_make_toy_pipeline_tree_includes_a_leaf() -> None:
+    tree = make_toy_pipeline_tree()
+
+    assert tree.node_count == 4
+    assert NodeType.LEAF in tree.node_types
+    assert tree.child_count[2] == 0
 
 
 def test_toy_solver_iteration_runs_on_tiny_tree_shape() -> None:
