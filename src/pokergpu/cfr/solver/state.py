@@ -17,14 +17,14 @@ class DenseCfrState:
 
 
 @dataclass(slots=True, frozen=True)
-class ToyCfrState:
+class SolverState:
     regret_sums: tuple[float, ...]
     strategy_sums: tuple[float, ...]
 
 
 @dataclass(slots=True, frozen=True)
-class ToyCfrResult:
-    state: ToyCfrState
+class SolverIterationResult:
+    state: SolverState
     strategy: tuple[float, ...]
     node_value: float
     action_values: tuple[float, ...]

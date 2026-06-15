@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from .state import ToyCfrResult, ToyCfrState
+from .state import SolverIterationResult, SolverState
 from ..stage1 import normalize_strategy
 from ..stage7 import regret_matching, update_average_strategy, update_regret
 
 
-def apply_toy_strategy_update(
-    state: ToyCfrState,
+def apply_solver_strategy_update(
+    state: SolverState,
     action_values: tuple[float, ...],
     *,
     reach_weight: float = 1.0,
-) -> ToyCfrResult:
+) -> SolverIterationResult:
     if not action_values:
         raise ValueError("action values cannot be empty")
     if len(state.regret_sums) != len(action_values):
@@ -23,8 +23,8 @@ def apply_toy_strategy_update(
     regret_sums = update_regret(state.regret_sums, action_values, node_value)
     strategy_sums = update_average_strategy(state.strategy_sums, strategy, reach_weight)
 
-    return ToyCfrResult(
-        state=ToyCfrState(regret_sums=regret_sums, strategy_sums=strategy_sums),
+    return SolverIterationResult(
+        state=SolverState(regret_sums=regret_sums, strategy_sums=strategy_sums),
         strategy=strategy,
         node_value=node_value,
         action_values=action_values,
