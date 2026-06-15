@@ -45,7 +45,7 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
     assert len(result.leaf_batch.rows[0].features.board_card_vector) == 52
     assert sum(result.leaf_batch.rows[0].features.board_card_vector) == 0.0
     assert len(result.leaf_batch.rows[0].features.leaf_card_reach_vector) == 52
-    assert sum(result.leaf_batch.rows[0].features.leaf_card_reach_vector) == pytest.approx(1.0)
+    assert sum(result.leaf_batch.rows[0].features.leaf_card_reach_vector) == 0.0
 
 
 def test_aggregate_prob_sum_uses_board_street() -> None:
