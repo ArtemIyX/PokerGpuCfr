@@ -137,19 +137,80 @@ Decomposed into 7 stages, each parallelizable:
 - Each stage has a defined interface and can be optimized independently
 - CFR variant only affects Stage 7; Stages 1–6 are identical across variants
 
+## CFR iteration pipeline
+
+**ForwardProfile** *(infoset parallel)*
+↓
+**AggregateProbability** *(node parallel)*
+↓ ↓ (parallel)
+
+| Left branch | Right branch |
+|---|---|
+| **OpponentReach** *(node parallel)* | **GPULeafEval** *(GPU batch)* |
+| **ShowdownEquity** *(node parallel)* | |
+
+↓ (join)
+**BackwardCFV** *(node parallel)*
+↓
+**UpdateRegret** *(infoset parallel)*
+
+> The parallel block runs OpponentReach + ShowdownEquity (CPU) alongside GPULeafEval (GPU batch) concurrently.
+
 ---
  
 **Stage details:**
  
 **S1 ForwardProfile** — infosets form independent chains; propagate reach sequentially within chain, parallel across chains. `πi(Ichild) = πi(Iparent) · σi(Iparent, a)`. Accumulate cumulative strategy π̄i(I) simultaneously.
+Information sets for a given player form<br>
+disjoint chains in the game tree. Within each chain, reach probabilities propagate sequentially:<br>
+πi(Ichild) = πi(Iparent) · σi(Iparent, a), (5)<br>
+where a is the action leading to Ichild. Chains are mutually independent, enabling parallel processing<br>
+across all chains. The cumulative reach-weighted strategy ¯πi(I) is accumulated simultaneously.<br>
  
 **S2 AggregateProbSum** — per node: aggregate reaches into 3 levels (Psum, Pcard, Phand) for O(1) blocking correction in S3. Parallel by node × card (52 dims). Builds leaf input tensor X ∈ R^(m×d) for GPU. Applies abstraction projection if used.
- 
+
+For each node n, we aggregate reach
+probabilities into three levels (total reach Psum, per-card reach Pcard, and per-hand reach Phand)<br>
+that enable O(1) card-blocking corrections in Stage 3 (see Appendix ?? for definitions). Node-level<br>
+aggregation is embarrassingly parallel; per-card sums add a second parallel dimension of size |C|<br>
+(e.g., 52 in poker).<br>
+
+For depth-limited solving, this stage also constructs the batched input tensor X ∈ R m×d for<br>
+all m non-terminal leaf nodes, preparing them for GPU evaluation in Stage 5. When information<br>
+abstraction is used, projection matrices bridge the game tree and network representation space
+
+After the forward pass, the pipeline forks into two independent branches: Stages 3–4 on CPU and<br>
+Stage 5 on GPU. Since they share no data dependency, they execute in parallel. In practice, GPU<br>
+evaluation time is entirely masked by the longer CPU branch on postflop streets.
+
 **S3 Opponent Reach** — naive summation is O(|H|²). Instead: (1) compute per-node ratios µ[n,h] via inclusion-exclusion on S2 aggregates (∥ node), (2) propagate π−i along chains (∥ chain). Avoids quadratic cost.
+
+Сomputing the opponent counterfactual<br>
+reach π−i(I) naively requires summing over all opponent hands at each information set, yielding<br>
+O(|H|2) complexity. We decompose this into two phases: first, compute per-node multiplicative ratios µ[n, h] using the three-level aggregates from Stage 2 via an inclusion-exclusion formula (parallel<br>
+by node); then propagate π−i along information set chains using these ratios (parallel by chain).<br>
+This avoids the quadratic cost while exposing parallelism in both phases.<br>
  
 **S4 ShowdownEquity** — rank-sorted linear scan reduces per-node cost from O(n²) to O(n). Independent nodes, trivially parallel. Blocking corrections applied.
+
+At showdown terminals, each hand’s equity must be<br>
+computed against the opponent’s reach-weighted range. Johanson et al. [2011] observed that hand<br>
+ranks induce a total order at showdown, enabling a rank-sorted linear scan that reduces per-node<br>
+complexity from O(n2) to O(n) where n is the number of hands. We adopt this technique with<br>
+our card-blocking corrections.Showdown nodes are independent, so this stage parallelizes trivially<br>
+across nodes. For games lacking the rank-monotonicity property of poker, one may pre-store a<br>
+payoff matrix and use sparsification methods [Farina and Sandholm, 2022] to compute showdown<br>
+values efficiently.
+
  
 **S5 BatchLeafEval** — single GPU forward pass: V̂ = fθ(X) ∈ R^(m×k). CPU-GPU transfer exactly twice per iteration. GPU time masked by S3–4 CPU branch on postflop.
+
+A single GPU forward pass evaluates all non-terminal leaves<br>
+simultaneously: Vˆ = fθ(X) ∈ R m×k<br>
+, where k is the output dimension (hands × players). This<br>
+reduces kernel launch overhead and keeps the GPU well-utilized. CPU–GPU data transfer occurs<br>
+exactly twice per iteration (input upload and output download), amortized across all leaf nodes.
+
  
 **S6 BackwardCFV** — weight leaf predictions by π−i(I) and chance probs. Propagate bottom-up within chains in reverse topological order. `vi(σ,I) = Σa σi(I,a)·vi(σ,I·a)`. Chains independent, parallel.
  
@@ -163,6 +224,19 @@ Decomposed into 7 stages, each parallelizable:
 - DCFR [Brown & Sandholm, 2019] — asymmetric discounting
 - Predictive CFR+ [Farina et al., 2021] — predictive regret matching
 
+
+## Integration with Pruning and Abstraction
+> Online Pruning. 
+
+Our pipeline integrates with online pruning methods that remove dominated<br>
+actions before CFR iterations begin. We adopt the EVPA framework [Li and Huang, 2025], which<br>
+uses a neural network ensemble to bound counterfactual values and prune actions whose optimistic<br>
+value is dominated by a sibling’s pessimistic value. Li and Huang [2025] proved that this pruning is<br>
+sound and demonstrated up to two orders of magnitude speedup. Since pruning is performed once<br>
+as a preprocessing step, it reduces the effective tree size by a factor ρ ∈ [0, 1] for all subsequent<br>
+CFR iterations, providing multiplicative speedup to every pipeline stage. Pruning decisions at<br>
+each information set are independent, so the pruning pass itself is embarrassingly parallel. All<br>
+experiments in this paper enable pruning by default.
 
 ## EV, Heuristic Eval, EV Normalization
 
