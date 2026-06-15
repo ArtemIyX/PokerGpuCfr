@@ -58,8 +58,7 @@ def aggregate_prob_sum(
     street = _street_code(board_street)
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
-    board_card_mask = _board_card_mask(board)
-    board_card_vector = tuple(1.0 if present else 0.0 for present in board_card_mask)
+    board_card_mask, board_card_vector = _board_card_features(board)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -114,13 +113,15 @@ def _board_signature(board: Board | None) -> int:
     return signature
 
 
-def _board_card_mask(board: Board | None) -> tuple[bool, ...]:
+def _board_card_features(board: Board | None) -> tuple[tuple[bool, ...], tuple[float, ...]]:
     mask = [False] * 52
     if board is None:
-        return tuple(mask)
+        empty_mask = tuple(mask)
+        return empty_mask, tuple(0.0 for _ in empty_mask)
     for card in board.cards:
         mask[_card_index(card.rank, card.suit)] = True
-    return tuple(mask)
+    mask_tuple = tuple(mask)
+    return mask_tuple, tuple(1.0 if present else 0.0 for present in mask_tuple)
 
 
 def _card_index(rank: Rank, suit: Suit) -> int:
