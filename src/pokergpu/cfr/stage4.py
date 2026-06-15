@@ -114,19 +114,28 @@ def build_showdown_equity_board_cache(
     live_hand_indices = tuple(
         index for index, is_live in enumerate(live_hand_mask) if is_live
     )
-    hand_scores = tuple(
-        _score_hand(evaluator_instance, hand, board) if is_live else 0
-        for hand, is_live in zip(hands, live_hand_mask, strict=True)
-    )
-    feasible_opponent_indices = tuple(
-        tuple(
-            opponent_index
-            for opponent_index in live_hand_indices
-            if hero_index != opponent_index
-            and (hand_card_masks[hero_index] & hand_card_masks[opponent_index]) == 0
-        )
-        for hero_index in range(private_hand_count())
-    )
+    hand_scores_list: list[int] = [0] * private_hand_count()
+    for hand_index, (hand, is_live) in enumerate(zip(hands, live_hand_mask, strict=True)):
+        if is_live:
+            hand_scores_list[hand_index] = _score_hand(evaluator_instance, hand, board)
+    hand_scores = tuple(hand_scores_list)
+
+    feasible_opponent_rows: list[tuple[int, ...]] = []
+    live_indices = live_hand_indices
+    hand_masks = hand_card_masks
+    for hero_index in range(private_hand_count()):
+        hero_mask = hand_masks[hero_index]
+        if not live_hand_mask[hero_index]:
+            feasible_opponent_rows.append(())
+            continue
+        feasible_row: list[int] = []
+        for opponent_index in live_indices:
+            if hero_index == opponent_index:
+                continue
+            if (hero_mask & hand_masks[opponent_index]) == 0:
+                feasible_row.append(opponent_index)
+        feasible_opponent_rows.append(tuple(feasible_row))
+    feasible_opponent_indices = tuple(feasible_opponent_rows)
     return ShowdownEquityBoardCache(
         board=board,
         live_hand_mask=live_hand_mask,
