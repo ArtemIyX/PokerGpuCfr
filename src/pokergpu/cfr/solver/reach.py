@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from pokergpu.tree.public_tree import InfosetId, NodeId, NodeType, PublicTree
 
+from .infosets import DenseInfosetTable, build_dense_infoset_table
+
 
 @dataclass(slots=True, frozen=True)
 class ReachResult:
@@ -26,10 +28,11 @@ def propagate_reach(
     *,
     root_reach: float = 1.0,
     infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
+    infoset_table: DenseInfosetTable | None = None,
 ) -> ReachResult:
+    table = infoset_table or build_dense_infoset_table(tree)
     strategies = infoset_strategies or {}
     node_reach = [0.0 for _ in range(tree.node_count)]
-    infoset_ids = [int(info) if info is not None else -1 for info in tree.infoset_ids]
     infoset_reach_map: dict[int, float] = {}
     action_reach: list[tuple[float, ...]] = [() for _ in range(tree.node_count)]
 
@@ -54,7 +57,7 @@ def propagate_reach(
         if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
             continue
 
-        infoset_id = infoset_ids[node_index]
+        infoset_id = table.node_to_infoset[node_index]
         if infoset_id < 0:
             continue
 
@@ -64,6 +67,8 @@ def propagate_reach(
         )
         if len(strategy) != len(child_links):
             raise ValueError("strategy length must match the node branching factor")
+        if table.action_counts[infoset_id] != len(child_links):
+            raise ValueError("infoset action count must match the node branching factor")
 
         infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
         action_reach[node_index] = strategy

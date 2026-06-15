@@ -3,6 +3,7 @@ from __future__ import annotations
 from pokergpu.cfr.solver import (
     SolverState,
     aggregate_action_values,
+    build_dense_infoset_table,
     make_kuhn_public_tree,
     propagate_reach,
     run_kuhn_root_iteration,
@@ -20,7 +21,8 @@ def test_make_kuhn_public_tree_has_chance_root() -> None:
 def test_kuhn_reach_and_action_values_are_wired() -> None:
     tree = make_kuhn_public_tree()
 
-    reach = propagate_reach(tree)
+    table = build_dense_infoset_table(tree)
+    reach = propagate_reach(tree, infoset_table=table)
     values = aggregate_action_values(tree, NodeId(1))
 
     assert reach.node_reach[0] == 1.0
