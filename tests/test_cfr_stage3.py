@@ -42,6 +42,9 @@ def test_compute_opponent_reach_aggregates_infoset_reach() -> None:
     assert sum(result.infoset_card_opponent_reach[0]) == pytest.approx(1.4)
     assert len(result.infoset_hand_opponent_reach) == 1
     assert len(result.infoset_hand_opponent_reach[0]) == 1326
+    assert len(result.infoset_node_hand_ratio) == 1
+    assert len(result.infoset_node_hand_ratio[0]) == 2
+    assert len(result.infoset_node_hand_ratio[0][0]) == 1326
     assert len(result.infoset_node_card_ratio) == 1
     assert len(result.infoset_node_card_ratio[0]) == 2
     assert len(result.infoset_node_card_ratio[0][0]) == 52
@@ -80,6 +83,7 @@ def test_compute_opponent_reach_uses_uniform_shares_for_zero_reach_infoset() -> 
     assert len(result.infoset_card_opponent_reach) == 1
     assert sum(result.infoset_card_opponent_reach[0]) == 0.0
     assert len(result.infoset_hand_opponent_reach[0]) == 1326
+    assert len(result.infoset_node_hand_ratio[0]) == 2
     assert len(result.infoset_node_card_ratio[0]) == 2
     assert sum(result.infoset_node_card_ratio[0][0]) == 0.0
     assert result.node_opponent_share == (0.5, 0.5)
@@ -145,6 +149,8 @@ def test_compute_opponent_reach_handles_repeated_infosets() -> None:
     assert sum(result.infoset_card_opponent_reach[0]) == pytest.approx(1.25)
     assert sum(result.infoset_card_opponent_reach[1]) == pytest.approx(0.5)
     assert len(result.infoset_hand_opponent_reach[0]) == 1326
+    assert len(result.infoset_node_hand_ratio[0]) == 2
+    assert len(result.infoset_node_hand_ratio[1]) == 1
     assert len(result.infoset_node_card_ratio[0]) == 2
     assert len(result.infoset_node_card_ratio[1]) == 1
     assert result.infoset_node_card_ratio[0][0][0] + result.infoset_node_card_ratio[0][1][0] == pytest.approx(1.0)

@@ -12,6 +12,7 @@ class OpponentReachResult:
     infoset_opponent_reach: tuple[float, ...]
     infoset_card_opponent_reach: tuple[tuple[float, ...], ...]
     infoset_hand_opponent_reach: tuple[tuple[float, ...], ...]
+    infoset_node_hand_ratio: tuple[tuple[tuple[float, ...], ...], ...]
     infoset_node_card_ratio: tuple[tuple[tuple[float, ...], ...], ...]
     node_opponent_reach: tuple[float, ...]
     node_opponent_share: tuple[float, ...]
@@ -36,6 +37,7 @@ def compute_opponent_reach(
     infoset_opponent_reach = [0.0 for _ in range(len(infoset_nodes))]
     infoset_card_opponent_reach = [tuple(0.0 for _ in range(52)) for _ in range(len(infoset_nodes))]
     infoset_hand_opponent_reach = [tuple(0.0 for _ in range(hand_width)) for _ in range(len(infoset_nodes))]
+    infoset_node_hand_ratio: list[tuple[tuple[float, ...], ...]] = [tuple() for _ in range(len(infoset_nodes))]
     infoset_node_card_ratio: list[tuple[tuple[float, ...], ...]] = [tuple() for _ in range(len(infoset_nodes))]
 
     def process_infoset(
@@ -45,6 +47,7 @@ def compute_opponent_reach(
         float,
         tuple[float, ...],
         tuple[float, ...],
+        tuple[tuple[float, ...], ...],
         tuple[tuple[float, ...], ...],
         list[tuple[int, float]],
     ]:
@@ -77,8 +80,10 @@ def compute_opponent_reach(
         card_total = tuple(card_reach)
         hand_total = tuple(hand_reach)
         node_card_ratio_rows = _normalize_card_reach_rows(node_card_reach_rows, card_total)
+        node_hand_ratio_rows = _normalize_card_reach_rows(node_hand_reach_rows, hand_total)
         _validate_card_ratio_rows(node_card_ratio_rows)
         _validate_hand_totals(node_hand_reach_rows, hand_total)
+        _validate_hand_ratio_rows(node_hand_ratio_rows, hand_width)
 
         node_shares: list[tuple[int, float]] = []
         if reach_total > 0.0:
@@ -95,6 +100,7 @@ def compute_opponent_reach(
             reach_total,
             card_total,
             hand_total,
+            tuple(node_hand_ratio_rows),
             tuple(node_card_ratio_rows),
             node_shares,
         )
@@ -106,10 +112,11 @@ def compute_opponent_reach(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(executor.map(process_infoset, infoset_ids))
 
-    for infoset_id, reach_total, card_reach, hand_reach, node_card_ratios, node_shares in results:
+    for infoset_id, reach_total, card_reach, hand_reach, node_hand_ratios, node_card_ratios, node_shares in results:
         infoset_opponent_reach[infoset_id] = reach_total
         infoset_card_opponent_reach[infoset_id] = card_reach
         infoset_hand_opponent_reach[infoset_id] = hand_reach
+        infoset_node_hand_ratio[infoset_id] = node_hand_ratios
         infoset_node_card_ratio[infoset_id] = node_card_ratios
         for node_index, share in node_shares:
             node_opponent_share[node_index] = share
@@ -118,6 +125,7 @@ def compute_opponent_reach(
         infoset_opponent_reach=tuple(infoset_opponent_reach),
         infoset_card_opponent_reach=tuple(infoset_card_opponent_reach),
         infoset_hand_opponent_reach=tuple(infoset_hand_opponent_reach),
+        infoset_node_hand_ratio=tuple(infoset_node_hand_ratio),
         infoset_node_card_ratio=tuple(infoset_node_card_ratio),
         node_opponent_reach=node_opponent_reach,
         node_opponent_share=tuple(node_opponent_share),
@@ -158,6 +166,15 @@ def _validate_hand_totals(
     hand_width = len(hand_total)
     if any(len(row) != hand_width for row in node_hand_reach_rows):
         raise ValueError("hand reach rows must have consistent width")
+
+
+def _validate_hand_ratio_rows(
+    node_hand_ratio_rows: list[tuple[float, ...]],
+    hand_width: int,
+) -> None:
+    for row in node_hand_ratio_rows:
+        if len(row) != hand_width:
+            raise ValueError("hand ratio rows must have consistent width")
 
 
 def _collect_infoset_nodes(tree: PublicTree) -> tuple[tuple[int, ...], ...]:
