@@ -103,6 +103,33 @@ def test_node_card_aggregate_holds_node_and_card_reach() -> None:
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(2.0)
 
 
+def test_aggregate_prob_sum_parallel_node_card_reach() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.LEAF,
+            NodeType.LEAF,
+            NodeType.LEAF,
+        ),
+        first_child=(0, 0, 0),
+        child_count=(0, 0, 0),
+        children=(),
+        infoset_ids=(None, None, None),
+        terminal_payoffs=(None, None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 2.0, 3.0),
+        infoset_reach=(),
+        action_reach=((), (), ()),
+    )
+
+    result = aggregate_prob_sum(tree, forward, max_workers=2)
+
+    assert len(result.node_aggregate.card_reach) == 3
+    assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(1.0)
+    assert sum(result.node_aggregate.card_reach[1]) == pytest.approx(2.0)
+    assert sum(result.node_aggregate.card_reach[2]) == pytest.approx(3.0)
+
+
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0,),

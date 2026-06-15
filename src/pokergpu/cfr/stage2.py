@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
@@ -50,14 +51,16 @@ def aggregate_prob_sum(
     tree: PublicTree,
     forward: ForwardProfileResult,
     board: Board | None = None,
+    max_workers: int | None = None,
 ) -> AggregateProbSumResult:
     if tree.node_count != len(forward.node_reach):
         raise ValueError("tree and forward pass must cover the same number of nodes")
 
     board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
-    node_card_reach = tuple(
-        _node_card_reach_vector(node_reach, board_card_mask)
-        for node_reach in forward.node_reach
+    node_card_reach = _build_node_card_reach(
+        forward.node_reach,
+        board_card_mask,
+        max_workers=max_workers,
     )
     leaf_node_ids = tuple(
         node_index
@@ -180,3 +183,21 @@ def _node_card_reach_vector(node_reach: float, board_card_mask: tuple[bool, ...]
         return tuple(0.0 for _ in range(52))
     weight = node_reach / live_count
     return tuple(0.0 if blocked else weight for blocked in board_card_mask)
+
+
+def _build_node_card_reach(
+    node_reach: tuple[float, ...],
+    board_card_mask: tuple[bool, ...],
+    *,
+    max_workers: int | None,
+) -> tuple[tuple[float, ...], ...]:
+    if max_workers is None or max_workers <= 1 or len(node_reach) <= 1:
+        return tuple(_node_card_reach_vector(value, board_card_mask) for value in node_reach)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return tuple(
+            executor.map(
+                lambda value: _node_card_reach_vector(value, board_card_mask),
+                node_reach,
+            )
+        )
