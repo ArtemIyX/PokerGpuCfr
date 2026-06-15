@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
-from pokergpu.cfr.stage2 import AggregateProbSumResult, aggregate_prob_sum
-from pokergpu.cfr.stage3 import OpponentReachResult, compute_opponent_reach
+from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.cfr.stage3 import compute_opponent_reach
 from pokergpu.cfr.stage4 import ShowdownEquityResult, build_showdown_equity_board_cache
 from pokergpu.cfr.stage4 import compute_showdown_equity
 from pokergpu.core.board import Board

@@ -57,9 +57,11 @@ def test_build_showdown_equity_board_cache_precomputes_board_only_data() -> None
     cache = build_showdown_equity_board_cache(board)
 
     assert cache.board == board
+    assert cache.street == board.street
     assert len(cache.live_hand_mask) == 1326
     assert len(cache.hand_scores) == 1326
     assert cache.hand_scores_array.shape == (1326,)
+    assert cache.hand_buckets_array.shape == (1326,)
     assert len(cache.live_hand_indices) < 1326
     assert len(cache.feasible_opponent_indices) == 1326
     assert sum(cache.live_hand_mask) == len(cache.live_hand_indices)
@@ -140,6 +142,37 @@ def test_compute_showdown_equity_has_exact_single_hand_showdown_value() -> None:
     assert 0.0 <= result.node_showdown_equity[0] <= 1.0
 
 
+def test_compute_showdown_equity_uses_approximation_on_flop() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    board = Board.from_str("AhKdTc")
+    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
+    aggregate = aggregate_prob_sum(tree, forward, board)
+    opponent = compute_opponent_reach(tree, aggregate)
+
+    result = compute_showdown_equity(tree, aggregate, opponent, board=board)
+
+    assert len(result.node_showdown_equity) == 1
+    assert 0.0 <= result.node_showdown_equity[0] <= 1.0
+    assert result.node_showdown_equity[0] == pytest.approx(result.node_showdown_equity_bb[0])
+
+
+def test_flop_cache_builds_without_exact_seven_card_eval() -> None:
+    board = Board.from_str("AhKdTc")
+
+    cache = build_showdown_equity_board_cache(board)
+
+    assert cache.street == board.street
+    assert len(cache.hand_buckets) == 1326
+    assert all(bucket >= -1 for bucket in cache.hand_buckets)
+
+
 def test_compute_showdown_equity_rejects_preflop_board() -> None:
     tree = PublicTree(
         node_types=(NodeType.LEAF,),
@@ -157,5 +190,5 @@ def test_compute_showdown_equity_rejects_preflop_board() -> None:
     aggregate = aggregate_prob_sum(tree, forward)
     opponent = compute_opponent_reach(tree, aggregate)
 
-    with pytest.raises(ValueError, match="river board"):
+    with pytest.raises(ValueError, match="postflop board"):
         compute_showdown_equity(tree, aggregate, opponent)

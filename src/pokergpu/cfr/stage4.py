@@ -14,7 +14,7 @@ from pokergpu.abstraction.hands import private_hand_mask
 from pokergpu.cfr.stage2 import AggregateProbSumResult
 from pokergpu.cfr.stage3 import OpponentReachResult
 from pokergpu.core.cards import Card
-from pokergpu.core.board import Board
+from pokergpu.core.board import Board, Street
 from pokergpu.eval.treys_evaluator import TreysHandEvaluator
 from pokergpu.tree.public_tree import PublicTree
 
@@ -51,9 +51,12 @@ class ShowdownEquityResult:
 @dataclass(slots=True, frozen=True)
 class ShowdownEquityBoardCache:
     board: Board
+    street: Street
     live_hand_mask: tuple[bool, ...]
     hand_scores: tuple[int, ...]
     hand_scores_array: np.ndarray
+    hand_buckets: tuple[int, ...]
+    hand_buckets_array: np.ndarray
     live_hand_indices: tuple[int, ...]
     feasible_opponent_indices: tuple[np.ndarray, ...]
     hand_card_masks: tuple[int, ...]
@@ -61,10 +64,16 @@ class ShowdownEquityBoardCache:
     def __post_init__(self) -> None:
         if len(self.live_hand_mask) != private_hand_count():
             raise ValueError("live hand mask must match private hand count")
+        if self.street is Street.PREFLOP:
+            raise ValueError("showdown cache requires postflop street")
         if len(self.hand_scores) != private_hand_count():
             raise ValueError("hand scores must match private hand count")
         if self.hand_scores_array.ndim != 1 or len(self.hand_scores_array) != private_hand_count():
             raise ValueError("hand scores array must match private hand count")
+        if len(self.hand_buckets) != private_hand_count():
+            raise ValueError("hand buckets must match private hand count")
+        if self.hand_buckets_array.ndim != 1 or len(self.hand_buckets_array) != private_hand_count():
+            raise ValueError("hand buckets array must match private hand count")
         if len(self.live_hand_indices) != sum(1 for is_live in self.live_hand_mask if is_live):
             raise ValueError("live hand indices must match live hand mask")
         if len(self.feasible_opponent_indices) != private_hand_count():
@@ -121,8 +130,8 @@ def _build_showdown_equity_board_cache_uncached(
     *,
     evaluator: TreysHandEvaluator | None = None,
 ) -> ShowdownEquityBoardCache:
-    if len(board.cards) != 5:
-        raise ValueError("showdown equity requires a river board")
+    if len(board.cards) not in {3, 4, 5}:
+        raise ValueError("showdown equity requires a postflop board")
 
     evaluator_instance = evaluator or TreysHandEvaluator()
     live_hand_mask = tuple(private_hand_mask(board.cards))
@@ -133,19 +142,30 @@ def _build_showdown_equity_board_cache_uncached(
     live_hand_indices = tuple(
         index for index, is_live in enumerate(live_hand_mask) if is_live
     )
-    live_hands = tuple(
-        hand for hand, is_live in zip(hands, live_hand_mask, strict=True) if is_live
-    )
-    live_scores = evaluator_instance.evaluate_seven_card_hands(
-        tuple((hand.first, hand.second, *board.cards) for hand in live_hands)
-    )
     hand_scores_list: list[int] = [0] * private_hand_count()
-    live_score_iter = iter(live_scores)
-    for hand_index, is_live in enumerate(live_hand_mask):
-        if is_live:
-            hand_scores_list[hand_index] = next(live_score_iter).score
+    hand_buckets_list: list[int] = [-1] * private_hand_count()
+    if board.street is Street.RIVER:
+        live_hands = tuple(
+            hand for hand, is_live in zip(hands, live_hand_mask, strict=True) if is_live
+        )
+        live_scores = evaluator_instance.evaluate_seven_card_hands(
+            tuple((hand.first, hand.second, *board.cards) for hand in live_hands)
+        )
+        live_score_iter = iter(live_scores)
+        for hand_index, is_live in enumerate(live_hand_mask):
+            if is_live:
+                hand_scores_list[hand_index] = next(live_score_iter).score
+    else:
+        for hand_index, is_live in enumerate(live_hand_mask):
+            if is_live:
+                hand_buckets_list[hand_index] = _approximate_hand_strength_bucket(
+                    hands[hand_index],
+                    board,
+                )
     hand_scores = tuple(hand_scores_list)
     hand_scores_array = np.asarray(hand_scores, dtype=np.int32)
+    hand_buckets = tuple(hand_buckets_list)
+    hand_buckets_array = np.asarray(hand_buckets, dtype=np.int32)
 
     feasible_opponent_rows: list[np.ndarray] = [np.empty(0, dtype=np.int32) for _ in range(private_hand_count())]
     live_indices = np.asarray(live_hand_indices, dtype=np.int32)
@@ -161,9 +181,12 @@ def _build_showdown_equity_board_cache_uncached(
     feasible_opponent_indices = tuple(feasible_opponent_rows)
     return ShowdownEquityBoardCache(
         board=board,
+        street=board.street,
         live_hand_mask=live_hand_mask,
         hand_scores=hand_scores,
         hand_scores_array=hand_scores_array,
+        hand_buckets=hand_buckets,
+        hand_buckets_array=hand_buckets_array,
         live_hand_indices=live_hand_indices,
         feasible_opponent_indices=feasible_opponent_indices,
         hand_card_masks=hand_card_masks,
@@ -186,7 +209,7 @@ def compute_showdown_equity(
     evaluator: TreysHandEvaluator | None = None,
 ) -> ShowdownEquityResult:
     if board is None:
-        raise ValueError("showdown equity requires a river board")
+        raise ValueError("showdown equity requires a postflop board")
     cache = cache or build_showdown_equity_board_cache(board, evaluator=evaluator)
     showdown_input = build_showdown_equity_input(
         tree,
@@ -261,15 +284,19 @@ def compute_showdown_equity_node(
     total_equity = 0.0
     hero_count = 0
     for hero_index in cache.live_hand_indices:
-        hero_score = cache.hand_scores[hero_index]
+        hero_value = cache.hand_scores[hero_index] if cache.street is Street.RIVER else cache.hand_buckets_array[hero_index]
         feasible_opponents = cache.feasible_opponent_indices[hero_index]
         if feasible_opponents.size == 0:
             continue
         feasible_weights = np.maximum(opponent_weights[feasible_opponents], 0.0)
         if not np.any(feasible_weights > 0.0):
             continue
-        opponent_scores = cache.hand_scores_array[feasible_opponents]
-        hero_equity = float(np.dot(feasible_weights, _compare_scores_vector(hero_score, opponent_scores)))
+        opponent_values = (
+            cache.hand_scores_array[feasible_opponents]
+            if cache.street is Street.RIVER
+            else cache.hand_buckets_array[feasible_opponents]
+        )
+        hero_equity = float(np.dot(feasible_weights, _compare_scores_vector(hero_value, opponent_values)))
         hero_opponent_weight = float(np.sum(feasible_weights, dtype=np.float64))
         if hero_opponent_weight > 0.0:
             total_equity += hero_equity / hero_opponent_weight
@@ -301,3 +328,25 @@ def _compare_scores_vector(hero_score: int, opponent_scores: np.ndarray) -> np.n
     wins = opponent_scores > hero_score
     ties = opponent_scores == hero_score
     return np.where(wins, 1.0, np.where(ties, 0.5, 0.0)).astype(np.float64)
+
+
+def _approximate_hand_strength_bucket(hand: PrivateHand, board: Board) -> int:
+    board_values = [card.rank.order_value for card in board.cards]
+    hand_values = [hand.first.rank.order_value, hand.second.rank.order_value]
+    all_values = sorted(board_values + hand_values, reverse=True)
+    pair_bonus = 0
+    ranks = [card.rank.order_value for card in (hand.first, hand.second, *board.cards)]
+    for rank_value in set(ranks):
+        count = ranks.count(rank_value)
+        if count == 4:
+            pair_bonus = 8
+            break
+        if count == 3:
+            pair_bonus = max(pair_bonus, 6)
+        elif count == 2:
+            pair_bonus = max(pair_bonus, 3)
+
+    board_high = max(board_values) if board_values else 0
+    hand_high = max(hand_values)
+    raw = hand_high + board_high + sum(all_values[:3]) // 3 + pair_bonus
+    return max(0, min(8, raw // 6))
