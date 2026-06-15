@@ -30,9 +30,9 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
 
     result = aggregate_prob_sum(tree, forward)
 
-    assert result.node_reach_sum == (1.0, 0.5, 0.25)
-    assert len(result.node_card_reach) == 3
-    assert len(result.node_card_reach[0]) == 52
+    assert result.node_aggregate.reach == (1.0, 0.5, 0.25)
+    assert len(result.node_aggregate.card_reach) == 3
+    assert len(result.node_aggregate.card_reach[0]) == 52
     assert result.leaf_node_ids == (1,)
     assert result.leaf_reach_sum == (0.5,)
     assert result.leaf_batch.rows[0].node_id == 1
@@ -76,7 +76,7 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
     assert sum(
         1 for value in result.leaf_batch.rows[0].features.leaf_card_reach_vector if value > 0.0
     ) == 49
-    assert sum(result.node_card_reach[0]) == pytest.approx(1.0)
+    assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(1.0)
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:

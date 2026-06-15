@@ -33,9 +33,14 @@ class LeafBatchInput:
 
 
 @dataclass(slots=True, frozen=True)
+class NodeCardAggregate:
+    reach: tuple[float, ...]
+    card_reach: tuple[tuple[float, ...], ...]
+
+
+@dataclass(slots=True, frozen=True)
 class AggregateProbSumResult:
-    node_reach_sum: tuple[float, ...]
-    node_card_reach: tuple[tuple[float, ...], ...]
+    node_aggregate: NodeCardAggregate
     leaf_node_ids: tuple[int, ...]
     leaf_reach_sum: tuple[float, ...]
     leaf_batch: LeafBatchInput
@@ -86,8 +91,7 @@ def aggregate_prob_sum(
     )
 
     return AggregateProbSumResult(
-        node_reach_sum=forward.node_reach,
-        node_card_reach=node_card_reach,
+        node_aggregate=NodeCardAggregate(reach=forward.node_reach, card_reach=node_card_reach),
         leaf_node_ids=leaf_node_ids,
         leaf_reach_sum=leaf_reach_sum,
         leaf_batch=leaf_batch,
