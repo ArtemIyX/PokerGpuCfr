@@ -8,7 +8,13 @@ from pokergpu.cfr.solver import evaluate_showdown_node_values
 from pokergpu.cfr.stage1 import ForwardProfileResult, propagate_forward
 from pokergpu.cfr.stage2 import AggregateProbSumResult, aggregate_prob_sum
 from pokergpu.cfr.stage3 import OpponentReachResult, compute_opponent_reach
-from pokergpu.cfr.stage4 import ShowdownEquityResult, compute_showdown_equity
+from pokergpu.cfr.stage4 import ShowdownEquityBatchInput
+from pokergpu.cfr.stage4 import ShowdownEquityBoardCache
+from pokergpu.cfr.stage4 import ShowdownEquityNodeInput
+from pokergpu.cfr.stage4 import build_showdown_equity_board_cache
+from pokergpu.cfr.stage4 import build_showdown_equity_input
+from pokergpu.cfr.stage4 import compute_showdown_equity
+from pokergpu.cfr.stage4 import compute_showdown_equity_node
 from pokergpu.core.board import Board
 from pokergpu.core.betting import Chips
 from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
@@ -58,15 +64,6 @@ def run_stage_3(tree: PublicTree, aggregate: AggregateProbSumResult) -> Opponent
     return compute_opponent_reach(tree, aggregate)
 
 
-def run_stage_4(
-    tree: PublicTree,
-    aggregate: AggregateProbSumResult,
-    opponent_reach: OpponentReachResult,
-    board: Board,
-) -> ShowdownEquityResult:
-    return compute_showdown_equity(tree, aggregate, opponent_reach, board=board)
-
-
 def profile_stage(name: str, runs: int, fn: Callable[[], object]) -> StageTiming:
     warmup_start = perf_counter()
     fn()
@@ -91,13 +88,18 @@ def main() -> None:
     forward = run_stage_1(tree)
     aggregate = run_stage_2(tree, forward)
     opponent_reach = run_stage_3(tree, aggregate)
+    cache = build_showdown_equity_board_cache(board)
+    showdown_input = build_showdown_equity_input(tree, aggregate, opponent_reach, board=board)
+    first_node = showdown_input.rows[0]
 
     timings = [
-        profile_stage("stage1_forward", 5000, lambda: run_stage_1(tree)),
-        profile_stage("stage2_aggregate", 2000, lambda: run_stage_2(tree, forward)),
-        profile_stage("stage3_opponent", 2000, lambda: run_stage_3(tree, aggregate)),
-        profile_stage("stage4_showdown_cache+node", 200, lambda: run_stage_4(tree, aggregate, opponent_reach, board)),
-        profile_stage("stage4_node_only", 2000, lambda: evaluate_showdown_node_values(tree, forward, board=board)),
+        profile_stage("stage1_forward", 10, lambda: run_stage_1(tree)),
+        profile_stage("stage2_aggregate", 10, lambda: run_stage_2(tree, forward)),
+        profile_stage("stage3_opponent", 10, lambda: run_stage_3(tree, aggregate)),
+        profile_stage("stage4_cache_build", 10, lambda: build_showdown_equity_board_cache(board)),
+        profile_stage("stage4_batch_wrapper", 10, lambda: compute_showdown_equity(tree, aggregate, opponent_reach, board=board)),
+        profile_stage("stage4_node_worker", 10, lambda: compute_showdown_equity_node(first_node, cache=cache)),
+        profile_stage("stage4_solver_wrapper", 10, lambda: evaluate_showdown_node_values(tree, forward, board=board)),
     ]
 
     print(f"tree_nodes={tree.node_count} board={board}")

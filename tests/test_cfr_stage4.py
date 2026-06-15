@@ -58,10 +58,8 @@ def test_build_showdown_equity_board_cache_precomputes_board_only_data() -> None
     assert len(cache.live_hand_mask) == 1326
     assert len(cache.hand_scores) == 1326
     assert len(cache.live_hand_indices) < 1326
-    assert len(cache.comparison_matrix) == 1326
-    assert len(cache.comparison_matrix[0]) == 1326
     assert sum(cache.live_hand_mask) == len(cache.live_hand_indices)
-    assert cache.comparison_matrix[0][0] == 0.0
+    assert any(score > 0 for score in cache.hand_scores if score != 0)
 
 
 def test_compute_showdown_equity_returns_node_aligned_output() -> None:
