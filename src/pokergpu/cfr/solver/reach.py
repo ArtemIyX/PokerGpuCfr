@@ -47,9 +47,7 @@ def propagate_reach(
         current_reach = node_reach[node_index]
         if current_reach <= 0.0:
             continue
-
-        node_type = tree.node_types[node_index]
-        if node_type is NodeType.CHANCE:
+        if tree.node_types[node_index] is NodeType.CHANCE:
             child_links = tree.child_links(NodeId(node_index))
             total_prob = sum(link.chance_prob or 0.0 for link in child_links)
             assert child_links, "chance nodes must have children"
@@ -59,33 +57,32 @@ def propagate_reach(
                 if link.chance_prob is None:
                     raise ValueError("chance children must define probabilities")
                 node_reach[int(link.child)] += current_reach * link.chance_prob
-            continue
-        if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
-            continue
 
-        infoset_id = table.node_to_infoset[node_index]
-        if infoset_id < 0:
-            continue
+    for infoset_id in table.infoset_order:
+        nodes = table.infoset_nodes[infoset_id]
+        assert nodes, "infoset must have at least one node"
+        for node_index in nodes:
+            current_reach = node_reach[node_index]
+            if current_reach <= 0.0:
+                continue
+            child_links = tree.child_links(NodeId(node_index))
+            strategy = normalize_strategy(
+                strategies.get(InfosetId(infoset_id), tuple(1.0 for _ in child_links))
+            )
+            if len(strategy) != len(child_links):
+                raise ValueError("strategy length must match the node branching factor")
+            if table.action_counts[infoset_id] != len(child_links):
+                raise ValueError("infoset action count must match the node branching factor")
 
-        child_links = tree.child_links(NodeId(node_index))
-        strategy = normalize_strategy(
-            strategies.get(InfosetId(infoset_id), tuple(1.0 for _ in child_links))
-        )
-        if len(strategy) != len(child_links):
-            raise ValueError("strategy length must match the node branching factor")
-        if table.action_counts[infoset_id] != len(child_links):
-            raise ValueError("infoset action count must match the node branching factor")
-        assert len(table.infoset_nodes[infoset_id]) >= 1, "infoset must have at least one node"
+            infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
+            action_reach[node_index] = strategy
+            cumulative = cumulative_strategy_map.setdefault(
+                infoset_id, [0.0 for _ in range(len(strategy))]
+            )
 
-        infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
-        action_reach[node_index] = strategy
-        cumulative = cumulative_strategy_map.setdefault(
-            infoset_id, [0.0 for _ in range(len(strategy))]
-        )
-
-        for child_index, link in enumerate(child_links):
-            cumulative[child_index] += current_reach * strategy[child_index]
-            node_reach[int(link.child)] += current_reach * strategy[child_index]
+            for child_index, link in enumerate(child_links):
+                cumulative[child_index] += current_reach * strategy[child_index]
+                node_reach[int(link.child)] += current_reach * strategy[child_index]
 
     max_infoset = max(infoset_reach_map, default=-1)
     infoset_reach = [0.0 for _ in range(max_infoset + 1)]

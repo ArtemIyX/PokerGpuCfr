@@ -27,6 +27,7 @@ def test_build_dense_infoset_table_extracts_dense_mappings() -> None:
     assert table.action_counts[0] == 2
     assert table.node_to_infoset[1] == 0
     assert table.infoset_nodes[0] == (1,)
+    assert table.infoset_order == (0, 1, 2, 3, 4, 5)
 
 
 def test_build_dense_infoset_table_rejects_missing_player_infoset() -> None:
@@ -73,5 +74,6 @@ def test_build_dense_infoset_table_groups_repeated_infosets() -> None:
 
     assert table.node_to_infoset == (0, 1, 0, -1, -1)
     assert table.infoset_nodes[0] == (0, 2)
+    assert table.infoset_order == (0, 1)
     assert reach.infoset_reach[0] == 1.75
     assert reach.cumulative_strategy[0] == (0.4375, 1.3125)
