@@ -55,13 +55,8 @@ def compute_opponent_reach(
             node_card_reach_rows.append(node_card_reach)
 
         card_total = tuple(card_reach)
-        node_card_ratio_rows: list[tuple[float, ...]] = []
-        for node_card_reach in node_card_reach_rows:
-            ratios = []
-            for card_index, value in enumerate(node_card_reach):
-                total = card_total[card_index]
-                ratios.append(0.0 if total <= 0.0 else value / total)
-            node_card_ratio_rows.append(tuple(ratios))
+        node_card_ratio_rows = _normalize_card_reach_rows(node_card_reach_rows, card_total)
+        _validate_card_ratio_rows(node_card_ratio_rows)
 
         node_shares: list[tuple[int, float]] = []
         if reach_total > 0.0:
@@ -96,6 +91,31 @@ def compute_opponent_reach(
         node_opponent_reach=node_opponent_reach,
         node_opponent_share=tuple(node_opponent_share),
     )
+
+
+def _normalize_card_reach_rows(
+    node_card_reach_rows: list[tuple[float, ...]],
+    card_total: tuple[float, ...],
+) -> list[tuple[float, ...]]:
+    normalized_rows: list[tuple[float, ...]] = []
+    for node_card_reach in node_card_reach_rows:
+        ratios: list[float] = []
+        for card_index, value in enumerate(node_card_reach):
+            total = card_total[card_index]
+            ratios.append(0.0 if total <= 0.0 else value / total)
+        normalized_rows.append(tuple(ratios))
+    return normalized_rows
+
+
+def _validate_card_ratio_rows(node_card_ratio_rows: list[tuple[float, ...]]) -> None:
+    if not node_card_ratio_rows:
+        return
+    card_width = len(node_card_ratio_rows[0])
+    if card_width != 52:
+        raise ValueError("card ratio vectors must have length 52")
+    for row in node_card_ratio_rows[1:]:
+        if len(row) != card_width:
+            raise ValueError("card ratio rows must have consistent width")
 
 
 def _collect_infoset_nodes(tree: PublicTree) -> tuple[tuple[int, ...], ...]:

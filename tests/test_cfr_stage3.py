@@ -43,6 +43,13 @@ def test_compute_opponent_reach_aggregates_infoset_reach() -> None:
     assert len(result.infoset_node_card_ratio) == 1
     assert len(result.infoset_node_card_ratio[0]) == 2
     assert len(result.infoset_node_card_ratio[0][0]) == 52
+    assert all(
+        total == pytest.approx(1.0)
+        for total in (
+            result.infoset_node_card_ratio[0][0][0] + result.infoset_node_card_ratio[0][1][0],
+            result.infoset_node_card_ratio[0][0][1] + result.infoset_node_card_ratio[0][1][1],
+        )
+    )
     assert result.node_opponent_reach == (1.0, 0.4, 0.0, 0.0)
     assert result.node_opponent_share == pytest.approx((5 / 7, 2 / 7, 0.0, 0.0))
 
@@ -136,5 +143,6 @@ def test_compute_opponent_reach_handles_repeated_infosets() -> None:
     assert sum(result.infoset_card_opponent_reach[1]) == pytest.approx(0.5)
     assert len(result.infoset_node_card_ratio[0]) == 2
     assert len(result.infoset_node_card_ratio[1]) == 1
+    assert result.infoset_node_card_ratio[0][0][0] + result.infoset_node_card_ratio[0][1][0] == pytest.approx(1.0)
     assert result.node_opponent_reach == (1.0, 0.5, 0.25, 0.0, 0.0)
     assert result.node_opponent_share == pytest.approx((0.8, 1.0, 0.2, 0.0, 0.0))
