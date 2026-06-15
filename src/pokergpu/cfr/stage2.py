@@ -10,6 +10,7 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 class AggregateProbSumResult:
     node_reach_sum: tuple[float, ...]
     leaf_node_ids: tuple[int, ...]
+    leaf_reach_sum: tuple[float, ...]
 
 
 def aggregate_prob_sum(
@@ -24,8 +25,10 @@ def aggregate_prob_sum(
         for node_index, node_type in enumerate(tree.node_types)
         if node_type is NodeType.LEAF
     )
+    leaf_reach_sum = tuple(forward.node_reach[node_index] for node_index in leaf_node_ids)
 
     return AggregateProbSumResult(
         node_reach_sum=forward.node_reach,
         leaf_node_ids=leaf_node_ids,
+        leaf_reach_sum=leaf_reach_sum,
     )
