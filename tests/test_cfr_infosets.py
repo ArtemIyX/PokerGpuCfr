@@ -81,6 +81,29 @@ def test_build_dense_infoset_table_groups_repeated_infosets() -> None:
     assert reach.cumulative_strategy[0] == (0.4375, 1.3125)
 
 
+def test_propagate_reach_threaded_matches_serial() -> None:
+    tree = make_kuhn_public_tree()
+    table = build_dense_infoset_table(tree)
+    strategies = {
+        InfosetId(0): (0.25, 0.75),
+        InfosetId(1): (0.5, 0.5),
+        InfosetId(2): (0.6, 0.4),
+        InfosetId(3): (0.3, 0.7),
+        InfosetId(4): (0.8, 0.2),
+        InfosetId(5): (0.1, 0.9),
+    }
+
+    serial = propagate_reach(tree, infoset_table=table, infoset_strategies=strategies)
+    threaded = propagate_reach(
+        tree,
+        infoset_table=table,
+        infoset_strategies=strategies,
+        max_workers=2,
+    )
+
+    assert threaded == serial
+
+
 def test_apply_dense_solver_strategy_update_updates_each_infoset_row() -> None:
     tree = make_kuhn_public_tree()
     table = build_dense_infoset_table(tree)
@@ -98,3 +121,28 @@ def test_apply_dense_solver_strategy_update_updates_each_infoset_row() -> None:
 
     assert next_state.regret_sums[0] == (1.0, -1.0)
     assert next_state.strategy_sums[0] == (0.5, 0.5)
+
+
+def test_apply_dense_solver_strategy_update_threaded_matches_serial() -> None:
+    tree = make_kuhn_public_tree()
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(
+        regret_sums=tuple((float(i), float(-i - 1)) for i in range(table.infoset_count)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+    )
+    action_values = tuple((1.0, -1.0) for _ in range(table.infoset_count))
+    serial = apply_dense_solver_strategy_update(
+        state,
+        action_values,
+        infoset_table=table,
+        reach_weights=tuple(1.0 for _ in range(table.infoset_count)),
+    )
+    threaded = apply_dense_solver_strategy_update(
+        state,
+        action_values,
+        infoset_table=table,
+        reach_weights=tuple(1.0 for _ in range(table.infoset_count)),
+        max_workers=2,
+    )
+
+    assert threaded == serial

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from math import ceil
 
 from pokergpu.tree.public_tree import InfosetId, NodeId, NodeType, PublicTree
 
@@ -31,6 +33,7 @@ def propagate_reach(
     root_reach: float = 1.0,
     infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
     infoset_table: DenseInfosetTable | None = None,
+    max_workers: int | None = None,
 ) -> ReachResult:
     table = infoset_table or build_dense_infoset_table(tree)
     assert len(table.node_to_infoset) == tree.node_count, "infoset table must align with tree"
@@ -58,7 +61,13 @@ def propagate_reach(
                     raise ValueError("chance children must define probabilities")
                 node_reach[int(link.child)] += current_reach * link.chance_prob
 
-    for infoset_id in table.infoset_order:
+    def process_infoset(
+        infoset_id: int,
+    ) -> tuple[int, float, tuple[float, ...], list[tuple[int, float]], list[tuple[int, tuple[float, ...]]]]:
+        infoset_reach = 0.0
+        cumulative: list[float] | None = None
+        updates: list[tuple[int, float]] = []
+        action_rows: list[tuple[int, tuple[float, ...]]] = []
         nodes = table.infoset_nodes[infoset_id]
         assert nodes, "infoset must have at least one node"
         for node_index in nodes:
@@ -74,15 +83,35 @@ def propagate_reach(
             if table.action_counts[infoset_id] != len(child_links):
                 raise ValueError("infoset action count must match the node branching factor")
 
-            infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
-            action_reach[node_index] = strategy
-            cumulative = cumulative_strategy_map.setdefault(
-                infoset_id, [0.0 for _ in range(len(strategy))]
-            )
-
+            infoset_reach += current_reach
+            action_rows.append((node_index, strategy))
+            if cumulative is None:
+                cumulative = [0.0 for _ in range(len(strategy))]
             for child_index, link in enumerate(child_links):
-                cumulative[child_index] += current_reach * strategy[child_index]
-                node_reach[int(link.child)] += current_reach * strategy[child_index]
+                delta = current_reach * strategy[child_index]
+                cumulative[child_index] += delta
+                updates.append((int(link.child), delta))
+        return infoset_id, infoset_reach, tuple(cumulative or ()), updates, action_rows
+
+    infoset_ids = list(table.infoset_order)
+    if max_workers is None or max_workers <= 1 or len(infoset_ids) <= 1:
+        results = [process_infoset(infoset_id) for infoset_id in infoset_ids]
+    else:
+        chunk_size = max(1, ceil(len(infoset_ids) / max_workers))
+        chunks = [tuple(infoset_ids[index : index + chunk_size]) for index in range(0, len(infoset_ids), chunk_size)]
+        results = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for chunk_result in executor.map(lambda chunk: tuple(process_infoset(infoset_id) for infoset_id in chunk), chunks):
+                results.extend(chunk_result)
+
+    for infoset_id, reach, cumulative, updates, action_rows in results:
+        infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + reach
+        if cumulative:
+            cumulative_strategy_map[infoset_id] = list(cumulative)
+        for node_index, strategy in action_rows:
+            action_reach[node_index] = strategy
+        for child_index, delta in updates:
+            node_reach[child_index] += delta
 
     max_infoset = max(infoset_reach_map, default=-1)
     infoset_reach = [0.0 for _ in range(max_infoset + 1)]

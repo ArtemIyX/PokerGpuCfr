@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from math import ceil
+
 from .infosets import DenseInfosetTable
 from .state import DenseCfrState, SolverIterationResult, SolverState
 from ..stage1 import normalize_strategy
@@ -40,6 +43,7 @@ def apply_dense_solver_strategy_update(
     *,
     infoset_table: DenseInfosetTable,
     reach_weights: tuple[float, ...] | None = None,
+    max_workers: int | None = None,
 ) -> DenseCfrState:
     assert infoset_table.infoset_count == len(state.regret_sums), "infoset table must align with state"
     if len(state.strategy_sums) != len(state.regret_sums):
@@ -51,10 +55,7 @@ def apply_dense_solver_strategy_update(
     if len(reach_vector) != len(state.regret_sums):
         raise ValueError("reach weights must match infoset count")
 
-    new_regrets: list[tuple[float, ...]] = []
-    new_strategy_sums: list[tuple[float, ...]] = []
-
-    for infoset_id in infoset_table.infoset_order:
+    def process_infoset(infoset_id: int) -> tuple[int, tuple[float, ...], tuple[float, ...]]:
         regrets = state.regret_sums[infoset_id]
         values = action_values[infoset_id]
         strategy_sums = state.strategy_sums[infoset_id]
@@ -65,10 +66,28 @@ def apply_dense_solver_strategy_update(
 
         strategy = normalize_strategy(regret_matching(regrets))
         node_value = sum(prob * value for prob, value in zip(strategy, values, strict=True))
-        new_regrets.append(update_regret(regrets, values, node_value))
-        new_strategy_sums.append(
-            update_average_strategy(strategy_sums, strategy, reach_vector[infoset_id])
+        return (
+            infoset_id,
+            update_regret(regrets, values, node_value),
+            update_average_strategy(strategy_sums, strategy, reach_vector[infoset_id]),
         )
+
+    infoset_ids = list(infoset_table.infoset_order)
+    if max_workers is None or max_workers <= 1 or len(infoset_ids) <= 1:
+        results = [process_infoset(infoset_id) for infoset_id in infoset_ids]
+    else:
+        chunk_size = max(1, ceil(len(infoset_ids) / max_workers))
+        chunks = [tuple(infoset_ids[index : index + chunk_size]) for index in range(0, len(infoset_ids), chunk_size)]
+        results = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for chunk_result in executor.map(lambda chunk: tuple(process_infoset(infoset_id) for infoset_id in chunk), chunks):
+                results.extend(chunk_result)
+
+    new_regrets: list[tuple[float, ...]] = [() for _ in range(len(state.regret_sums))]
+    new_strategy_sums: list[tuple[float, ...]] = [() for _ in range(len(state.strategy_sums))]
+    for infoset_id, regrets, strategy_sums in results:
+        new_regrets[infoset_id] = regrets
+        new_strategy_sums[infoset_id] = strategy_sums
 
     return DenseCfrState(
         regret_sums=tuple(new_regrets),
