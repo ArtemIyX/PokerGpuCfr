@@ -7,10 +7,16 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 
 
 @dataclass(slots=True, frozen=True)
+class LeafFeatures:
+    reach: float
+    share: float
+
+
+@dataclass(slots=True, frozen=True)
 class LeafBatchRow:
     node_id: int
     reach: float
-    features: tuple[float, ...]
+    features: LeafFeatures
 
 
 @dataclass(slots=True, frozen=True)
@@ -45,9 +51,9 @@ def aggregate_prob_sum(
             LeafBatchRow(
                 node_id=node_index,
                 reach=forward.node_reach[node_index],
-                features=(
-                    forward.node_reach[node_index],
-                    _safe_share(forward.node_reach[node_index], total_leaf_reach),
+                features=LeafFeatures(
+                    reach=forward.node_reach[node_index],
+                    share=_safe_share(forward.node_reach[node_index], total_leaf_reach),
                 ),
             )
             for node_index in leaf_node_ids

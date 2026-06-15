@@ -34,7 +34,8 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
     assert result.leaf_reach_sum == (0.5,)
     assert result.leaf_batch.rows[0].node_id == 1
     assert result.leaf_batch.rows[0].reach == 0.5
-    assert result.leaf_batch.rows[0].features == (0.5, 1.0)
+    assert result.leaf_batch.rows[0].features.reach == 0.5
+    assert result.leaf_batch.rows[0].features.share == 1.0
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
