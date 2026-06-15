@@ -15,7 +15,7 @@ from pokergpu.cfr.solver import (  # noqa: E402
     DenseCfrState,
     aggregate_action_values,
     build_dense_infoset_table,
-    make_kuhn_public_tree,
+    make_leduc_public_tree,
     propagate_reach,
 )
 from pokergpu.cfr.solver.strategy_update import apply_dense_solver_strategy_update  # noqa: E402
@@ -40,7 +40,7 @@ def make_state(table) -> DenseCfrState:
 
 
 def measure_once(max_workers: int | None, iterations: int) -> BenchSample:
-    tree = make_kuhn_public_tree()
+    tree = make_leduc_public_tree()
     t0 = time.perf_counter()
     table = build_dense_infoset_table(tree)
     t1 = time.perf_counter()
@@ -113,7 +113,7 @@ def main() -> None:
     warmup_runs = 3
     timed_runs = 10
 
-    print("Kuhn dense benchmark")
+    print("Leduc dense benchmark")
     print(f"iterations={args.iterations}")
     print(f"warmup_runs={warmup_runs} timed_runs={timed_runs}")
     print()
