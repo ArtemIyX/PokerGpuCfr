@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pokergpu.cfr.solver import (
+    DenseCfrState,
     build_dense_infoset_table,
     make_kuhn_public_tree,
     propagate_reach,
@@ -15,6 +16,7 @@ from pokergpu.tree.public_tree import (
     PublicTree,
 )
 from pokergpu.core.betting import Chips
+from pokergpu.cfr.solver import apply_dense_solver_strategy_update
 
 
 def test_build_dense_infoset_table_extracts_dense_mappings() -> None:
@@ -77,3 +79,22 @@ def test_build_dense_infoset_table_groups_repeated_infosets() -> None:
     assert table.infoset_order == (0, 1)
     assert reach.infoset_reach[0] == 1.75
     assert reach.cumulative_strategy[0] == (0.4375, 1.3125)
+
+
+def test_apply_dense_solver_strategy_update_updates_each_infoset_row() -> None:
+    tree = make_kuhn_public_tree()
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(
+        regret_sums=((0.0, 0.0),) * table.infoset_count,
+        strategy_sums=((0.0, 0.0),) * table.infoset_count,
+    )
+
+    next_state = apply_dense_solver_strategy_update(
+        state,
+        action_values=tuple((1.0, -1.0) for _ in range(table.infoset_count)),
+        infoset_table=table,
+        reach_weights=tuple(1.0 for _ in range(table.infoset_count)),
+    )
+
+    assert next_state.regret_sums[0] == (1.0, -1.0)
+    assert next_state.strategy_sums[0] == (0.5, 0.5)
