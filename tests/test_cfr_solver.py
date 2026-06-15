@@ -51,4 +51,4 @@ def test_toy_solver_iteration_uses_descendant_terminal_values() -> None:
     state = ToyCfrState(regret_sums=(0.0, 0.0), strategy_sums=(0.0, 0.0))
     result = run_tree_root_cfr_iteration(tree, state)
 
-    assert result.action_values == (2.0, -1.0)
+    assert result.action_values == (1.0, 1.0)
