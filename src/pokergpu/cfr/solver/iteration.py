@@ -25,10 +25,11 @@ def run_tree_root_iteration(
     tree: PublicTree,
     state: SolverState,
     reach_weight: float = 1.0,
+    max_workers: int | None = None,
 ) -> SolverIterationResult:
     assert tree.node_count > 0, "public tree cannot be empty"
     return apply_solver_strategy_update(
         state,
-        evaluate_root_action_values(tree),
+        evaluate_root_action_values(tree, max_workers=max_workers),
         reach_weight=reach_weight,
     )

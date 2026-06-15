@@ -70,3 +70,19 @@ def test_aggregate_root_action_values_reads_terminal_payoffs() -> None:
     tree = make_toy_public_tree()
 
     assert aggregate_root_action_values(tree) == (1.0, -1.0)
+
+
+def test_aggregate_root_action_values_threaded_matches_serial() -> None:
+    tree = make_toy_public_tree()
+
+    assert aggregate_root_action_values(tree, max_workers=2) == aggregate_root_action_values(tree)
+
+
+def test_run_tree_root_iteration_threaded_matches_serial() -> None:
+    tree = make_toy_public_tree()
+    state = SolverState(regret_sums=(0.0, 0.0), strategy_sums=(0.0, 0.0))
+
+    serial = run_tree_root_iteration(tree, state)
+    threaded = run_tree_root_iteration(tree, state, max_workers=2)
+
+    assert threaded == serial
