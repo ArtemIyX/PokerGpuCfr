@@ -85,3 +85,41 @@ def test_compute_opponent_reach_rejects_non_dense_infosets() -> None:
 
     with pytest.raises(ValueError, match="infoset ids must be dense and contiguous"):
         compute_opponent_reach(tree, aggregate)
+
+
+def test_compute_opponent_reach_handles_repeated_infosets() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.PLAYER1,
+            NodeType.PLAYER0,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+        ),
+        first_child=(0, 2, 4, 4, 4),
+        child_count=(2, 2, 2, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(2)),
+            ChildLink(child=NodeId(3)),
+            ChildLink(child=NodeId(4)),
+            ChildLink(child=NodeId(3)),
+            ChildLink(child=NodeId(4)),
+        ),
+        infoset_ids=(InfosetId(0), InfosetId(1), InfosetId(0), None, None),
+        terminal_payoffs=(None, None, None, Chips(1), Chips(2)),
+    )
+    aggregate = aggregate_prob_sum(
+        tree,
+        ForwardProfileResult(
+            node_reach=(1.0, 0.5, 0.25, 0.0, 0.0),
+            infoset_reach=(1.25, 0.5),
+            action_reach=((0.4, 0.6), (0.5, 0.5), (0.2, 0.8), (), ()),
+        ),
+    )
+
+    result = compute_opponent_reach(tree, aggregate)
+
+    assert result.infoset_opponent_reach == (1.25, 0.5)
+    assert result.node_opponent_reach == (1.0, 0.5, 0.25, 0.0, 0.0)
+    assert result.node_opponent_share == pytest.approx((0.8, 1.0, 0.2, 0.0, 0.0))
