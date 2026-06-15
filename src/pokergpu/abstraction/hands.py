@@ -44,6 +44,10 @@ _PRIVATE_HANDS: tuple[PrivateHand, ...] = tuple(
     for first_index in range(len(_DECK))
     for second_index in range(first_index + 1, len(_DECK))
 )
+_PRIVATE_HAND_CARD_MASKS: tuple[int, ...] = tuple(
+    (1 << _CARD_TO_INDEX[hand.first]) | (1 << _CARD_TO_INDEX[hand.second])
+    for hand in _PRIVATE_HANDS
+)
 _PRIVATE_HAND_TO_INDEX: dict[PrivateHand, PrivateHandIndex] = {
     hand: PrivateHandIndex(index) for index, hand in enumerate(_PRIVATE_HANDS)
 }
@@ -66,6 +70,17 @@ def private_hand_from_index(index: PrivateHandIndex) -> PrivateHand:
     if index_value < 0 or index_value >= len(_PRIVATE_HANDS):
         raise IndexError(f"private hand index out of range: {index_value}")
     return _PRIVATE_HANDS[index_value]
+
+
+def private_hand_card_mask(index: PrivateHandIndex) -> int:
+    index_value = int(index)
+    if index_value < 0 or index_value >= len(_PRIVATE_HANDS):
+        raise IndexError(f"private hand index out of range: {index_value}")
+    return _PRIVATE_HAND_CARD_MASKS[index_value]
+
+
+def all_private_hand_card_masks() -> tuple[int, ...]:
+    return _PRIVATE_HAND_CARD_MASKS
 
 
 def private_hand_mask(dead_cards: tuple[Card, ...] | list[Card]) -> NDArray[np.bool_]:

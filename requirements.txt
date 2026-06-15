@@ -31,5 +31,6 @@ rich>=13.7
 # Testing / dev
 pytest>=8.0
 pytest-benchmark>=4.0
+py-spy>=0.4
 ruff>=0.6
 mypy>=1.10
