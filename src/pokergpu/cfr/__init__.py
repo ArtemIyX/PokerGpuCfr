@@ -1,4 +1,5 @@
 from .stage1 import ForwardProfileResult, normalize_strategy, propagate_forward
+from .stage2 import AggregateProbSumResult, aggregate_prob_sum
 from .solver import (
     DenseCfrState,
     SolverIterationResult,
@@ -11,9 +12,11 @@ from .stage7 import regret_matching, update_average_strategy, update_regret
 __all__ = [
     "DenseCfrState",
     "ForwardProfileResult",
+    "AggregateProbSumResult",
     "SolverIterationResult",
     "SolverState",
     "make_toy_public_tree",
+    "aggregate_prob_sum",
     "normalize_strategy",
     "propagate_forward",
     "regret_matching",
