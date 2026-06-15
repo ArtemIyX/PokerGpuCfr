@@ -11,9 +11,11 @@ from pokergpu.cfr.solver import (
     propagate_reach,
     propagate_opponent_reach,
     run_tree_root_iteration,
+    evaluate_showdown_node_values,
 )
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
@@ -131,3 +133,21 @@ def test_propagate_opponent_reach_matches_stage3_result() -> None:
 
     assert result.infoset_opponent_reach == (1.4,)
     assert result.node_opponent_share == pytest.approx((5 / 7, 2 / 7, 0.0, 0.0))
+
+
+def test_evaluate_showdown_node_values_runs_stage3_then_stage4() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
+
+    result = evaluate_showdown_node_values(tree, forward, board=Board.from_str("AhKdTc9s2c"))
+
+    assert len(result.node_showdown_equity) == 1
+    assert len(result.output_rows) == 1
+    assert result.output_rows[0].node_id == 0
