@@ -165,3 +165,48 @@ def test_compute_opponent_reach_handles_repeated_infosets() -> None:
     assert len(result.node_hand_opponent_reach) == 5
     assert result.node_opponent_reach == (1.0, 0.5, 0.25, 0.0, 0.0)
     assert result.node_opponent_share == pytest.approx((0.8, 1.0, 0.2, 0.0, 0.0))
+
+
+def test_compute_opponent_reach_matches_reference_baseline_on_tiny_tree() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER0),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(InfosetId(0), InfosetId(0)),
+        terminal_payoffs=(None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(2.0, 4.0),
+        infoset_reach=(6.0,),
+        action_reach=((), ()),
+    )
+    aggregate = aggregate_prob_sum(tree, forward)
+    node0_hand = [0.0 for _ in range(1326)]
+    node1_hand = [0.0 for _ in range(1326)]
+    node0_hand[0] = 2.0
+    node0_hand[1] = 1.0
+    node1_hand[0] = 1.0
+    node1_hand[1] = 3.0
+    object.__setattr__(
+        aggregate.node_aggregate,
+        "hand_reach",
+        (
+            tuple(node0_hand),
+            tuple(node1_hand),
+        ),
+    )
+
+    result = compute_opponent_reach(tree, aggregate)
+
+    assert result.infoset_opponent_reach == (6.0,)
+    assert result.infoset_hand_opponent_reach[0][0] == pytest.approx(3.0)
+    assert result.infoset_hand_opponent_reach[0][1] == pytest.approx(4.0)
+    assert result.infoset_node_hand_ratio[0][0][0] == pytest.approx(2.0 / 3.0)
+    assert result.infoset_node_hand_ratio[0][1][0] == pytest.approx(1.0 / 3.0)
+    assert result.infoset_node_hand_ratio[0][0][1] == pytest.approx(1.0 / 4.0)
+    assert result.infoset_node_hand_ratio[0][1][1] == pytest.approx(3.0 / 4.0)
+    assert result.node_hand_opponent_reach[0][0] == pytest.approx(2.0 / 3.0)
+    assert result.node_hand_opponent_reach[1][0] == pytest.approx(1.0 / 3.0)
+    assert result.node_hand_opponent_reach[0][1] == pytest.approx(1.0 / 4.0)
+    assert result.node_hand_opponent_reach[1][1] == pytest.approx(3.0 / 4.0)
