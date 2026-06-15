@@ -57,6 +57,7 @@ def test_build_showdown_equity_board_cache_precomputes_board_only_data() -> None
     assert cache.board == board
     assert len(cache.live_hand_mask) == 1326
     assert len(cache.hand_scores) == 1326
+    assert cache.hand_scores_array.shape == (1326,)
     assert len(cache.live_hand_indices) < 1326
     assert len(cache.feasible_opponent_indices) == 1326
     assert sum(cache.live_hand_mask) == len(cache.live_hand_indices)
