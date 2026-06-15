@@ -41,6 +41,16 @@ def propagate_reach(
             continue
 
         node_type = tree.node_types[node_index]
+        if node_type is NodeType.CHANCE:
+            child_links = tree.child_links(NodeId(node_index))
+            total_prob = sum(link.chance_prob or 0.0 for link in child_links)
+            if abs(total_prob - 1.0) > 1e-6:
+                raise ValueError("chance probabilities must sum to 1")
+            for link in child_links:
+                if link.chance_prob is None:
+                    raise ValueError("chance children must define probabilities")
+                node_reach[int(link.child)] += current_reach * link.chance_prob
+            continue
         if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
             continue
 
