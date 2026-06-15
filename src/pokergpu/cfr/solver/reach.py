@@ -12,6 +12,7 @@ class ReachResult:
     node_reach: tuple[float, ...]
     infoset_reach: tuple[float, ...]
     action_reach: tuple[tuple[float, ...], ...]
+    cumulative_strategy: tuple[tuple[float, ...], ...]
 
 
 def normalize_strategy(weights: tuple[float, ...]) -> tuple[float, ...]:
@@ -34,6 +35,7 @@ def propagate_reach(
     strategies = infoset_strategies or {}
     node_reach = [0.0 for _ in range(tree.node_count)]
     infoset_reach_map: dict[int, float] = {}
+    cumulative_strategy_map: dict[int, list[float]] = {}
     action_reach: list[tuple[float, ...]] = [() for _ in range(tree.node_count)]
 
     node_reach[0] = root_reach
@@ -72,17 +74,27 @@ def propagate_reach(
 
         infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
         action_reach[node_index] = strategy
+        cumulative = cumulative_strategy_map.setdefault(
+            infoset_id, [0.0 for _ in range(len(strategy))]
+        )
 
         for child_index, link in enumerate(child_links):
+            cumulative[child_index] += current_reach * strategy[child_index]
             node_reach[int(link.child)] += current_reach * strategy[child_index]
 
     max_infoset = max(infoset_reach_map, default=-1)
     infoset_reach = [0.0 for _ in range(max_infoset + 1)]
+    cumulative_strategy: list[tuple[float, ...]] = [
+        tuple() for _ in range(max_infoset + 1)
+    ]
     for infoset_id, reach in infoset_reach_map.items():
         infoset_reach[infoset_id] = reach
+    for infoset_id, values in cumulative_strategy_map.items():
+        cumulative_strategy[infoset_id] = tuple(values)
 
     return ReachResult(
         node_reach=tuple(node_reach),
         infoset_reach=tuple(infoset_reach),
         action_reach=tuple(action_reach),
+        cumulative_strategy=tuple(cumulative_strategy),
     )

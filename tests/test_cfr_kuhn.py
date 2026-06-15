@@ -27,6 +27,7 @@ def test_kuhn_reach_and_action_values_are_wired() -> None:
 
     assert reach.node_reach[0] == 1.0
     assert reach.node_reach[1] == 1 / 6
+    assert reach.cumulative_strategy[0] == (1 / 12, 1 / 12)
     assert values == (1.0, -1.0)
 
 
