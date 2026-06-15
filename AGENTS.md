@@ -10,6 +10,7 @@ parallelism: **by information set and by tree node**
 
 ### Main working rules
 
+- Try not to use 'Any' (mypy errors)
 - Divide tasks on small subtasks that can be solved one by one
 - Create short plans for each large task/problem, before solving it
 - Do not revert back, mask off, turn off if something broken - fix it instead
