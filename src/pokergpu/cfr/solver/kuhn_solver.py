@@ -46,3 +46,16 @@ def run_kuhn_dense_iteration(
         infoset_table=table,
         reach_weights=reach.infoset_reach if reach.infoset_reach else None,
     )
+
+
+def run_kuhn_dense_iterations(
+    state: DenseCfrState,
+    iterations: int,
+    *,
+    reach_weight: float = 1.0,
+) -> DenseCfrState:
+    assert iterations > 0, "iterations must be positive"
+    current = state
+    for _ in range(iterations):
+        current = run_kuhn_dense_iteration(current, reach_weight=reach_weight)
+    return current

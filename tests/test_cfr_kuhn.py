@@ -8,6 +8,7 @@ from pokergpu.cfr.solver import (
     make_kuhn_public_tree,
     propagate_reach,
     run_kuhn_dense_iteration,
+    run_kuhn_dense_iterations,
     run_kuhn_root_iteration,
 )
 from pokergpu.tree.public_tree import NodeId, NodeType
@@ -53,3 +54,17 @@ def test_kuhn_dense_iteration_uses_stage1_output_to_update_stage7() -> None:
 
     assert len(next_state.regret_sums) == table.infoset_count
     assert next_state.strategy_sums[0] == (1 / 12, 1 / 12)
+
+
+def test_kuhn_dense_iterations_accumulate_changes() -> None:
+    tree = make_kuhn_public_tree()
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(
+        regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+    )
+
+    next_state = run_kuhn_dense_iterations(state, 3)
+
+    assert next_state != state
+    assert next_state.regret_sums[0] != (0.0, 0.0)
