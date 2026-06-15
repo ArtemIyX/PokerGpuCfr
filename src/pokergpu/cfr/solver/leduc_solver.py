@@ -32,6 +32,7 @@ def run_leduc_dense_iteration(
     *,
     reach_weight: float = 1.0,
     max_workers: int | None = None,
+    use_processes: bool = False,
 ) -> DenseCfrState:
     tree = make_leduc_public_tree()
     table = build_dense_infoset_table(tree)
@@ -48,6 +49,7 @@ def run_leduc_dense_iteration(
         infoset_table=table,
         reach_weights=reach.infoset_reach if reach.infoset_reach else None,
         max_workers=max_workers,
+        use_processes=use_processes,
     )
 
 
@@ -57,6 +59,7 @@ def run_leduc_dense_iterations(
     *,
     reach_weight: float = 1.0,
     max_workers: int | None = None,
+    use_processes: bool = False,
 ) -> DenseCfrState:
     assert iterations > 0, "iterations must be positive"
     current = state
@@ -65,5 +68,6 @@ def run_leduc_dense_iterations(
             current,
             reach_weight=reach_weight,
             max_workers=max_workers,
+            use_processes=use_processes,
         )
     return current
