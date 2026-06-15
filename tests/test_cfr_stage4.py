@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import numpy as np
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
@@ -42,6 +43,7 @@ def test_build_showdown_equity_input_is_node_local() -> None:
 
     assert len(result.rows) == 3
     assert all(row.board == board for row in result.rows)
+    assert isinstance(result.rows[0].opponent_reach, np.ndarray)
     assert result.rows[0].node_id == 0
     assert result.rows[1].node_id == 1
     assert len(result.rows[0].opponent_reach) == 1326

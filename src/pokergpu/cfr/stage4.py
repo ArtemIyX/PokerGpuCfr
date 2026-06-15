@@ -23,7 +23,7 @@ from pokergpu.tree.public_tree import PublicTree
 class ShowdownEquityNodeInput:
     node_id: int
     board: Board
-    opponent_reach: tuple[float, ...]
+    opponent_reach: np.ndarray
     live_hand_mask: tuple[bool, ...]
     pot_size: float
 
@@ -96,7 +96,7 @@ def build_showdown_equity_input(
         ShowdownEquityNodeInput(
             node_id=node_id,
             board=live_board,
-            opponent_reach=opponent_reach.node_hand_opponent_reach[node_id],
+            opponent_reach=np.asarray(opponent_reach.node_hand_opponent_reach[node_id], dtype=np.float64),
             live_hand_mask=cache.live_hand_mask,
             pot_size=max(1.0, aggregate.node_aggregate.reach[node_id]),
         )
@@ -137,13 +137,12 @@ def _build_showdown_equity_board_cache_uncached(
     hand_scores = tuple(hand_scores_list)
     hand_scores_array = np.asarray(hand_scores, dtype=np.int32)
 
-    feasible_opponent_rows: list[np.ndarray] = []
+    feasible_opponent_rows: list[np.ndarray] = [np.empty(0, dtype=np.int32) for _ in range(private_hand_count())]
     live_indices = live_hand_indices
     hand_masks = hand_card_masks
     for hero_index in range(private_hand_count()):
         hero_mask = hand_masks[hero_index]
         if not live_hand_mask[hero_index]:
-            feasible_opponent_rows.append(np.empty(0, dtype=np.int32))
             continue
         feasible_row: list[int] = []
         for opponent_index in live_indices:
@@ -151,7 +150,7 @@ def _build_showdown_equity_board_cache_uncached(
                 continue
             if (hero_mask & hand_masks[opponent_index]) == 0:
                 feasible_row.append(opponent_index)
-        feasible_opponent_rows.append(np.asarray(feasible_row, dtype=np.int32))
+        feasible_opponent_rows[hero_index] = np.asarray(feasible_row, dtype=np.int32)
     feasible_opponent_indices = tuple(feasible_opponent_rows)
     return ShowdownEquityBoardCache(
         board=board,
@@ -243,7 +242,9 @@ def compute_showdown_equity_node(
     if not cache.live_hand_indices:
         return 0.0
 
-    opponent_weights = np.asarray(row.opponent_reach, dtype=np.float64)
+    opponent_weights = row.opponent_reach
+    if opponent_weights.ndim != 1 or len(opponent_weights) != private_hand_count():
+        raise ValueError("opponent reach must be one-dimensional and match private hand count")
     opponent_total = float(np.sum(np.maximum(opponent_weights, 0.0), dtype=np.float64))
     if opponent_total <= 0.0:
         return 0.0
