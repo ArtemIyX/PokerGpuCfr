@@ -1,23 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from .stage1 import normalize_strategy
-from .stage7 import regret_matching, update_average_strategy, update_regret
-
-
-@dataclass(slots=True, frozen=True)
-class ToyCfrState:
-    regret_sums: tuple[float, ...]
-    strategy_sums: tuple[float, ...]
-
-
-@dataclass(slots=True, frozen=True)
-class ToyCfrResult:
-    state: ToyCfrState
-    strategy: tuple[float, ...]
-    node_value: float
-    action_values: tuple[float, ...]
+from .state import ToyCfrResult, ToyCfrState
+from ..stage1 import normalize_strategy
+from ..stage7 import regret_matching, update_average_strategy, update_regret
 
 
 def run_toy_cfr_iteration(
@@ -33,8 +18,7 @@ def run_toy_cfr_iteration(
     if len(state.strategy_sums) != len(action_values):
         raise ValueError("state and action values must have the same length")
 
-    strategy = regret_matching(state.regret_sums)
-    strategy = normalize_strategy(strategy)
+    strategy = normalize_strategy(regret_matching(state.regret_sums))
     node_value = sum(prob * value for prob, value in zip(strategy, action_values, strict=True))
     regret_sums = update_regret(state.regret_sums, action_values, node_value)
     strategy_sums = update_average_strategy(state.strategy_sums, strategy, reach_weight)
