@@ -10,6 +10,7 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 class LeafBatchRow:
     node_id: int
     reach: float
+    features: tuple[float, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -40,7 +41,11 @@ def aggregate_prob_sum(
     leaf_reach_sum = tuple(forward.node_reach[node_index] for node_index in leaf_node_ids)
     leaf_batch = LeafBatchInput(
         rows=tuple(
-            LeafBatchRow(node_id=node_index, reach=forward.node_reach[node_index])
+            LeafBatchRow(
+                node_id=node_index,
+                reach=forward.node_reach[node_index],
+                features=(forward.node_reach[node_index],),
+            )
             for node_index in leaf_node_ids
         )
     )
