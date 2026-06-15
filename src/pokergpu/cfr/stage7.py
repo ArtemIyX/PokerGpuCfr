@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from .solver.state import DenseCfrState
+
+__all__ = [
+    "DenseCfrState",
+    "regret_matching",
+    "update_average_strategy",
+    "update_regret",
+]
 
 def regret_matching(regrets: tuple[float, ...]) -> tuple[float, ...]:
     if not regrets:
