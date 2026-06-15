@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pokergpu.tree.public_tree import NodeId, PublicTree
+from pokergpu.tree.public_tree import NodeId, NodeType, PublicTree
 
 from .state import ToyCfrResult, ToyCfrState
 from ..stage1 import normalize_strategy
@@ -36,16 +36,37 @@ def run_toy_cfr_iteration(
 def run_tree_root_cfr_iteration(
     tree: PublicTree,
     state: ToyCfrState,
-    *,
-    terminal_values: tuple[float, ...],
     reach_weight: float = 1.0,
 ) -> ToyCfrResult:
-    root_children = tree.child_links(NodeId(0))
-    if len(root_children) != len(terminal_values):
-        raise ValueError("terminal values must match the root branching factor")
+    terminal_values = _child_action_values(tree, NodeId(0))
 
     return run_toy_cfr_iteration(
         state,
         terminal_values,
         reach_weight=reach_weight,
     )
+
+
+def _child_action_values(tree: PublicTree, node: NodeId) -> tuple[float, ...]:
+    child_values: list[float] = []
+    for link in tree.child_links(node):
+        child_index = int(link.child)
+        child_type = tree.node_types[child_index]
+        payoff = tree.terminal_payoffs[child_index]
+
+        if child_type is NodeType.TERMINAL:
+            if payoff is None:
+                raise ValueError("terminal nodes must carry payoffs")
+            child_values.append(float(payoff))
+            continue
+
+        if child_type is NodeType.LEAF:
+            raise ValueError("toy solver cannot evaluate leaf nodes yet")
+
+        if tree.child_count[child_index] == 0:
+            raise ValueError("non-terminal child nodes must have children")
+
+        descendant_values = _child_action_values(tree, link.child)
+        child_values.append(sum(descendant_values) / len(descendant_values))
+
+    return tuple(child_values)
