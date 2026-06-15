@@ -5,6 +5,7 @@ import pstats
 from dataclasses import dataclass
 from io import StringIO
 from time import perf_counter
+from typing import Any
 
 from pokergpu.cfr.solver import evaluate_showdown_node_values
 from pokergpu.cfr.stage1 import ForwardProfileResult, propagate_forward
@@ -50,14 +51,42 @@ def make_profile_context() -> ProfileContext:
 
 
 def run_profile_workload(ctx: ProfileContext) -> None:
-    aggregate = aggregate_prob_sum(ctx.tree, ctx.forward, ctx.board)
-    opponent = compute_opponent_reach(ctx.tree, aggregate)
-    cache = build_showdown_equity_board_cache(ctx.board)
-    showdown_input = build_showdown_equity_input(ctx.tree, aggregate, opponent, board=ctx.board)
+    aggregate = profile_stage2_aggregate(ctx)
+    opponent = profile_stage3_opponent(ctx, aggregate)
+    cache = profile_stage4_cache(ctx)
+    showdown_input = profile_stage4_input(ctx, aggregate, opponent)
 
-    compute_showdown_equity(ctx.tree, aggregate, opponent, board=ctx.board)
-    compute_showdown_equity_node(showdown_input.rows[0], cache=cache)
-    evaluate_showdown_node_values(ctx.tree, ctx.forward, board=ctx.board)
+    profile_stage4_batch(ctx, aggregate, opponent)
+    profile_stage4_node(cache, showdown_input)
+    profile_solver_wrapper(ctx)
+
+
+def profile_stage2_aggregate(ctx: ProfileContext):
+    return aggregate_prob_sum(ctx.tree, ctx.forward, ctx.board)
+
+
+def profile_stage3_opponent(ctx: ProfileContext, aggregate: Any):
+    return compute_opponent_reach(ctx.tree, aggregate)
+
+
+def profile_stage4_cache(ctx: ProfileContext):
+    return build_showdown_equity_board_cache(ctx.board)
+
+
+def profile_stage4_input(ctx: ProfileContext, aggregate: Any, opponent: Any):
+    return build_showdown_equity_input(ctx.tree, aggregate, opponent, board=ctx.board)
+
+
+def profile_stage4_batch(ctx: ProfileContext, aggregate: Any, opponent: Any):
+    return compute_showdown_equity(ctx.tree, aggregate, opponent, board=ctx.board)
+
+
+def profile_stage4_node(cache: Any, showdown_input: Any):
+    return compute_showdown_equity_node(showdown_input.rows[0], cache=cache)
+
+
+def profile_solver_wrapper(ctx: ProfileContext):
+    return evaluate_showdown_node_values(ctx.tree, ctx.forward, board=ctx.board)
 
 
 def profile_once() -> str:
@@ -73,6 +102,8 @@ def profile_once() -> str:
     stats = pstats.Stats(profiler, stream=stream).sort_stats("cumulative")
     stats.print_stats(40)
     stats.print_callers(20)
+    stats.stream.write("\nappend callers:\n")
+    stats.print_callers("{method 'append' of 'list' objects}")
     return f"total_seconds={total_seconds:.6f}\n{stream.getvalue()}"
 
 

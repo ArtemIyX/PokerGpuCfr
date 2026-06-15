@@ -84,6 +84,7 @@ def build_showdown_equity_input(
     opponent_reach: OpponentReachResult,
     *,
     board: Board | None = None,
+    cache: ShowdownEquityBoardCache | None = None,
 ) -> ShowdownEquityBatchInput:
     if tree.node_count != len(aggregate.node_aggregate.reach):
         raise ValueError("tree and aggregate result must cover the same number of nodes")
@@ -91,7 +92,7 @@ def build_showdown_equity_input(
         raise ValueError("tree and opponent reach result must cover the same number of nodes")
 
     live_board = board or Board(())
-    cache = build_showdown_equity_board_cache(live_board)
+    cache = cache or build_showdown_equity_board_cache(live_board)
     rows = tuple(
         ShowdownEquityNodeInput(
             node_id=node_id,
@@ -127,30 +128,36 @@ def _build_showdown_equity_board_cache_uncached(
     live_hand_mask = tuple(private_hand_mask(board.cards))
     hands = all_private_hands()
     hand_card_masks = all_private_hand_card_masks()
+    hand_card_masks_array = np.asarray(hand_card_masks, dtype=np.uint64)
+    live_mask_array = np.asarray(live_hand_mask, dtype=np.bool_)
     live_hand_indices = tuple(
         index for index, is_live in enumerate(live_hand_mask) if is_live
     )
+    live_hands = tuple(
+        hand for hand, is_live in zip(hands, live_hand_mask, strict=True) if is_live
+    )
+    live_scores = evaluator_instance.evaluate_seven_card_hands(
+        tuple((hand.first, hand.second, *board.cards) for hand in live_hands)
+    )
     hand_scores_list: list[int] = [0] * private_hand_count()
-    for hand_index, (hand, is_live) in enumerate(zip(hands, live_hand_mask, strict=True)):
+    live_score_iter = iter(live_scores)
+    for hand_index, is_live in enumerate(live_hand_mask):
         if is_live:
-            hand_scores_list[hand_index] = _score_hand(evaluator_instance, hand, board)
+            hand_scores_list[hand_index] = next(live_score_iter).score
     hand_scores = tuple(hand_scores_list)
     hand_scores_array = np.asarray(hand_scores, dtype=np.int32)
 
     feasible_opponent_rows: list[np.ndarray] = [np.empty(0, dtype=np.int32) for _ in range(private_hand_count())]
-    live_indices = live_hand_indices
-    hand_masks = hand_card_masks
+    live_indices = np.asarray(live_hand_indices, dtype=np.int32)
+    hand_masks = hand_card_masks_array
     for hero_index in range(private_hand_count()):
-        hero_mask = hand_masks[hero_index]
-        if not live_hand_mask[hero_index]:
+        if not live_mask_array[hero_index]:
             continue
-        feasible_row: list[int] = []
-        for opponent_index in live_indices:
-            if hero_index == opponent_index:
-                continue
-            if (hero_mask & hand_masks[opponent_index]) == 0:
-                feasible_row.append(opponent_index)
-        feasible_opponent_rows[hero_index] = np.asarray(feasible_row, dtype=np.int32)
+        hero_mask = hand_masks[hero_index]
+        compatibility = (hand_masks & hero_mask) == 0
+        compatible_live = live_mask_array & compatibility
+        compatible_live[hero_index] = False
+        feasible_opponent_rows[hero_index] = np.flatnonzero(compatible_live).astype(np.int32, copy=False)
     feasible_opponent_indices = tuple(feasible_opponent_rows)
     return ShowdownEquityBoardCache(
         board=board,
@@ -174,17 +181,19 @@ def compute_showdown_equity(
     opponent_reach: OpponentReachResult,
     *,
     board: Board | None = None,
+    cache: ShowdownEquityBoardCache | None = None,
     max_workers: int | None = None,
     evaluator: TreysHandEvaluator | None = None,
 ) -> ShowdownEquityResult:
     if board is None:
         raise ValueError("showdown equity requires a river board")
-    cache = build_showdown_equity_board_cache(board, evaluator=evaluator)
+    cache = cache or build_showdown_equity_board_cache(board, evaluator=evaluator)
     showdown_input = build_showdown_equity_input(
         tree,
         aggregate,
         opponent_reach,
         board=cache.board,
+        cache=cache,
     )
     node_values = _compute_node_showdown_equity(
         showdown_input,
