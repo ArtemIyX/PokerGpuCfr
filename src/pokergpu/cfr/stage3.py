@@ -11,6 +11,7 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 class OpponentReachResult:
     infoset_opponent_reach: tuple[float, ...]
     infoset_card_opponent_reach: tuple[tuple[float, ...], ...]
+    infoset_hand_opponent_reach: tuple[tuple[float, ...], ...]
     infoset_node_card_ratio: tuple[tuple[tuple[float, ...], ...], ...]
     node_opponent_reach: tuple[float, ...]
     node_opponent_share: tuple[float, ...]
@@ -24,39 +25,60 @@ def compute_opponent_reach(
 ) -> OpponentReachResult:
     if tree.node_count != len(aggregate.node_aggregate.reach):
         raise ValueError("tree and aggregate result must cover the same number of nodes")
+    if not aggregate.node_aggregate.hand_reach:
+        raise ValueError("node hand reach vectors cannot be empty")
 
     infoset_nodes = _collect_infoset_nodes(tree)
+    hand_width = len(aggregate.node_aggregate.hand_reach[0])
 
     node_opponent_reach = tuple(aggregate.node_aggregate.reach)
     node_opponent_share = [0.0 for _ in range(tree.node_count)]
     infoset_opponent_reach = [0.0 for _ in range(len(infoset_nodes))]
     infoset_card_opponent_reach = [tuple(0.0 for _ in range(52)) for _ in range(len(infoset_nodes))]
+    infoset_hand_opponent_reach = [tuple(0.0 for _ in range(hand_width)) for _ in range(len(infoset_nodes))]
     infoset_node_card_ratio: list[tuple[tuple[float, ...], ...]] = [tuple() for _ in range(len(infoset_nodes))]
 
     def process_infoset(
         infoset_id: int,
-    ) -> tuple[int, float, tuple[float, ...], tuple[tuple[float, ...], ...], list[tuple[int, float]]]:
+    ) -> tuple[
+        int,
+        float,
+        tuple[float, ...],
+        tuple[float, ...],
+        tuple[tuple[float, ...], ...],
+        list[tuple[int, float]],
+    ]:
         nodes = infoset_nodes[infoset_id]
         if not nodes:
             raise ValueError("infoset must have at least one node")
 
         reach_total = 0.0
         card_reach = [0.0 for _ in range(52)]
+        hand_reach = [0.0 for _ in range(hand_width)]
         node_card_reach_rows: list[tuple[float, ...]] = []
+        node_hand_reach_rows: list[tuple[float, ...]] = []
         for node_index in nodes:
             if tree.node_types[node_index] not in {NodeType.PLAYER0, NodeType.PLAYER1}:
                 raise ValueError("infoset nodes must be player nodes")
             reach_total += aggregate.node_aggregate.reach[node_index]
             node_card_reach = aggregate.node_aggregate.card_reach[node_index]
+            node_hand_reach = aggregate.node_aggregate.hand_reach[node_index]
             if len(node_card_reach) != 52:
                 raise ValueError("node card reach vectors must have length 52")
+            if len(node_hand_reach) != hand_width:
+                raise ValueError("node hand reach vectors must have consistent length")
             for card_index, value in enumerate(node_card_reach):
                 card_reach[card_index] += value
+            for hand_index, value in enumerate(node_hand_reach):
+                hand_reach[hand_index] += value
             node_card_reach_rows.append(node_card_reach)
+            node_hand_reach_rows.append(node_hand_reach)
 
         card_total = tuple(card_reach)
+        hand_total = tuple(hand_reach)
         node_card_ratio_rows = _normalize_card_reach_rows(node_card_reach_rows, card_total)
         _validate_card_ratio_rows(node_card_ratio_rows)
+        _validate_hand_totals(node_hand_reach_rows, hand_total)
 
         node_shares: list[tuple[int, float]] = []
         if reach_total > 0.0:
@@ -68,7 +90,14 @@ def compute_opponent_reach(
             for node_index in nodes:
                 node_shares.append((node_index, uniform_share))
 
-        return infoset_id, reach_total, card_total, tuple(node_card_ratio_rows), node_shares
+        return (
+            infoset_id,
+            reach_total,
+            card_total,
+            hand_total,
+            tuple(node_card_ratio_rows),
+            node_shares,
+        )
 
     infoset_ids = list(range(len(infoset_nodes)))
     if max_workers is None or max_workers <= 1 or len(infoset_ids) <= 1:
@@ -77,9 +106,10 @@ def compute_opponent_reach(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(executor.map(process_infoset, infoset_ids))
 
-    for infoset_id, reach_total, card_reach, node_card_ratios, node_shares in results:
+    for infoset_id, reach_total, card_reach, hand_reach, node_card_ratios, node_shares in results:
         infoset_opponent_reach[infoset_id] = reach_total
         infoset_card_opponent_reach[infoset_id] = card_reach
+        infoset_hand_opponent_reach[infoset_id] = hand_reach
         infoset_node_card_ratio[infoset_id] = node_card_ratios
         for node_index, share in node_shares:
             node_opponent_share[node_index] = share
@@ -87,6 +117,7 @@ def compute_opponent_reach(
     return OpponentReachResult(
         infoset_opponent_reach=tuple(infoset_opponent_reach),
         infoset_card_opponent_reach=tuple(infoset_card_opponent_reach),
+        infoset_hand_opponent_reach=tuple(infoset_hand_opponent_reach),
         infoset_node_card_ratio=tuple(infoset_node_card_ratio),
         node_opponent_reach=node_opponent_reach,
         node_opponent_share=tuple(node_opponent_share),
@@ -116,6 +147,17 @@ def _validate_card_ratio_rows(node_card_ratio_rows: list[tuple[float, ...]]) -> 
     for row in node_card_ratio_rows[1:]:
         if len(row) != card_width:
             raise ValueError("card ratio rows must have consistent width")
+
+
+def _validate_hand_totals(
+    node_hand_reach_rows: list[tuple[float, ...]],
+    hand_total: tuple[float, ...],
+) -> None:
+    if not node_hand_reach_rows:
+        return
+    hand_width = len(hand_total)
+    if any(len(row) != hand_width for row in node_hand_reach_rows):
+        raise ValueError("hand reach rows must have consistent width")
 
 
 def _collect_infoset_nodes(tree: PublicTree) -> tuple[tuple[int, ...], ...]:

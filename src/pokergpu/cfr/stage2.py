@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.abstraction.hands import private_hand_count, private_hand_mask
 from pokergpu.core.cards import Rank, Suit
 from pokergpu.core.board import Board, Street
 from pokergpu.tree.public_tree import NodeType, PublicTree
@@ -37,6 +38,7 @@ class LeafBatchInput:
 class NodeCardAggregate:
     reach: tuple[float, ...]
     card_reach: tuple[tuple[float, ...], ...]
+    hand_reach: tuple[tuple[float, ...], ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -62,6 +64,7 @@ def aggregate_prob_sum(
         board_card_mask,
         max_workers=max_workers,
     )
+    node_hand_reach = _build_node_hand_reach(forward.node_reach, board)
     leaf_node_ids = tuple(
         node_index
         for node_index, node_type in enumerate(tree.node_types)
@@ -94,7 +97,11 @@ def aggregate_prob_sum(
     )
 
     return AggregateProbSumResult(
-        node_aggregate=NodeCardAggregate(reach=forward.node_reach, card_reach=node_card_reach),
+        node_aggregate=NodeCardAggregate(
+            reach=forward.node_reach,
+            card_reach=node_card_reach,
+            hand_reach=node_hand_reach,
+        ),
         leaf_node_ids=leaf_node_ids,
         leaf_reach_sum=leaf_reach_sum,
         leaf_batch=leaf_batch,
@@ -183,6 +190,33 @@ def _node_card_reach_vector(node_reach: float, board_card_mask: tuple[bool, ...]
         return tuple(0.0 for _ in range(52))
     weight = node_reach / live_count
     return tuple(0.0 if blocked else weight for blocked in board_card_mask)
+
+
+def _node_hand_reach_vector(node_reach: float, board: Board | None) -> tuple[float, ...]:
+    live_mask = private_hand_mask(board.cards if board is not None else ())
+    live_count = int(live_mask.sum())
+    if live_count <= 0 or node_reach <= 0.0:
+        return tuple(0.0 for _ in range(private_hand_count()))
+    weight = node_reach / live_count
+    return tuple(weight if live else 0.0 for live in live_mask)
+
+
+def _build_node_hand_reach(
+    node_reach: tuple[float, ...],
+    board: Board | None,
+    *,
+    max_workers: int | None = None,
+) -> tuple[tuple[float, ...], ...]:
+    if max_workers is None or max_workers <= 1 or len(node_reach) <= 1:
+        return tuple(_node_hand_reach_vector(value, board) for value in node_reach)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return tuple(
+            executor.map(
+                lambda value: _node_hand_reach_vector(value, board),
+                node_reach,
+            )
+        )
 
 
 def _build_node_card_reach(
