@@ -8,6 +8,8 @@
 ![CFR](https://img.shields.io/badge/algorithm-CFR%2B%20%2F%20DCFR-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> [Main Paper](https://export.arxiv.org/pdf/2605.19928)
+
 A Python research project for building a GPU-accelerated Counterfactual Regret Minimization solver for poker, with a long-term focus on No-Limit Texas Hold'em.
 
 The project is not trying to exactly solve full 6-max no-limit Hold'em. That game is far too large to solve directly. Instead, this repository focuses on the practical approach used by real poker-solving systems: abstraction, flat data layouts, depth-limited solving, batched leaf evaluation, CFR variants, benchmarking, and eventually GPU-assisted re-solving.
