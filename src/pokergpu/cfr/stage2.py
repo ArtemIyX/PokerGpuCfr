@@ -39,12 +39,16 @@ def aggregate_prob_sum(
         if node_type is NodeType.LEAF
     )
     leaf_reach_sum = tuple(forward.node_reach[node_index] for node_index in leaf_node_ids)
+    total_leaf_reach = sum(leaf_reach_sum)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
                 node_id=node_index,
                 reach=forward.node_reach[node_index],
-                features=(forward.node_reach[node_index],),
+                features=(
+                    forward.node_reach[node_index],
+                    _safe_share(forward.node_reach[node_index], total_leaf_reach),
+                ),
             )
             for node_index in leaf_node_ids
         )
@@ -56,3 +60,9 @@ def aggregate_prob_sum(
         leaf_reach_sum=leaf_reach_sum,
         leaf_batch=leaf_batch,
     )
+
+
+def _safe_share(value: float, total: float) -> float:
+    if total <= 0.0:
+        return 0.0
+    return value / total
