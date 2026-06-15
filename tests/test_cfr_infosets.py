@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from pokergpu.cfr.solver import build_dense_infoset_table, make_kuhn_public_tree
+from pokergpu.cfr.solver import (
+    build_dense_infoset_table,
+    make_kuhn_public_tree,
+    propagate_reach,
+)
 from pokergpu.tree.public_tree import (
     ChildLink,
     InfosetId,
@@ -42,21 +46,32 @@ def test_build_dense_infoset_table_groups_repeated_infosets() -> None:
         node_types=(
             NodeType.PLAYER0,
             NodeType.PLAYER1,
-            NodeType.TERMINAL,
             NodeType.PLAYER0,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
         ),
-        first_child=(0, 2, 2, 2),
-        child_count=(2, 0, 0, 0),
+        first_child=(0, 2, 4, 4, 4),
+        child_count=(2, 2, 2, 0, 0),
         children=(
             ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(2)),
             ChildLink(child=NodeId(3)),
-            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(4)),
+            ChildLink(child=NodeId(3)),
+            ChildLink(child=NodeId(4)),
         ),
-        infoset_ids=(InfosetId(0), InfosetId(1), None, InfosetId(0)),
-        terminal_payoffs=(None, None, Chips(1), None),
+        infoset_ids=(InfosetId(0), InfosetId(1), InfosetId(0), None, None),
+        terminal_payoffs=(None, None, None, Chips(1), Chips(2)),
     )
 
     table = build_dense_infoset_table(tree)
+    reach = propagate_reach(
+        tree,
+        infoset_table=table,
+        infoset_strategies={InfosetId(0): (0.25, 0.75), InfosetId(1): (1.0, 0.0)},
+    )
 
-    assert table.node_to_infoset == (0, 1, -1, 0)
-    assert table.infoset_nodes[0] == (0, 3)
+    assert table.node_to_infoset == (0, 1, 0, -1, -1)
+    assert table.infoset_nodes[0] == (0, 2)
+    assert reach.infoset_reach[0] == 1.75
+    assert reach.cumulative_strategy[0] == (0.4375, 1.3125)
