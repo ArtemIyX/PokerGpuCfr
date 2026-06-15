@@ -3,6 +3,7 @@ from .stage2 import AggregateProbSumResult, aggregate_prob_sum
 from .stage3 import OpponentReachResult, compute_opponent_reach
 from .stage4 import (
     ShowdownEquityBatchInput,
+    ShowdownEquityBoardCache,
     ShowdownEquityNodeInput,
     ShowdownEquityNodeOutput,
     ShowdownEquityResult,
@@ -24,6 +25,7 @@ __all__ = [
     "AggregateProbSumResult",
     "OpponentReachResult",
     "ShowdownEquityBatchInput",
+    "ShowdownEquityBoardCache",
     "ShowdownEquityNodeInput",
     "ShowdownEquityNodeOutput",
     "ShowdownEquityResult",
