@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import pytest
+
+from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.cfr.stage3 import compute_opponent_reach
+from pokergpu.core.betting import Chips
+from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
+
+
+def test_compute_opponent_reach_aggregates_infoset_reach() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.PLAYER1,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+        ),
+        first_child=(0, 1, 0, 0),
+        child_count=(1, 2, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(2)),
+            ChildLink(child=NodeId(3)),
+        ),
+        infoset_ids=(InfosetId(0), InfosetId(0), None, None),
+        terminal_payoffs=(None, None, Chips(0), Chips(0)),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 0.4, 0.0, 0.0),
+        infoset_reach=(1.4,),
+        action_reach=((0.4,), (0.25, 0.75), (), ()),
+    )
+    aggregate = aggregate_prob_sum(tree, forward)
+
+    result = compute_opponent_reach(tree, aggregate)
+
+    assert result.infoset_opponent_reach == (1.4,)
+    assert result.node_opponent_reach == (1.0, 0.4, 0.0, 0.0)
+    assert result.node_opponent_share == pytest.approx((5 / 7, 2 / 7, 0.0, 0.0))
+
+
+def test_compute_opponent_reach_uses_uniform_shares_for_zero_reach_infoset() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER0),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(InfosetId(0), InfosetId(0)),
+        terminal_payoffs=(None, None),
+    )
+    aggregate = aggregate_prob_sum(
+        tree,
+        ForwardProfileResult(
+            node_reach=(0.0, 0.0),
+            infoset_reach=(0.0,),
+            action_reach=((), ()),
+        ),
+    )
+
+    result = compute_opponent_reach(tree, aggregate, max_workers=2)
+
+    assert result.infoset_opponent_reach == (0.0,)
+    assert result.node_opponent_share == (0.5, 0.5)
+
+
+def test_compute_opponent_reach_rejects_non_dense_infosets() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER0),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(InfosetId(0), InfosetId(2)),
+        terminal_payoffs=(None, None),
+    )
+    aggregate = aggregate_prob_sum(
+        tree,
+        ForwardProfileResult(
+            node_reach=(1.0, 1.0),
+            infoset_reach=(1.0, 0.0, 1.0),
+            action_reach=((), ()),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="infoset ids must be dense and contiguous"):
+        compute_opponent_reach(tree, aggregate)
