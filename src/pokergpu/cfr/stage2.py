@@ -17,6 +17,7 @@ class LeafFeatures:
     board_signature: int
     board_card_mask: tuple[bool, ...]
     board_card_vector: tuple[float, ...]
+    leaf_card_reach_vector: tuple[float, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -59,6 +60,7 @@ def aggregate_prob_sum(
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
     board_card_mask, board_card_vector = _board_card_features(board)
+    leaf_card_reach_vector = _leaf_card_reach_vector(board_card_mask, board_size)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -72,6 +74,7 @@ def aggregate_prob_sum(
                     board_signature=board_signature,
                     board_card_mask=board_card_mask,
                     board_card_vector=board_card_vector,
+                    leaf_card_reach_vector=leaf_card_reach_vector,
                 ),
             )
             for node_index in leaf_node_ids
@@ -147,3 +150,14 @@ def _card_index(rank: Rank, suit: Suit) -> int:
         Rank.ACE: 12,
     }[rank]
     return suit_index * 13 + rank_index
+
+
+def _leaf_card_reach_vector(
+    board_card_mask: tuple[bool, ...],
+    board_size: int,
+) -> tuple[float, ...]:
+    live_card_count = 52 - board_size
+    if live_card_count <= 0:
+        return tuple(0.0 for _ in range(52))
+    weight = 1.0 / live_card_count
+    return tuple(0.0 if blocked else weight for blocked in board_card_mask)
