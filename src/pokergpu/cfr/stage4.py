@@ -52,6 +52,7 @@ class ShowdownEquityBoardCache:
     live_hand_mask: tuple[bool, ...]
     hand_scores: tuple[int, ...]
     live_hand_indices: tuple[int, ...]
+    feasible_opponent_mask: tuple[tuple[bool, ...], ...]
     comparison_matrix: tuple[tuple[float, ...], ...]
 
     def __post_init__(self) -> None:
@@ -63,9 +64,14 @@ class ShowdownEquityBoardCache:
             raise ValueError("live hand indices must match live hand mask")
         if len(self.comparison_matrix) != private_hand_count():
             raise ValueError("comparison matrix must match private hand count")
+        if len(self.feasible_opponent_mask) != private_hand_count():
+            raise ValueError("feasible opponent mask must match private hand count")
         for row in self.comparison_matrix:
             if len(row) != private_hand_count():
                 raise ValueError("comparison matrix must be square over private hands")
+        for row in self.feasible_opponent_mask:
+            if len(row) != private_hand_count():
+                raise ValueError("feasible opponent mask must be square over private hands")
 
 
 def build_showdown_equity_input(
@@ -122,11 +128,22 @@ def build_showdown_equity_board_cache(
         )
         for hero_index, hero_score in enumerate(hand_scores)
     )
+    feasible_opponent_mask = tuple(
+        tuple(
+            hero_index != opponent_index
+            and live_hand_mask[hero_index]
+            and live_hand_mask[opponent_index]
+            and _hands_are_disjoint(hands[hero_index], hands[opponent_index])
+            for opponent_index in range(private_hand_count())
+        )
+        for hero_index in range(private_hand_count())
+    )
     return ShowdownEquityBoardCache(
         board=board,
         live_hand_mask=live_hand_mask,
         hand_scores=hand_scores,
         live_hand_indices=live_hand_indices,
+        feasible_opponent_mask=feasible_opponent_mask,
         comparison_matrix=comparison_matrix,
     )
 
@@ -211,11 +228,12 @@ def compute_showdown_equity_node(
     if opponent_total <= 0.0:
         return 0.0
 
-    live_opponent_weights = np.where(live_mask > 0.0, np.maximum(opponent_weights, 0.0), 0.0)
     total_equity = 0.0
     hero_count = 0
     for hero_index in cache.live_hand_indices:
         hero_row = np.asarray(cache.comparison_matrix[hero_index], dtype=np.float64)
+        feasible_mask = np.asarray(cache.feasible_opponent_mask[hero_index], dtype=np.float64)
+        live_opponent_weights = np.where(feasible_mask > 0.0, np.maximum(opponent_weights, 0.0), 0.0)
         hero_equity = float(np.dot(live_opponent_weights, hero_row))
         hero_opponent_weight = float(np.sum(live_opponent_weights, dtype=np.float64))
         if hero_opponent_weight > 0.0:
@@ -242,3 +260,12 @@ def _compare_scores(hero_score: int, opponent_score: int) -> float:
     if hero_score == opponent_score:
         return 0.5
     return 0.0
+
+
+def _hands_are_disjoint(hero_hand: PrivateHand, opponent_hand: PrivateHand) -> bool:
+    return (
+        hero_hand.first != opponent_hand.first
+        and hero_hand.first != opponent_hand.second
+        and hero_hand.second != opponent_hand.first
+        and hero_hand.second != opponent_hand.second
+    )
