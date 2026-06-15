@@ -30,10 +30,11 @@ def run_kuhn_dense_iteration(
     state: DenseCfrState,
     *,
     reach_weight: float = 1.0,
+    max_workers: int | None = None,
 ) -> DenseCfrState:
     tree = make_kuhn_public_tree()
     table = build_dense_infoset_table(tree)
-    reach = propagate_reach(tree, infoset_table=table)
+    reach = propagate_reach(tree, infoset_table=table, max_workers=max_workers)
     action_values = tuple(
         aggregate_action_values(tree, NodeId(node_index))
         for node_index in table.infoset_to_node
@@ -45,6 +46,7 @@ def run_kuhn_dense_iteration(
         action_values,
         infoset_table=table,
         reach_weights=reach.infoset_reach if reach.infoset_reach else None,
+        max_workers=max_workers,
     )
 
 
@@ -53,9 +55,14 @@ def run_kuhn_dense_iterations(
     iterations: int,
     *,
     reach_weight: float = 1.0,
+    max_workers: int | None = None,
 ) -> DenseCfrState:
     assert iterations > 0, "iterations must be positive"
     current = state
     for _ in range(iterations):
-        current = run_kuhn_dense_iteration(current, reach_weight=reach_weight)
+        current = run_kuhn_dense_iteration(
+            current,
+            reach_weight=reach_weight,
+            max_workers=max_workers,
+        )
     return current
