@@ -8,6 +8,7 @@ from pokergpu.cfr.solver import (
     make_kuhn_public_tree,
     propagate_reach,
 )
+from pokergpu.cfr.solver.chunking import chunk_indices
 from pokergpu.tree.public_tree import (
     ChildLink,
     InfosetId,
@@ -146,3 +147,9 @@ def test_apply_dense_solver_strategy_update_threaded_matches_serial() -> None:
     )
 
     assert threaded == serial
+
+
+def test_chunk_indices_splits_deterministically() -> None:
+    assert chunk_indices([0, 1, 2, 3, 4], 2) == ((0, 1, 2), (3, 4))
+    assert chunk_indices([0, 1, 2, 3, 4], 10) == ((0,), (1,), (2,), (3,), (4,))
+    assert chunk_indices([], 4) == ()

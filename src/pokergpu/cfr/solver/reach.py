@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from math import ceil
 from collections.abc import Mapping
 
 from pokergpu.tree.public_tree import InfosetId, NodeId, NodeType, PublicTree
 
 from .infosets import DenseInfosetTable, build_dense_infoset_table
+from .chunking import chunk_indices
 
 
 @dataclass(slots=True, frozen=True)
@@ -101,8 +101,7 @@ def propagate_reach(
     if max_workers is None or max_workers <= 1 or len(infoset_ids) <= 1:
         results = [process_infoset(infoset_id) for infoset_id in infoset_ids]
     else:
-        chunk_size = max(1, ceil(len(infoset_ids) / max_workers))
-        chunks = [tuple(infoset_ids[index : index + chunk_size]) for index in range(0, len(infoset_ids), chunk_size)]
+        chunks = chunk_indices(infoset_ids, max_workers)
         results = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for chunk_result in executor.map(lambda chunk: tuple(process_infoset(infoset_id) for infoset_id in chunk), chunks):
