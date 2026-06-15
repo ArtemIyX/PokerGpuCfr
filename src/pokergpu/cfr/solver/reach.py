@@ -84,13 +84,21 @@ def propagate_reach(
 
     max_infoset = max(infoset_reach_map, default=-1)
     infoset_reach = [0.0 for _ in range(max_infoset + 1)]
-    cumulative_strategy: list[tuple[float, ...]] = [
-        tuple() for _ in range(max_infoset + 1)
-    ]
+    cumulative_strategy: list[tuple[float, ...]] = [tuple() for _ in range(max_infoset + 1)]
     for infoset_id, reach in infoset_reach_map.items():
         infoset_reach[infoset_id] = reach
     for infoset_id, values in cumulative_strategy_map.items():
         cumulative_strategy[infoset_id] = tuple(values)
+
+    for infoset_id, nodes in enumerate(table.infoset_nodes):
+        if not nodes:
+            continue
+        if infoset_id >= len(infoset_reach):
+            continue
+        node_branching = tree.child_count[nodes[0]]
+        for node_index in nodes[1:]:
+            if tree.child_count[node_index] != node_branching:
+                raise ValueError("infoset nodes must share the same branching factor")
 
     return ReachResult(
         node_reach=tuple(node_reach),

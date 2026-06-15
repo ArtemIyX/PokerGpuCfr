@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from pokergpu.cfr.solver import build_dense_infoset_table, make_kuhn_public_tree
-from pokergpu.tree.public_tree import NodeType, PublicTree
+from pokergpu.tree.public_tree import (
+    ChildLink,
+    InfosetId,
+    NodeId,
+    NodeType,
+    PublicTree,
+)
 from pokergpu.core.betting import Chips
 
 
@@ -16,6 +22,7 @@ def test_build_dense_infoset_table_extracts_dense_mappings() -> None:
     assert table.infoset_to_node[0] == 1
     assert table.action_counts[0] == 2
     assert table.node_to_infoset[1] == 0
+    assert table.infoset_nodes[0] == (1,)
 
 
 def test_build_dense_infoset_table_rejects_missing_player_infoset() -> None:
@@ -28,3 +35,28 @@ def test_build_dense_infoset_table_rejects_missing_player_infoset() -> None:
             infoset_ids=(None, None),
             terminal_payoffs=(None, Chips(1)),
         )
+
+
+def test_build_dense_infoset_table_groups_repeated_infosets() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.PLAYER1,
+            NodeType.TERMINAL,
+            NodeType.PLAYER0,
+        ),
+        first_child=(0, 2, 2, 2),
+        child_count=(2, 0, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(3)),
+            ChildLink(child=NodeId(1)),
+        ),
+        infoset_ids=(InfosetId(0), InfosetId(1), None, InfosetId(0)),
+        terminal_payoffs=(None, None, Chips(1), None),
+    )
+
+    table = build_dense_infoset_table(tree)
+
+    assert table.node_to_infoset == (0, 1, -1, 0)
+    assert table.infoset_nodes[0] == (0, 3)
