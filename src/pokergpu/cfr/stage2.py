@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.core.board import Board, Street
 from pokergpu.tree.public_tree import NodeType, PublicTree
 
 
@@ -10,6 +11,7 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 class LeafFeatures:
     reach: float
     share: float
+    street: int
 
 
 @dataclass(slots=True, frozen=True)
@@ -35,6 +37,7 @@ class AggregateProbSumResult:
 def aggregate_prob_sum(
     tree: PublicTree,
     forward: ForwardProfileResult,
+    board: Board | None = None,
 ) -> AggregateProbSumResult:
     if tree.node_count != len(forward.node_reach):
         raise ValueError("tree and forward pass must cover the same number of nodes")
@@ -46,6 +49,7 @@ def aggregate_prob_sum(
     )
     leaf_reach_sum = tuple(forward.node_reach[node_index] for node_index in leaf_node_ids)
     total_leaf_reach = sum(leaf_reach_sum)
+    street = _street_code(board.street if board is not None else Street.PREFLOP)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -54,6 +58,7 @@ def aggregate_prob_sum(
                 features=LeafFeatures(
                     reach=forward.node_reach[node_index],
                     share=_safe_share(forward.node_reach[node_index], total_leaf_reach),
+                    street=street,
                 ),
             )
             for node_index in leaf_node_ids
@@ -72,3 +77,13 @@ def _safe_share(value: float, total: float) -> float:
     if total <= 0.0:
         return 0.0
     return value / total
+
+
+def _street_code(street: Street) -> int:
+    if street is Street.PREFLOP:
+        return 0
+    if street is Street.FLOP:
+        return 1
+    if street is Street.TURN:
+        return 2
+    return 3
