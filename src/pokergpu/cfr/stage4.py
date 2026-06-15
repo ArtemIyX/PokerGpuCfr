@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
@@ -104,6 +105,16 @@ def build_showdown_equity_board_cache(
     *,
     evaluator: TreysHandEvaluator | None = None,
 ) -> ShowdownEquityBoardCache:
+    if evaluator is not None:
+        return _build_showdown_equity_board_cache_uncached(board, evaluator=evaluator)
+    return _build_showdown_equity_board_cache_cached(board)
+
+
+def _build_showdown_equity_board_cache_uncached(
+    board: Board,
+    *,
+    evaluator: TreysHandEvaluator | None = None,
+) -> ShowdownEquityBoardCache:
     if len(board.cards) != 5:
         raise ValueError("showdown equity requires a river board")
 
@@ -144,6 +155,11 @@ def build_showdown_equity_board_cache(
         feasible_opponent_indices=feasible_opponent_indices,
         hand_card_masks=hand_card_masks,
     )
+
+
+@lru_cache(maxsize=256)
+def _build_showdown_equity_board_cache_cached(board: Board) -> ShowdownEquityBoardCache:
+    return _build_showdown_equity_board_cache_uncached(board)
 
 
 def compute_showdown_equity(
