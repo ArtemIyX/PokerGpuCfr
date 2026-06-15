@@ -3,6 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+import numpy as np
+
 from pokergpu.abstraction.hands import all_private_hands
 from pokergpu.abstraction.hands import private_hand_count
 from pokergpu.abstraction.hands import PrivateHand
@@ -150,7 +152,6 @@ def compute_showdown_equity(
     node_values = _compute_node_showdown_equity(
         showdown_input,
         cache=cache,
-        evaluator=evaluator,
         max_workers=max_workers,
     )
     return ShowdownEquityResult(
@@ -172,25 +173,21 @@ def _compute_node_showdown_equity(
     showdown_input: ShowdownEquityBatchInput,
     *,
     cache: ShowdownEquityBoardCache,
-    evaluator: TreysHandEvaluator | None = None,
     max_workers: int | None = None,
 ) -> tuple[float, ...]:
     if max_workers is None or max_workers <= 1 or len(showdown_input.rows) <= 1:
         return tuple(
-            _compute_single_node_showdown_equity(row, cache=cache)
+            compute_showdown_equity_node(row, cache=cache)
             for row in showdown_input.rows
         )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         return tuple(
-            executor.map(
-                lambda row: _compute_single_node_showdown_equity(row, cache=cache),
-                showdown_input.rows,
-            )
+            executor.map(lambda row: compute_showdown_equity_node(row, cache=cache), showdown_input.rows)
         )
 
 
-def _compute_single_node_showdown_equity(
+def compute_showdown_equity_node(
     row: ShowdownEquityNodeInput,
     *,
     cache: ShowdownEquityBoardCache,
@@ -208,23 +205,19 @@ def _compute_single_node_showdown_equity(
     if not cache.live_hand_indices:
         return 0.0
 
-    opponent_total = sum(max(0.0, weight) for weight in row.opponent_reach)
+    opponent_weights = np.asarray(row.opponent_reach, dtype=np.float64)
+    live_mask = np.asarray(row.live_hand_mask, dtype=np.float64)
+    opponent_total = float(np.sum(np.maximum(opponent_weights, 0.0), dtype=np.float64))
     if opponent_total <= 0.0:
         return 0.0
 
+    live_opponent_weights = np.where(live_mask > 0.0, np.maximum(opponent_weights, 0.0), 0.0)
     total_equity = 0.0
     hero_count = 0
     for hero_index in cache.live_hand_indices:
-        hero_row = cache.comparison_matrix[hero_index]
-        hero_equity = 0.0
-        hero_opponent_weight = 0.0
-        for opponent_index in cache.live_hand_indices:
-            opponent_weight = row.opponent_reach[opponent_index]
-            if opponent_weight <= 0.0:
-                continue
-            hero_equity += opponent_weight * hero_row[opponent_index]
-            hero_opponent_weight += opponent_weight
-
+        hero_row = np.asarray(cache.comparison_matrix[hero_index], dtype=np.float64)
+        hero_equity = float(np.dot(live_opponent_weights, hero_row))
+        hero_opponent_weight = float(np.sum(live_opponent_weights, dtype=np.float64))
         if hero_opponent_weight > 0.0:
             total_equity += hero_equity / hero_opponent_weight
             hero_count += 1

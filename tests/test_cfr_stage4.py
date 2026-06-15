@@ -7,6 +7,7 @@ from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.cfr.stage3 import compute_opponent_reach
 from pokergpu.cfr.stage4 import build_showdown_equity_board_cache
 from pokergpu.cfr.stage4 import build_showdown_equity_input, compute_showdown_equity
+from pokergpu.cfr.stage4 import compute_showdown_equity_node
 from pokergpu.core.betting import Chips
 from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
@@ -88,6 +89,28 @@ def test_compute_showdown_equity_returns_node_aligned_output() -> None:
     assert result.output_rows[0].node_id == 0
     assert result.output_rows[0].showdown_equity == result.node_showdown_equity[0]
     assert result.output_rows[0].showdown_equity_bb == result.node_showdown_equity_bb[0]
+
+
+def test_compute_showdown_equity_node_matches_batch_result() -> None:
+    board = Board.from_str("AhKdTc9s2c")
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
+    aggregate = aggregate_prob_sum(tree, forward, board)
+    opponent = compute_opponent_reach(tree, aggregate)
+    batch = build_showdown_equity_input(tree, aggregate, opponent, board=board)
+    cache = build_showdown_equity_board_cache(board)
+
+    node_value = compute_showdown_equity_node(batch.rows[0], cache=cache)
+    batch_value = compute_showdown_equity(tree, aggregate, opponent, board=board).node_showdown_equity[0]
+
+    assert node_value == pytest.approx(batch_value)
 
 
 def test_compute_showdown_equity_has_exact_single_hand_showdown_value() -> None:

@@ -9,6 +9,7 @@ from .stage4 import (
     ShowdownEquityResult,
     build_showdown_equity_input,
     compute_showdown_equity,
+    compute_showdown_equity_node,
 )
 from .solver import (
     DenseCfrState,
@@ -36,6 +37,7 @@ __all__ = [
     "compute_opponent_reach",
     "build_showdown_equity_input",
     "compute_showdown_equity",
+    "compute_showdown_equity_node",
     "normalize_strategy",
     "propagate_forward",
     "regret_matching",
