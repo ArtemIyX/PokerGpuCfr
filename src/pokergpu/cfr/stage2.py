@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.core.cards import Rank, Suit
 from pokergpu.core.board import Board, Street
 from pokergpu.tree.public_tree import NodeType, PublicTree
 
@@ -14,6 +15,7 @@ class LeafFeatures:
     street: int
     board_size: int
     board_signature: int
+    board_card_mask: tuple[bool, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -55,6 +57,7 @@ def aggregate_prob_sum(
     street = _street_code(board_street)
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
+    board_card_mask = _board_card_mask(board)
     leaf_batch = LeafBatchInput(
         rows=tuple(
             LeafBatchRow(
@@ -66,6 +69,7 @@ def aggregate_prob_sum(
                     street=street,
                     board_size=board_size,
                     board_signature=board_signature,
+                    board_card_mask=board_card_mask,
                 ),
             )
             for node_index in leaf_node_ids
@@ -105,3 +109,37 @@ def _board_signature(board: Board | None) -> int:
         suit_value = ord(card.suit.value[0])
         signature = signature * 131 + rank_value * 17 + suit_value
     return signature
+
+
+def _board_card_mask(board: Board | None) -> tuple[bool, ...]:
+    mask = [False] * 52
+    if board is None:
+        return tuple(mask)
+    for card in board.cards:
+        mask[_card_index(card.rank, card.suit)] = True
+    return tuple(mask)
+
+
+def _card_index(rank: Rank, suit: Suit) -> int:
+    suit_index = {
+        Suit.CLUBS: 0,
+        Suit.DIAMONDS: 1,
+        Suit.HEARTS: 2,
+        Suit.SPADES: 3,
+    }[suit]
+    rank_index = {
+        Rank.TWO: 0,
+        Rank.THREE: 1,
+        Rank.FOUR: 2,
+        Rank.FIVE: 3,
+        Rank.SIX: 4,
+        Rank.SEVEN: 5,
+        Rank.EIGHT: 6,
+        Rank.NINE: 7,
+        Rank.TEN: 8,
+        Rank.JACK: 9,
+        Rank.QUEEN: 10,
+        Rank.KING: 11,
+        Rank.ACE: 12,
+    }[rank]
+    return suit_index * 13 + rank_index
