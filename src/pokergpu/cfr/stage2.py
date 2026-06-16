@@ -98,61 +98,84 @@ def aggregate_prob_sum(
         raise ValueError("tree cannot be empty")
 
     board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
-    node_card_reach = np.empty((len(forward.node_reach), 52), dtype=np.float64)
-    node_hand_reach = np.empty((len(forward.node_reach), private_hand_count()), dtype=np.float64)
-    if _can_use_numba_parallel(max_workers):
-        _fill_node_aggregates_numba(
-            node_card_reach,
-            node_hand_reach,
-            np.asarray(forward.node_reach, dtype=np.float64),
-            np.asarray(board_card_mask, dtype=np.bool_),
-            private_hand_mask(board.cards if board is not None else ()),
-        )
-    elif max_workers is None or max_workers <= 1 or tree.node_count <= 1:
-        _fill_node_card_reach(node_card_reach, forward.node_reach, board_card_mask)
-        _fill_node_hand_reach(node_hand_reach, forward.node_reach, board)
-    else:
-        _fill_node_aggregates_parallel(
-            node_card_reach=node_card_reach,
-            node_hand_reach=node_hand_reach,
-            node_reach=forward.node_reach,
-            board=board,
-            board_card_mask=board_card_mask,
-            max_workers=max_workers,
-        )
+    board_card_mask_array = np.asarray(board_card_mask, dtype=np.bool_)
+    board_card_block_array = np.where(board_card_mask_array, np.float32(0.0), np.float32(1.0))
+    board_card_vector_array = np.asarray(board_card_vector, dtype=np.float32)
+    leaf_card_reach_vector_array = np.asarray(leaf_card_reach_vector, dtype=np.float32)
+    live_hand_mask = private_hand_mask(board.cards if board is not None else ())
+    node_reach_array = np.asarray(forward.node_reach, dtype=np.float64)
     leaf_node_ids = tuple(
         node_index
         for node_index, node_type in enumerate(tree.node_types)
         if node_type is NodeType.LEAF
     )
-    leaf_reach_sum = tuple(forward.node_reach[node_index] for node_index in leaf_node_ids)
-    total_leaf_reach = sum(leaf_reach_sum)
-    board_street = board.street if board is not None else Street.PREFLOP
-    street = _street_code(board_street)
-    board_size = len(board.cards) if board is not None else 0
-    board_signature = _board_signature(board)
-    leaf_node_id_tuple = tuple(leaf_node_ids)
-    leaf_reach_array = np.asarray(leaf_reach_sum, dtype=np.float32)
-    if leaf_reach_array.ndim != 1:
-        raise ValueError("leaf reach must be one-dimensional")
-    leaf_feature_rows = _build_leaf_feature_rows(
-        leaf_node_ids=leaf_node_ids,
-        node_reach=forward.node_reach,
-        total_leaf_reach=total_leaf_reach,
-        street=street,
-        board_size=board_size,
-        board_signature=board_signature,
-        board_card_mask=board_card_mask,
-        board_card_vector=board_card_vector,
-        leaf_card_reach_vector=leaf_card_reach_vector,
-    )
-    if leaf_feature_rows.dtype != np.float32:
-        raise ValueError("leaf feature rows must use float32")
-    leaf_batch = LeafBatchInput(
-        node_ids=leaf_node_id_tuple,
-        reach=leaf_reach_array,
-        features=leaf_feature_rows,
-    )
+    leaf_indices = np.asarray(leaf_node_ids, dtype=np.int64)
+    leaf_reach_sum_array = node_reach_array[leaf_indices]
+    total_leaf_reach = float(np.sum(leaf_reach_sum_array, dtype=np.float64))
+    leaf_shares = np.zeros_like(leaf_reach_sum_array, dtype=np.float32)
+    if total_leaf_reach > 0.0:
+        np.divide(leaf_reach_sum_array, np.float32(total_leaf_reach), out=leaf_shares)
+    node_card_reach = np.empty((len(forward.node_reach), 52), dtype=np.float64)
+    node_hand_reach = np.empty((len(forward.node_reach), private_hand_count()), dtype=np.float64)
+    if _can_use_numba_parallel(max_workers):
+        board_street = board.street if board is not None else Street.PREFLOP
+        street = _street_code(board_street)
+        board_size = len(board.cards) if board is not None else 0
+        board_signature = _board_signature(board)
+        leaf_batch_features = np.empty((len(leaf_node_ids), LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
+        _fill_node_aggregates_numba(
+            node_card_reach,
+            node_hand_reach,
+            node_reach_array,
+            board_card_mask_array,
+            live_hand_mask,
+        )
+        _fill_leaf_features_numba(
+            leaf_batch_features,
+            np.asarray(forward.node_reach, dtype=np.float64),
+            leaf_shares,
+            board_card_block_array,
+            board_card_vector_array,
+            leaf_card_reach_vector_array,
+            np.float32(street),
+            np.float32(board_size),
+            np.float32(board_signature),
+            leaf_indices,
+        )
+        leaf_batch = LeafBatchInput(
+            node_ids=leaf_node_ids,
+            reach=np.asarray(leaf_reach_sum_array, dtype=np.float32),
+            features=leaf_batch_features,
+        )
+    else:
+        if max_workers is None or max_workers <= 1 or tree.node_count <= 1:
+            _fill_node_card_reach(node_card_reach, node_reach_array, board_card_mask_array)
+            _fill_node_hand_reach(node_hand_reach, node_reach_array, live_hand_mask)
+        else:
+            _fill_node_aggregates_parallel(
+                node_card_reach=node_card_reach,
+                node_hand_reach=node_hand_reach,
+                node_reach=node_reach_array,
+                board_card_mask=board_card_mask_array,
+                live_hand_mask=live_hand_mask,
+                max_workers=max_workers,
+            )
+        leaf_feature_rows = _build_leaf_feature_rows(
+            leaf_indices=leaf_indices,
+            node_reach=node_reach_array,
+            leaf_shares=leaf_shares,
+            street=_street_code(board.street if board is not None else Street.PREFLOP),
+            board_size=len(board.cards) if board is not None else 0,
+            board_signature=_board_signature(board),
+            board_card_mask=board_card_mask_array,
+            board_card_vector=board_card_vector_array,
+            leaf_card_reach_vector=leaf_card_reach_vector_array,
+        )
+        leaf_batch = LeafBatchInput(
+            node_ids=leaf_node_ids,
+            reach=np.asarray(leaf_reach_sum_array, dtype=np.float32),
+            features=leaf_feature_rows,
+        )
 
     return AggregateProbSumResult(
         node_aggregate=NodeCardAggregate(
@@ -161,7 +184,7 @@ def aggregate_prob_sum(
             hand_reach=node_hand_reach,
         ),
         leaf_node_ids=leaf_node_ids,
-        leaf_reach_sum=leaf_reach_sum,
+        leaf_reach_sum=tuple(float(value) for value in leaf_reach_sum_array),
         leaf_batch=leaf_batch,
     )
 
@@ -173,34 +196,28 @@ def build_leaf_eval_batch(leaf_batch: LeafBatchInput) -> LeafEvalBatchInput:
     )
 
 
-def _safe_share(value: float, total: float) -> float:
-    if total <= 0.0:
-        return 0.0
-    return value / total
-
-
 def _build_leaf_feature_rows(
     *,
-    leaf_node_ids: tuple[int, ...],
-    node_reach: tuple[float, ...],
-    total_leaf_reach: float,
+    leaf_indices: NDArray[np.int64],
+    node_reach: NDArray[np.float64],
+    leaf_shares: NDArray[np.float32],
     street: int,
     board_size: int,
     board_signature: int,
-    board_card_mask: tuple[bool, ...],
-    board_card_vector: tuple[float, ...],
-    leaf_card_reach_vector: tuple[float, ...],
+    board_card_mask: NDArray[np.bool_],
+    board_card_vector: NDArray[np.float32],
+    leaf_card_reach_vector: NDArray[np.float32],
 ) -> NDArray[np.float32]:
-    leaf_count = len(leaf_node_ids)
+    leaf_count = leaf_indices.shape[0]
     if leaf_count == 0:
         return np.zeros((0, LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
 
-    reach = np.asarray([node_reach[node_index] for node_index in leaf_node_ids], dtype=np.float32)
-    share = np.asarray([_safe_share(node_reach[node_index], total_leaf_reach) for node_index in leaf_node_ids], dtype=np.float32)
+    reach = np.asarray(node_reach[leaf_indices], dtype=np.float32)
+    share = np.asarray(leaf_shares, dtype=np.float32)
     street_column = np.full((leaf_count, 1), np.float32(street), dtype=np.float32)
     board_size_column = np.full((leaf_count, 1), np.float32(board_size), dtype=np.float32)
     board_signature_column = np.full((leaf_count, 1), np.float32(board_signature), dtype=np.float32)
-    board_mask = np.asarray([1.0 if blocked else 0.0 for blocked in board_card_mask], dtype=np.float32)
+    board_mask = np.where(board_card_mask, np.float32(1.0), np.float32(0.0))
     board_vector = np.asarray(board_card_vector, dtype=np.float32)
     leaf_vector = np.asarray(leaf_card_reach_vector, dtype=np.float32)
     if board_mask.shape[0] != 52:
@@ -303,48 +320,44 @@ def _leaf_card_reach_vector(board_card_mask: tuple[bool, ...], board_size: int) 
 
 def _fill_node_hand_reach(
     out: NDArray[np.float64],
-    node_reach: tuple[float, ...],
-    board: Board | None,
+    node_reach: NDArray[np.float64],
+    live_mask: NDArray[np.bool_],
 ) -> None:
-    node_reach_array = np.asarray(node_reach, dtype=np.float64)
-    live_mask = private_hand_mask(board.cards if board is not None else ())
     live_count = int(live_mask.sum())
     if live_count <= 0:
         out.fill(0.0)
         return
-    weights = node_reach_array / np.float64(live_count)
+    weights = node_reach / np.float64(live_count)
     out[:] = np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
 
 
 def _fill_node_card_reach(
     out: NDArray[np.float64],
-    node_reach: tuple[float, ...],
-    board_card_mask: tuple[bool, ...],
+    node_reach: NDArray[np.float64],
+    board_card_mask: NDArray[np.bool_],
 ) -> None:
-    node_reach_array = np.asarray(node_reach, dtype=np.float64)
-    live_mask = np.asarray([not blocked for blocked in board_card_mask], dtype=np.bool_)
-    live_count = int(live_mask.sum())
+    live_count = int((~board_card_mask).sum())
     if live_count <= 0:
         out.fill(0.0)
         return
-    weights = node_reach_array / np.float64(live_count)
-    out[:] = np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
+    weights = node_reach / np.float64(live_count)
+    out[:] = np.where((~board_card_mask)[None, :], weights[:, None], np.float64(0.0))
 
 
 def _fill_node_aggregates_parallel(
     *,
     node_card_reach: NDArray[np.float64],
     node_hand_reach: NDArray[np.float64],
-    node_reach: tuple[float, ...],
-    board: Board | None,
-    board_card_mask: tuple[bool, ...],
+    node_reach: NDArray[np.float64],
+    board_card_mask: NDArray[np.bool_],
+    live_hand_mask: NDArray[np.bool_],
     max_workers: int,
 ) -> None:
     node_count = len(node_reach)
     worker_count = min(max_workers, node_count)
     if worker_count <= 1:
         _fill_node_card_reach(node_card_reach, node_reach, board_card_mask)
-        _fill_node_hand_reach(node_hand_reach, node_reach, board)
+        _fill_node_hand_reach(node_hand_reach, node_reach, live_hand_mask)
         return
 
     bounds = _chunk_bounds(node_count, worker_count)
@@ -355,8 +368,8 @@ def _fill_node_aggregates_parallel(
                     node_card_reach=node_card_reach,
                     node_hand_reach=node_hand_reach,
                     node_reach=node_reach,
-                    board=board,
                     board_card_mask=board_card_mask,
+                    live_hand_mask=live_hand_mask,
                     start=span[0],
                     stop=span[1],
                 ),
@@ -369,9 +382,9 @@ def _fill_node_aggregate_chunk(
     *,
     node_card_reach: NDArray[np.float64],
     node_hand_reach: NDArray[np.float64],
-    node_reach: tuple[float, ...],
-    board: Board | None,
-    board_card_mask: tuple[bool, ...],
+    node_reach: NDArray[np.float64],
+    board_card_mask: NDArray[np.bool_],
+    live_hand_mask: NDArray[np.bool_],
     start: int,
     stop: int,
 ) -> None:
@@ -385,7 +398,7 @@ def _fill_node_aggregate_chunk(
     _fill_node_hand_reach(
         node_hand_reach[start:stop],
         node_reach[start:stop],
-        board,
+        live_hand_mask,
     )
 
 
@@ -441,6 +454,38 @@ if njit is not None and prange is not None:
                 hand_weight = reach / hand_live_count
                 for hand_index in range(live_hand_mask.shape[0]):
                     node_hand_reach[node_index, hand_index] = hand_weight if live_hand_mask[hand_index] else 0.0
+
+
+    @njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
+    def _fill_leaf_features_numba(
+        leaf_features: NDArray[np.float32],
+        node_reach: NDArray[np.float64],
+        leaf_shares: NDArray[np.float32],
+        board_mask: NDArray[np.float32],
+        board_vector: NDArray[np.float32],
+        leaf_vector: NDArray[np.float32],
+        street: np.float32,
+        board_size: np.float32,
+        board_signature: np.float32,
+        leaf_node_ids: NDArray[np.int64],
+    ) -> None:
+        leaf_count = leaf_node_ids.shape[0]
+        for leaf_index in prange(leaf_count):
+            node_index = leaf_node_ids[leaf_index]
+            leaf_features[leaf_index, 0] = np.float32(node_reach[node_index])
+            leaf_features[leaf_index, 1] = leaf_shares[leaf_index]
+            leaf_features[leaf_index, 2] = street
+            leaf_features[leaf_index, 3] = board_size
+            leaf_features[leaf_index, 4] = board_signature
+            offset = 5
+            for i in range(52):
+                leaf_features[leaf_index, offset + i] = board_mask[i]
+            offset += 52
+            for i in range(52):
+                leaf_features[leaf_index, offset + i] = board_vector[i]
+            offset += 52
+            for i in range(52):
+                leaf_features[leaf_index, offset + i] = leaf_vector[i]
 
 else:
 

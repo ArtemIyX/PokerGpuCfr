@@ -3,9 +3,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
-from dataclasses import dataclass
-from pathlib import Path
 import sys
+from pathlib import Path
 from time import perf_counter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,17 +12,12 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+import numpy as np
+from numba import set_num_threads
+
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import NodeType, PublicTree
-
-
-@dataclass(slots=True)
-class ResultRow:
-    mode: str
-    workers: int
-    mean_ms: float
-    speedup: float
 
 
 def main() -> None:
@@ -34,101 +28,190 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=8)
     args = parser.parse_args()
 
+    os.environ["POKERGPU_STAGE2_NUMBA"] = "1"
+    stage2 = importlib.import_module("pokergpu.cfr.stage2")
+    stage2 = importlib.reload(stage2)
+
     tree = _make_leaf_tree(args.nodes)
     forward = _make_forward(tree)
     board = Board.from_str("AhKdTc")
+    board_card_mask, board_card_vector, leaf_card_reach_vector = stage2._board_card_features(board)
+    live_hand_mask = stage2.private_hand_mask(board.cards)
+    leaf_node_ids = tuple(range(tree.node_count))
+    leaf_indices = np.asarray(leaf_node_ids, dtype=np.int64)
+    node_reach = np.asarray(forward.node_reach, dtype=np.float64)
+    leaf_reach_sum = node_reach[leaf_indices]
+    leaf_shares = np.zeros_like(leaf_reach_sum, dtype=np.float32)
+    total_leaf_reach = float(np.sum(leaf_reach_sum, dtype=np.float64))
+    if total_leaf_reach > 0.0:
+        np.divide(leaf_reach_sum, np.float32(total_leaf_reach), out=leaf_shares)
 
-    print("Stage 2 parallelism benchmark")
+    node_card_reach = np.empty((tree.node_count, 52), dtype=np.float64)
+    node_hand_reach = np.empty((tree.node_count, stage2.private_hand_count()), dtype=np.float64)
+    leaf_features = np.empty((tree.node_count, stage2.LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
+
+    print("Stage 2 Numba benchmark")
     print(f"nodes={args.nodes} iterations={args.iterations}")
     print(f"warmup_runs={args.warmup} timed_runs={args.runs}")
-    print("mode    | workers | mean_ms | speedup")
-    print("-" * 44)
+    print("step                 | threads | mean_ms")
+    print("-" * 46)
 
-    rows: list[ResultRow] = []
-    for mode in ("serial", "threaded", "numba"):
-        baseline = None
-        for workers in (1, 2, 4, 8, 16):
-            if mode == "serial":
-                result = _run_mode(
+    steps = (
+        ("node_aggregates", _bench_node_aggregates),
+        ("leaf_features", _bench_leaf_features),
+        ("full_stage2", _bench_full_stage2),
+    )
+    for step_name, bench in steps:
+        baseline: float | None = None
+        for threads in (1, 2, 4, 8, 16):
+            set_num_threads(threads)
+            for _ in range(args.warmup):
+                bench(
+                    stage2,
                     tree,
                     forward,
                     board,
-                    mode=mode,
-                    workers=1,
+                    board_card_mask,
+                    board_card_vector,
+                    leaf_card_reach_vector,
+                    live_hand_mask,
+                    leaf_node_ids,
+                    leaf_indices,
+                    leaf_reach_sum,
+                    leaf_shares,
+                    node_card_reach,
+                    node_hand_reach,
+                    leaf_features,
                     iterations=args.iterations,
-                    warmup=args.warmup,
-                    runs=args.runs,
                 )
-            else:
-                result = _run_mode(
+            samples = [
+                _time_call(
+                    bench,
+                    stage2,
                     tree,
                     forward,
                     board,
-                    mode=mode,
-                    workers=workers,
+                    board_card_mask,
+                    board_card_vector,
+                    leaf_card_reach_vector,
+                    live_hand_mask,
+                    leaf_node_ids,
+                    leaf_indices,
+                    leaf_reach_sum,
+                    leaf_shares,
+                    node_card_reach,
+                    node_hand_reach,
+                    leaf_features,
                     iterations=args.iterations,
-                    warmup=args.warmup,
-                    runs=args.runs,
                 )
+                for _ in range(args.runs)
+            ]
+            mean_ms = sum(samples) / len(samples) * 1000.0
             if baseline is None:
-                baseline = result.mean_ms
-            rows.append(
-                ResultRow(
-                    mode=mode,
-                    workers=workers,
-                    mean_ms=result.mean_ms,
-                    speedup=baseline / result.mean_ms if result.mean_ms > 0.0 else 0.0,
-                )
-            )
-
-    for row in rows:
-        print(f"{row.mode:<7} | {row.workers:>7} | {row.mean_ms:>7.3f} | {row.speedup:>7.3f}x")
+                baseline = mean_ms
+            speedup = baseline / mean_ms if mean_ms > 0.0 else 0.0
+            print(f"{step_name:<20} | {threads:>7} | {mean_ms:>7.3f}  ({speedup:>5.2f}x)")
 
 
-def _run_mode(
-    tree: PublicTree,
-    forward: ForwardProfileResult,
-    board: Board,
-    *,
-    mode: str,
-    workers: int,
-    iterations: int,
-    warmup: int,
-    runs: int,
-) -> ResultRow:
-    stage2 = _load_stage2(mode)
-    for _ in range(warmup):
-        _run_once(stage2, tree, forward, board, workers=workers, iterations=iterations)
-    samples = [
-        _run_once(stage2, tree, forward, board, workers=workers, iterations=iterations)
-        for _ in range(runs)
-    ]
-    mean_ms = sum(samples) / len(samples) * 1000.0
-    return ResultRow(mode=mode, workers=workers, mean_ms=mean_ms, speedup=0.0)
-
-
-def _run_once(
+def _bench_node_aggregates(
     stage2,
     tree: PublicTree,
     forward: ForwardProfileResult,
     board: Board,
+    board_card_mask,
+    board_card_vector,
+    leaf_card_reach_vector,
+    live_hand_mask,
+    leaf_node_ids,
+    leaf_indices,
+    leaf_reach_sum,
+    leaf_shares,
+    node_card_reach,
+    node_hand_reach,
+    leaf_features,
     *,
-    workers: int,
     iterations: int,
-) -> float:
-    start = perf_counter()
+) -> None:
+    node_reach = np.asarray(forward.node_reach, dtype=np.float64)
+    board_mask = np.asarray(board_card_mask, dtype=np.bool_)
     for _ in range(iterations):
-        stage2.aggregate_prob_sum(tree, forward, board, max_workers=workers)
+        stage2._fill_node_aggregates_numba(
+            node_card_reach,
+            node_hand_reach,
+            node_reach,
+            board_mask,
+            live_hand_mask,
+        )
+
+
+def _bench_leaf_features(
+    stage2,
+    tree: PublicTree,
+    forward: ForwardProfileResult,
+    board: Board,
+    board_card_mask,
+    board_card_vector,
+    leaf_card_reach_vector,
+    live_hand_mask,
+    leaf_node_ids,
+    leaf_indices,
+    leaf_reach_sum,
+    leaf_shares,
+    node_card_reach,
+    node_hand_reach,
+    leaf_features,
+    *,
+    iterations: int,
+) -> None:
+    node_reach = np.asarray(forward.node_reach, dtype=np.float64)
+    board_mask = np.where(np.asarray(board_card_mask, dtype=np.bool_), np.float32(1.0), np.float32(0.0))
+    board_vector = np.asarray(board_card_vector, dtype=np.float32)
+    leaf_vector = np.asarray(leaf_card_reach_vector, dtype=np.float32)
+    street = np.float32(stage2._street_code(board.street))
+    board_size = np.float32(len(board.cards))
+    board_signature = np.float32(stage2._board_signature(board))
+    for _ in range(iterations):
+        stage2._fill_leaf_features_numba(
+            leaf_features,
+            node_reach,
+            leaf_shares,
+            board_mask,
+            board_vector,
+            leaf_vector,
+            street,
+            board_size,
+            board_signature,
+            np.asarray(leaf_indices, dtype=np.int64),
+        )
+
+
+def _bench_full_stage2(
+    stage2,
+    tree: PublicTree,
+    forward: ForwardProfileResult,
+    board: Board,
+    board_card_mask,
+    board_card_vector,
+    leaf_card_reach_vector,
+    live_hand_mask,
+    leaf_node_ids,
+    leaf_indices,
+    leaf_reach_sum,
+    leaf_shares,
+    node_card_reach,
+    node_hand_reach,
+    leaf_features,
+    *,
+    iterations: int,
+) -> None:
+    for _ in range(iterations):
+        stage2.aggregate_prob_sum(tree, forward, board, max_workers=16)
+
+
+def _time_call(func, *args, **kwargs) -> float:
+    start = perf_counter()
+    func(*args, **kwargs)
     return perf_counter() - start
-
-
-def _load_stage2(mode: str):
-    if mode == "numba":
-        os.environ["POKERGPU_STAGE2_NUMBA"] = "1"
-    else:
-        os.environ.pop("POKERGPU_STAGE2_NUMBA", None)
-    module = importlib.import_module("pokergpu.cfr.stage2")
-    return importlib.reload(module)
 
 
 def _make_leaf_tree(node_count: int) -> PublicTree:
