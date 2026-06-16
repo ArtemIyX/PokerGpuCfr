@@ -177,6 +177,12 @@ def _build_leaf_feature_rows(
     board_mask = np.asarray([1.0 if blocked else 0.0 for blocked in board_card_mask], dtype=np.float32)
     board_vector = np.asarray(board_card_vector, dtype=np.float32)
     leaf_vector = np.asarray(leaf_card_reach_vector, dtype=np.float32)
+    if board_mask.shape[0] != 52:
+        raise ValueError("board mask must have width 52")
+    if board_vector.shape[0] != 52:
+        raise ValueError("board vector must have width 52")
+    if leaf_vector.shape[0] != 52:
+        raise ValueError("leaf card reach vector must have width 52")
 
     repeated_board_mask = np.broadcast_to(board_mask, (leaf_count, board_mask.shape[0]))
     repeated_board_vector = np.broadcast_to(board_vector, (leaf_count, board_vector.shape[0]))
