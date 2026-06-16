@@ -15,25 +15,6 @@ from pokergpu.tree.public_tree import NodeType, PublicTree
 
 
 @dataclass(slots=True, frozen=True)
-class LeafFeatures:
-    reach: float
-    share: float
-    street: int
-    board_size: int
-    board_signature: int
-    board_card_mask: tuple[bool, ...]
-    board_card_vector: tuple[float, ...]
-    leaf_card_reach_vector: tuple[float, ...]
-
-
-@dataclass(slots=True, frozen=True)
-class LeafBatchRow:
-    node_id: int
-    reach: float
-    features: LeafFeatures
-
-
-@dataclass(slots=True, frozen=True)
 class LeafBatchInput:
     node_ids: tuple[int, ...]
     reach: NDArray[np.float32]
@@ -128,26 +109,17 @@ def aggregate_prob_sum(
     leaf_reach_array = np.asarray(leaf_reach_sum, dtype=np.float32)
     if leaf_reach_array.ndim != 1:
         raise ValueError("leaf reach must be one-dimensional")
-    leaf_feature_rows = np.asarray(
-        [
-            _leaf_eval_feature_row(
-                LeafFeatures(
-                    reach=forward.node_reach[node_index],
-                    share=_safe_share(forward.node_reach[node_index], total_leaf_reach),
-                    street=street,
-                    board_size=board_size,
-                    board_signature=board_signature,
-                    board_card_mask=board_card_mask,
-                    board_card_vector=board_card_vector,
-                    leaf_card_reach_vector=leaf_card_reach_vector,
-                )
-            )
-            for node_index in leaf_node_ids
-        ],
-        dtype=np.float32,
+    leaf_feature_rows = _build_leaf_feature_rows(
+        leaf_node_ids=leaf_node_ids,
+        node_reach=forward.node_reach,
+        total_leaf_reach=total_leaf_reach,
+        street=street,
+        board_size=board_size,
+        board_signature=board_signature,
+        board_card_mask=board_card_mask,
+        board_card_vector=board_card_vector,
+        leaf_card_reach_vector=leaf_card_reach_vector,
     )
-    if leaf_feature_rows.ndim == 1:
-        leaf_feature_rows = np.zeros((0, LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
     if leaf_feature_rows.dtype != np.float32:
         raise ValueError("leaf feature rows must use float32")
     leaf_batch = LeafBatchInput(
@@ -181,20 +153,50 @@ def _safe_share(value: float, total: float) -> float:
     return value / total
 
 
-def _leaf_eval_feature_row(features: LeafFeatures) -> tuple[float, ...]:
-    row = (
-        features.reach,
-        features.share,
-        float(features.street),
-        float(features.board_size),
-        float(features.board_signature),
-        *tuple(1.0 if blocked else 0.0 for blocked in features.board_card_mask),
-        *features.board_card_vector,
-        *features.leaf_card_reach_vector,
+def _build_leaf_feature_rows(
+    *,
+    leaf_node_ids: tuple[int, ...],
+    node_reach: tuple[float, ...],
+    total_leaf_reach: float,
+    street: int,
+    board_size: int,
+    board_signature: int,
+    board_card_mask: tuple[bool, ...],
+    board_card_vector: tuple[float, ...],
+    leaf_card_reach_vector: tuple[float, ...],
+) -> NDArray[np.float32]:
+    leaf_count = len(leaf_node_ids)
+    if leaf_count == 0:
+        return np.zeros((0, LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
+
+    reach = np.asarray([node_reach[node_index] for node_index in leaf_node_ids], dtype=np.float32)
+    share = np.asarray([_safe_share(node_reach[node_index], total_leaf_reach) for node_index in leaf_node_ids], dtype=np.float32)
+    street_column = np.full((leaf_count, 1), np.float32(street), dtype=np.float32)
+    board_size_column = np.full((leaf_count, 1), np.float32(board_size), dtype=np.float32)
+    board_signature_column = np.full((leaf_count, 1), np.float32(board_signature), dtype=np.float32)
+    board_mask = np.asarray([1.0 if blocked else 0.0 for blocked in board_card_mask], dtype=np.float32)
+    board_vector = np.asarray(board_card_vector, dtype=np.float32)
+    leaf_vector = np.asarray(leaf_card_reach_vector, dtype=np.float32)
+
+    repeated_board_mask = np.broadcast_to(board_mask, (leaf_count, board_mask.shape[0]))
+    repeated_board_vector = np.broadcast_to(board_vector, (leaf_count, board_vector.shape[0]))
+    repeated_leaf_vector = np.broadcast_to(leaf_vector, (leaf_count, leaf_vector.shape[0]))
+    rows = np.concatenate(
+        (
+            reach[:, None],
+            share[:, None],
+            street_column,
+            board_size_column,
+            board_signature_column,
+            repeated_board_mask,
+            repeated_board_vector,
+            repeated_leaf_vector,
+        ),
+        axis=1,
     )
-    if len(row) != LEAF_EVAL_FEATURE_WIDTH:
+    if rows.shape[1] != LEAF_EVAL_FEATURE_WIDTH:
         raise ValueError("leaf eval feature row has an unexpected width")
-    return row
+    return rows.astype(np.float32, copy=False)
 
 
 def _street_code(street: Street) -> int:

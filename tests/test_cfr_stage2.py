@@ -110,6 +110,61 @@ def test_aggregate_prob_sum_blocks_board_cards_in_dense_vectors() -> None:
     assert sum(result.node_aggregate.hand_reach[1]) == pytest.approx(8.0)
 
 
+def test_aggregate_prob_sum_handles_tree_without_leaf_nodes() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(InfosetId(0),),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0,),
+        infoset_reach=(1.0,),
+        action_reach=((),),
+    )
+
+    result = aggregate_prob_sum(tree, forward)
+
+    assert result.leaf_node_ids == ()
+    assert result.leaf_reach_sum == ()
+    assert result.leaf_batch.node_ids == ()
+    assert result.leaf_batch.reach.shape == (0,)
+    assert result.leaf_batch.features.shape == (0, LEAF_EVAL_FEATURE_WIDTH)
+    assert result.leaf_batch.features.dtype == np.float32
+
+
+def test_aggregate_prob_sum_builds_direct_leaf_tensor_for_boarded_state() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF, NodeType.LEAF),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(None, None),
+        terminal_payoffs=(None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(3.0, 1.5),
+        infoset_reach=(),
+        action_reach=((), ()),
+    )
+
+    result = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
+
+    assert result.leaf_batch.node_ids == (0, 1)
+    assert result.leaf_batch.reach.shape == (2,)
+    assert result.leaf_batch.features.shape == (2, LEAF_EVAL_FEATURE_WIDTH)
+    assert result.leaf_batch.features.dtype == np.float32
+    assert result.leaf_batch.features[0, 0] == pytest.approx(3.0)
+    assert result.leaf_batch.features[1, 0] == pytest.approx(1.5)
+    assert result.leaf_batch.features[0, 1] == pytest.approx(2.0 / 3.0)
+    assert result.leaf_batch.features[1, 1] == pytest.approx(1.0 / 3.0)
+    assert result.leaf_batch.features[0, 2] == pytest.approx(1.0)
+    assert result.leaf_batch.features[0, 3] == pytest.approx(3.0)
+    assert result.leaf_batch.features[0, 4] != 0.0
+
+
 def test_node_card_aggregate_holds_node_and_card_reach() -> None:
     tree = PublicTree(
         node_types=(NodeType.LEAF,),
