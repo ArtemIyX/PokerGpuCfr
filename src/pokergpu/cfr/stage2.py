@@ -76,13 +76,16 @@ class NodeCardAggregate:
 class AggregateProbSumResult:
     node_aggregate: NodeCardAggregate
     leaf_node_ids: tuple[int, ...]
-    leaf_reach_sum: tuple[float, ...]
+    leaf_reach_sum: NDArray[np.float32]
     leaf_batch: LeafBatchInput
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "leaf_node_ids", tuple(self.leaf_node_ids))
-        object.__setattr__(self, "leaf_reach_sum", tuple(self.leaf_reach_sum))
-        if len(self.leaf_node_ids) != len(self.leaf_reach_sum):
+        if self.leaf_reach_sum.ndim != 1:
+            raise ValueError("leaf reach sum must be a 1D tensor")
+        if self.leaf_reach_sum.dtype != np.float32:
+            raise ValueError("leaf reach sum must use float32")
+        if len(self.leaf_node_ids) != self.leaf_reach_sum.shape[0]:
             raise ValueError("leaf ids and reach must align")
         if self.leaf_batch.node_ids != self.leaf_node_ids:
             raise ValueError("leaf batch node ids must match leaf node ids")
@@ -126,7 +129,7 @@ def aggregate_prob_sum(
     return AggregateProbSumResult(
         node_aggregate=result.node_aggregate,
         leaf_node_ids=result.leaf_node_ids,
-        leaf_reach_sum=tuple(float(value) for value in result.leaf_reach_sum),
+        leaf_reach_sum=np.asarray(result.leaf_reach_sum, dtype=np.float32),
         leaf_batch=result.leaf_batch,
     )
 

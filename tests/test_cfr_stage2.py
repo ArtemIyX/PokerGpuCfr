@@ -132,7 +132,7 @@ def test_aggregate_prob_sum_handles_tree_without_leaf_nodes() -> None:
     result = aggregate_prob_sum(tree, forward)
 
     assert result.leaf_node_ids == ()
-    assert result.leaf_reach_sum == ()
+    assert result.leaf_reach_sum.shape == (0,)
     assert result.leaf_batch.node_ids == ()
     assert result.leaf_batch.reach.shape == (0,)
     assert result.leaf_batch.features.shape == (0, LEAF_EVAL_FEATURE_WIDTH)
