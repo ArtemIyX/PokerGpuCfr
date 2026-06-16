@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pokergpu.cfr.leaf_eval import LeafEvalResult
 from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
-from pokergpu.cfr.gpu_leaf_backend import create_default_leaf_backend
+from pokergpu.cfr.leaf_backend_factory import create_leaf_backend
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.cfr.stage2 import build_leaf_eval_batch
@@ -46,7 +46,7 @@ def evaluate_leaf_node_values(
 ) -> LeafEvalResult:
     aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
     batch = build_leaf_eval_batch(aggregate.leaf_batch)
-    return evaluate_leaf_batch(batch, backend or create_default_leaf_backend())
+    return evaluate_leaf_batch(batch, backend or create_leaf_backend())
 
 
 def evaluate_root_action_values(
