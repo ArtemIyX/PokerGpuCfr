@@ -49,9 +49,8 @@ def _linear_kernel(  # type: ignore[no-untyped-def]
         w = tl.load(w_ptrs + k0 * stride_wk, mask=w_mask, other=0.0)
         acc += tl.dot(x, w)
 
-    if b_ptr != 0:
-        b = tl.load(b_ptr + offs_n, mask=offs_n < n, other=0.0)
-        acc += b[None, :]
+    b = tl.load(b_ptr + offs_n, mask=offs_n < n, other=0.0)
+    acc += b[None, :]
 
     y = acc.to(tl.float32)
     y_ptrs = y_ptr + offs_m[:, None] * stride_ym + offs_n[None, :] * stride_yn
