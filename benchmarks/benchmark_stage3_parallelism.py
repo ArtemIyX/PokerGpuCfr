@@ -6,6 +6,7 @@ import importlib
 import os
 import pstats
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
@@ -20,8 +21,10 @@ import numpy as np
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.cfr.stage3 import compute_opponent_reach
 from pokergpu.cfr.infosets import build_dense_infoset_table
 from pokergpu.cfr.solver.leduc import make_leduc_public_tree
+from pokergpu.abstraction.hands import private_hand_count
 from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
@@ -52,14 +55,24 @@ def main() -> None:
     print("Stage 3 benchmark")
     print(f"replicas={args.replicas} tree_nodes={tree.node_count} iterations={args.iterations}")
     print(f"warmup_runs={args.warmup} timed_runs={args.runs}")
-    print("mode   | workers | mean_ms | speedup_vs_python")
-    print("-" * 52)
+    print("mode   | workers | compile_ms | steady_ms | speedup_vs_python")
+    print("-" * 66)
 
     reference = None
-    samples: list[BenchSample] = []
     for mode in ("python", "numba"):
         for workers in (1, 2, 4, 8, 16):
             max_workers = None if workers == 1 else workers
+            compile_ms = 0.0
+            if mode == "numba":
+                compile_ms = _time_call(
+                    _bench,
+                    stage3,
+                    tree,
+                    aggregate,
+                    iterations=1,
+                    max_workers=max_workers,
+                    mode=mode,
+                ) * 1000.0
             for _ in range(args.warmup):
                 _bench(stage3, tree, aggregate, iterations=args.iterations, max_workers=max_workers, mode=mode)
             times = [
@@ -78,8 +91,9 @@ def main() -> None:
             if mode == "python" and workers == 1:
                 reference = mean_ms
             speedup = reference / mean_ms if reference and mean_ms > 0.0 else 1.0
-            samples.append(BenchSample(mode=mode, workers=workers, mean_ms=mean_ms))
-            print(f"{mode:<6} | {workers:>7} | {mean_ms:>7.3f} | {speedup:>16.2f}x")
+            print(
+                f"{mode:<6} | {workers:>7} | {compile_ms:>10.3f} | {mean_ms:>9.3f} | {speedup:>16.2f}x"
+            )
 
     if args.profile:
         _run_profile(stage3, tree, aggregate, iterations=args.iterations)
@@ -88,9 +102,9 @@ def main() -> None:
 def _bench(stage3, tree, aggregate, *, iterations: int, max_workers: int | None, mode: str) -> None:
     for _ in range(iterations):
         if mode == "python":
-            _compute_opponent_reach_python_reference(stage3, tree, aggregate, max_workers=max_workers)
+            _compute_opponent_reach_python_reference(tree, aggregate, max_workers=max_workers)
         else:
-            stage3.compute_opponent_reach(tree, aggregate, max_workers=max_workers)
+            compute_opponent_reach(tree, aggregate, max_workers=max_workers)
 
 
 def _run_profile(stage3, tree, aggregate, *, iterations: int) -> None:
@@ -109,39 +123,97 @@ def _time_call(func, *args, **kwargs) -> float:
     return perf_counter() - start
 
 
-def _compute_opponent_reach_python_reference(stage3, tree, aggregate, *, max_workers: int | None) -> None:
+def _compute_opponent_reach_python_reference(tree: PublicTree, aggregate, *, max_workers: int | None) -> None:
     hand_reach_rows = aggregate.node_aggregate.hand_reach
     if len(hand_reach_rows) == 0:
         return
     infoset_nodes = build_dense_infoset_table(tree).infoset_nodes
     hand_width = int(np.asarray(hand_reach_rows[0]).shape[0])
-    node_hand_rows = [tuple(0.0 for _ in range(hand_width)) for _ in range(tree.node_count)]
-    node_share = [0.0 for _ in range(tree.node_count)]
-    for nodes in infoset_nodes:
+    node_opponent_share = [0.0 for _ in range(tree.node_count)]
+    node_hand_opponent_reach = [tuple(0.0 for _ in range(hand_width)) for _ in range(tree.node_count)]
+    infoset_opponent_reach = [0.0 for _ in range(len(infoset_nodes))]
+    infoset_card_opponent_reach = [tuple(0.0 for _ in range(52)) for _ in range(len(infoset_nodes))]
+    infoset_hand_opponent_reach = [tuple(0.0 for _ in range(hand_width)) for _ in range(len(infoset_nodes))]
+    infoset_node_hand_ratio: list[tuple[tuple[float, ...], ...]] = [tuple() for _ in range(len(infoset_nodes))]
+    infoset_node_card_ratio: list[tuple[tuple[float, ...], ...]] = [tuple() for _ in range(len(infoset_nodes))]
+
+    def process_infoset(infoset_id: int):
+        nodes = infoset_nodes[infoset_id]
+        if not nodes:
+            return infoset_id, 0.0, (), (), (), (), (), []
+
         reach_total = 0.0
-        card_total = [0.0 for _ in range(52)]
-        hand_total = [0.0 for _ in range(hand_width)]
-        node_card_rows: list[tuple[float, ...]] = []
-        node_hand_rows_local: list[tuple[float, ...]] = []
+        card_reach = [0.0 for _ in range(52)]
+        hand_reach = [0.0 for _ in range(hand_width)]
+        node_card_reach_rows: list[tuple[float, ...]] = []
+        node_hand_reach_rows: list[tuple[float, ...]] = []
         for node_index in nodes:
             reach_total += aggregate.node_aggregate.reach[node_index]
             node_card_reach = aggregate.node_aggregate.card_reach[node_index]
             node_hand_reach = aggregate.node_aggregate.hand_reach[node_index]
             for card_index, value in enumerate(node_card_reach):
-                card_total[card_index] += value
+                card_reach[card_index] += value
             for hand_index, value in enumerate(node_hand_reach):
-                hand_total[hand_index] += value
-            node_card_rows.append(node_card_reach)
-            node_hand_rows_local.append(node_hand_reach)
-        hand_total_tuple = tuple(hand_total)
+                hand_reach[hand_index] += value
+            node_card_reach_rows.append(node_card_reach)
+            node_hand_reach_rows.append(node_hand_reach)
+
+        card_total = tuple(card_reach)
+        hand_total = tuple(hand_reach)
+        node_card_ratio_rows = []
+        for row in node_card_reach_rows:
+            ratios = []
+            for card_index, value in enumerate(row):
+                total = card_total[card_index]
+                ratios.append(0.0 if total <= 0.0 else value / total)
+            node_card_ratio_rows.append(tuple(ratios))
+        node_hand_ratio_rows = []
+        for row in node_hand_reach_rows:
+            ratios = []
+            for hand_index, value in enumerate(row):
+                total = hand_total[hand_index]
+                ratios.append(0.0 if total <= 0.0 else value / total)
+            node_hand_ratio_rows.append(tuple(ratios))
+        node_hand_rows = []
+        for row in node_hand_reach_rows:
+            exact = []
+            for hand_index, value in enumerate(row):
+                total = hand_total[hand_index]
+                exact.append(0.0 if total <= 0.0 else value / total)
+            node_hand_rows.append(tuple(exact))
         if reach_total > 0.0:
-            for node_index in nodes:
-                node_share[node_index] = aggregate.node_aggregate.reach[node_index] / reach_total
+            node_shares = [(node_index, aggregate.node_aggregate.reach[node_index] / reach_total) for node_index in nodes]
         else:
-            for node_index in nodes:
-                node_share[node_index] = 1.0 / len(nodes)
-        for node_index, row in zip(nodes, node_hand_rows_local, strict=True):
-            node_hand_rows[node_index] = row
+            uniform_share = 1.0 / len(nodes)
+            node_shares = [(node_index, uniform_share) for node_index in nodes]
+        return (
+            infoset_id,
+            reach_total,
+            tuple(card_reach),
+            tuple(hand_reach),
+            tuple(node_hand_ratio_rows),
+            tuple(node_hand_rows),
+            tuple(node_card_ratio_rows),
+            node_shares,
+        )
+
+    infoset_ids = list(range(len(infoset_nodes)))
+    if max_workers is None or max_workers <= 1 or len(infoset_ids) <= 1:
+        results = [process_infoset(infoset_id) for infoset_id in infoset_ids]
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_infoset, infoset_ids))
+
+    for infoset_id, reach_total, card_reach, hand_reach, node_hand_ratios, node_hand_rows, node_card_ratios, node_shares in results:
+        infoset_opponent_reach[infoset_id] = reach_total
+        infoset_card_opponent_reach[infoset_id] = card_reach
+        infoset_hand_opponent_reach[infoset_id] = hand_reach
+        infoset_node_hand_ratio[infoset_id] = node_hand_ratios
+        infoset_node_card_ratio[infoset_id] = node_card_ratios
+        for node_index, node_hand_row in zip(infoset_nodes[infoset_id], node_hand_rows, strict=True):
+            node_hand_opponent_reach[node_index] = node_hand_row
+        for node_index, share in node_shares:
+            node_opponent_share[node_index] = share
 
 
 def _make_repeated_tree(base: PublicTree, replicas: int) -> PublicTree:

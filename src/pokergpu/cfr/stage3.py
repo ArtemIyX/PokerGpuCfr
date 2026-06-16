@@ -20,14 +20,59 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
 class OpponentReachResult:
     """Blocking-aware opponent reach summaries for a single public tree."""
 
-    infoset_opponent_reach: tuple[float, ...]
-    infoset_card_opponent_reach: tuple[tuple[float, ...], ...]
-    infoset_hand_opponent_reach: tuple[tuple[float, ...], ...]
-    infoset_node_hand_ratio: tuple[tuple[tuple[float, ...], ...], ...]
-    infoset_node_card_ratio: tuple[tuple[tuple[float, ...], ...], ...]
-    node_opponent_reach: tuple[float, ...]
-    node_opponent_share: tuple[float, ...]
-    node_hand_opponent_reach: tuple[tuple[float, ...], ...]
+    infoset_opponent_reach: np.ndarray
+    infoset_card_opponent_reach: np.ndarray
+    infoset_hand_opponent_reach: np.ndarray
+    infoset_node_hand_ratio: np.ndarray
+    infoset_node_card_ratio: np.ndarray
+    node_opponent_reach: np.ndarray
+    node_opponent_share: np.ndarray
+    node_hand_opponent_reach: np.ndarray
+
+    def to_legacy(self, infoset_table: DenseInfosetTable) -> tuple[
+        tuple[float, ...],
+        tuple[tuple[float, ...], ...],
+        tuple[tuple[float, ...], ...],
+        tuple[tuple[tuple[float, ...], ...], ...],
+        tuple[tuple[tuple[float, ...], ...], ...],
+        tuple[float, ...],
+        tuple[float, ...],
+        tuple[tuple[float, ...], ...],
+    ]:
+        infoset_counts = infoset_table.infoset_node_counts
+        row_offsets = _build_row_offsets(infoset_counts)
+        return (
+            tuple(float(value) for value in self.infoset_opponent_reach),
+            tuple(tuple(float(value) for value in row) for row in self.infoset_card_opponent_reach),
+            tuple(tuple(float(value) for value in row) for row in self.infoset_hand_opponent_reach),
+            tuple(
+                tuple(
+                    tuple(float(value) for value in node_row)
+                    for node_row in _iter_infoset_rows(
+                        self.infoset_node_hand_ratio,
+                        row_offsets,
+                        infoset_id,
+                        int(infoset_counts[infoset_id]),
+                    )
+                )
+                for infoset_id in range(infoset_table.infoset_count)
+            ),
+            tuple(
+                tuple(
+                    tuple(float(value) for value in node_row)
+                    for node_row in _iter_infoset_rows(
+                        self.infoset_node_card_ratio,
+                        row_offsets,
+                        infoset_id,
+                        int(infoset_counts[infoset_id]),
+                    )
+                )
+                for infoset_id in range(infoset_table.infoset_count)
+            ),
+            tuple(float(value) for value in self.node_opponent_reach),
+            tuple(float(value) for value in self.node_opponent_share),
+            tuple(tuple(float(value) for value in row) for row in self.node_hand_opponent_reach),
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -35,6 +80,7 @@ class Stage3PreparedInput:
     infoset_table: DenseInfosetTable
     infoset_node_indices: np.ndarray
     infoset_node_counts: np.ndarray
+    infoset_row_offsets: np.ndarray
     node_reach: np.ndarray
     node_card_reach: np.ndarray
     node_hand_reach: np.ndarray
@@ -50,7 +96,6 @@ def compute_opponent_reach(
         raise ValueError("tree and aggregate result must cover the same number of nodes")
     prepared = _prepare_stage3_input(tree, aggregate)
     infoset_table = prepared.infoset_table
-    infoset_nodes = infoset_table.infoset_nodes
     hand_width = int(prepared.node_hand_reach.shape[1])
     if hand_width != private_hand_count():
         raise ValueError("node hand reach vectors must match the private hand count")
@@ -65,8 +110,9 @@ def compute_opponent_reach(
     infoset_hand_opponent_reach = np.zeros((infoset_count, hand_width), dtype=np.float64)
     node_opponent_share = np.zeros(tree.node_count, dtype=np.float64)
     node_hand_opponent_reach = np.zeros((tree.node_count, hand_width), dtype=np.float64)
-    infoset_node_hand_ratio = np.zeros((infoset_count, node_reach.shape[0], hand_width), dtype=np.float64)
-    infoset_node_card_ratio = np.zeros((infoset_count, node_reach.shape[0], 52), dtype=np.float64)
+    total_infoset_nodes = int(prepared.infoset_row_offsets[-1]) if infoset_count > 0 else 0
+    infoset_node_hand_ratio = np.zeros((total_infoset_nodes, hand_width), dtype=np.float64)
+    infoset_node_card_ratio = np.zeros((total_infoset_nodes, 52), dtype=np.float64)
 
     _reduce_stage3_infosets(
         infoset_node_indices=prepared.infoset_node_indices,
@@ -79,44 +125,21 @@ def compute_opponent_reach(
         infoset_hand_opponent_reach=infoset_hand_opponent_reach,
         infoset_node_hand_ratio=infoset_node_hand_ratio,
         infoset_node_card_ratio=infoset_node_card_ratio,
+        infoset_row_offsets=prepared.infoset_row_offsets,
         node_opponent_share=node_opponent_share,
         node_hand_opponent_reach=node_hand_opponent_reach,
         max_workers=max_workers,
     )
 
     return OpponentReachResult(
-        infoset_opponent_reach=tuple(float(value) for value in infoset_opponent_reach),
-        infoset_card_opponent_reach=tuple(
-            tuple(float(value) for value in row)
-            for row in infoset_card_opponent_reach
-        ),
-        infoset_hand_opponent_reach=tuple(
-            tuple(float(value) for value in row)
-            for row in infoset_hand_opponent_reach
-        ),
-        infoset_node_hand_ratio=tuple(
-            tuple(
-                tuple(float(value) for value in node_row)
-                for node_row in (
-                    infoset_node_hand_ratio[infoset_id, node_index]
-                    for node_index in range(int(prepared.infoset_node_counts[infoset_id]))
-                )
-            )
-            for infoset_id in range(infoset_table.infoset_count)
-        ),
-        infoset_node_card_ratio=tuple(
-            tuple(
-                tuple(float(value) for value in node_row)
-                for node_row in (
-                    infoset_node_card_ratio[infoset_id, node_index]
-                    for node_index in range(int(prepared.infoset_node_counts[infoset_id]))
-                )
-            )
-            for infoset_id in range(infoset_table.infoset_count)
-        ),
-        node_opponent_reach=tuple(float(value) for value in node_reach),
-        node_opponent_share=tuple(float(value) for value in node_opponent_share),
-        node_hand_opponent_reach=tuple(tuple(float(value) for value in row) for row in node_hand_opponent_reach),
+        infoset_opponent_reach=infoset_opponent_reach,
+        infoset_card_opponent_reach=infoset_card_opponent_reach,
+        infoset_hand_opponent_reach=infoset_hand_opponent_reach,
+        infoset_node_hand_ratio=infoset_node_hand_ratio,
+        infoset_node_card_ratio=infoset_node_card_ratio,
+        node_opponent_reach=node_reach,
+        node_opponent_share=node_opponent_share,
+        node_hand_opponent_reach=node_hand_opponent_reach,
     )
 
 
@@ -142,16 +165,22 @@ def _prepare_stage3_input(
     max_infoset_width = max((len(nodes) for nodes in infoset_table.infoset_nodes), default=0)
     infoset_node_indices = np.full((infoset_count, max_infoset_width), -1, dtype=np.int64)
     infoset_node_counts = np.zeros(infoset_count, dtype=np.int64)
+    infoset_row_offsets = np.zeros(infoset_count + 1, dtype=np.int64)
+    running_offset = 0
     for infoset_id, nodes in enumerate(infoset_table.infoset_nodes):
         count = len(nodes)
         infoset_node_counts[infoset_id] = count
+        infoset_row_offsets[infoset_id] = running_offset
+        running_offset += count
         if count > 0:
             infoset_node_indices[infoset_id, :count] = np.asarray(nodes, dtype=np.int64)
+    infoset_row_offsets[infoset_count] = running_offset
 
     return Stage3PreparedInput(
         infoset_table=infoset_table,
         infoset_node_indices=infoset_node_indices,
         infoset_node_counts=infoset_node_counts,
+        infoset_row_offsets=infoset_row_offsets,
         node_reach=node_reach,
         node_card_reach=node_card_reach,
         node_hand_reach=node_hand_reach,
@@ -162,6 +191,7 @@ def _reduce_stage3_infosets(
     *,
     infoset_node_indices: np.ndarray,
     infoset_node_counts: np.ndarray,
+    infoset_row_offsets: np.ndarray,
     node_reach: np.ndarray,
     node_card_reach: np.ndarray,
     node_hand_reach: np.ndarray,
@@ -181,6 +211,7 @@ def _reduce_stage3_infosets(
         _reduce_stage3_infosets_numba(
             infoset_node_indices,
             infoset_node_counts,
+            infoset_row_offsets,
             node_reach,
             node_card_reach,
             node_hand_reach,
@@ -199,6 +230,7 @@ def _reduce_stage3_infosets(
             infoset_id=infoset_id,
             infoset_node_indices=infoset_node_indices,
             infoset_node_counts=infoset_node_counts,
+            infoset_row_offsets=infoset_row_offsets,
             node_reach=node_reach,
             node_card_reach=node_card_reach,
             node_hand_reach=node_hand_reach,
@@ -217,6 +249,7 @@ def _reduce_single_infoset(
     infoset_id: int,
     infoset_node_indices: np.ndarray,
     infoset_node_counts: np.ndarray,
+    infoset_row_offsets: np.ndarray,
     node_reach: np.ndarray,
     node_card_reach: np.ndarray,
     node_hand_reach: np.ndarray,
@@ -248,13 +281,14 @@ def _reduce_single_infoset(
     card_denominator = np.where(card_total > 0.0, card_total, 1.0)
     hand_denominator = np.where(hand_total > 0.0, hand_total, 1.0)
 
-    infoset_node_card_ratio[infoset_id, :count] = np.divide(
+    row_offset = int(infoset_row_offsets[infoset_id])
+    infoset_node_card_ratio[row_offset : row_offset + count] = np.divide(
         info_card_reach,
         card_denominator[None, :],
         out=np.zeros_like(info_card_reach),
         where=card_total[None, :] > 0.0,
     )
-    infoset_node_hand_ratio[infoset_id, :count] = np.divide(
+    infoset_node_hand_ratio[row_offset : row_offset + count] = np.divide(
         info_hand_reach,
         hand_denominator[None, :],
         out=np.zeros_like(info_hand_reach),
@@ -288,6 +322,7 @@ if njit is not None and prange is not None:
     def _reduce_stage3_infosets_numba(
         infoset_node_indices: np.ndarray,
         infoset_node_counts: np.ndarray,
+        infoset_row_offsets: np.ndarray,
         node_reach: np.ndarray,
         node_card_reach: np.ndarray,
         node_hand_reach: np.ndarray,
@@ -312,6 +347,7 @@ if njit is not None and prange is not None:
 
             infoset_opponent_reach[infoset_id] = reach_total
 
+            row_offset = int(infoset_row_offsets[infoset_id])
             for card_index in range(52):
                 total = 0.0
                 for node_slot in range(count):
@@ -336,21 +372,22 @@ if njit is not None and prange is not None:
 
             for node_slot in range(count):
                 node_index = int(infoset_node_indices[infoset_id, node_slot])
+                flat_row = row_offset + node_slot
                 for card_index in range(52):
                     total = infoset_card_opponent_reach[infoset_id, card_index]
                     if total > 0.0:
-                        infoset_node_card_ratio[infoset_id, node_slot, card_index] = (
+                        infoset_node_card_ratio[flat_row, card_index] = (
                             node_card_reach[node_index, card_index] / total
                         )
                     else:
-                        infoset_node_card_ratio[infoset_id, node_slot, card_index] = 0.0
+                        infoset_node_card_ratio[flat_row, card_index] = 0.0
                 for hand_index in range(node_hand_reach.shape[1]):
                     total = infoset_hand_opponent_reach[infoset_id, hand_index]
                     if total > 0.0:
                         ratio = node_hand_reach[node_index, hand_index] / total
                     else:
                         ratio = 0.0
-                    infoset_node_hand_ratio[infoset_id, node_slot, hand_index] = ratio
+                    infoset_node_hand_ratio[flat_row, hand_index] = ratio
                     node_hand_opponent_reach[node_index, hand_index] = ratio
 
 else:
@@ -358,6 +395,7 @@ else:
     def _reduce_stage3_infosets_numba(
         infoset_node_indices: np.ndarray,
         infoset_node_counts: np.ndarray,
+        infoset_row_offsets: np.ndarray,
         node_reach: np.ndarray,
         node_card_reach: np.ndarray,
         node_hand_reach: np.ndarray,
@@ -370,5 +408,25 @@ else:
         node_hand_opponent_reach: np.ndarray,
     ) -> None:
         raise RuntimeError("numba is not available")
+
+
+def _iter_infoset_rows(
+    array: np.ndarray,
+    row_offsets: np.ndarray,
+    infoset_id: int,
+    count: int,
+) -> tuple[np.ndarray, ...]:
+    row_offset = int(row_offsets[infoset_id])
+    return tuple(array[row_offset + node_index] for node_index in range(count))
+
+
+def _build_row_offsets(infoset_counts: tuple[int, ...]) -> np.ndarray:
+    row_offsets = np.zeros(len(infoset_counts) + 1, dtype=np.int64)
+    running_offset = 0
+    for infoset_id, count in enumerate(infoset_counts):
+        row_offsets[infoset_id] = running_offset
+        running_offset += count
+    row_offsets[len(infoset_counts)] = running_offset
+    return row_offsets
 
 
