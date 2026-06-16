@@ -46,3 +46,21 @@ class LeafEvalBackend(Protocol):
     def evaluate(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
         """Evaluate a fixed-size batch of leaf features."""
 
+
+@dataclass(slots=True, frozen=True)
+class LeafEvalResult:
+    node_ids: tuple[int, ...]
+    node_values: tuple[float, ...]
+
+
+def evaluate_leaf_batch(
+    batch: LeafEvalBatchInput,
+    backend: LeafEvalBackend,
+) -> LeafEvalResult:
+    output = backend.evaluate(batch)
+    if output.node_ids != batch.node_ids:
+        raise ValueError("leaf eval backend must preserve node ordering")
+    if output.values.shape[0] != len(batch.node_ids):
+        raise ValueError("leaf eval backend returned an unexpected row count")
+    values = tuple(float(value) for value in output.values[:, 0])
+    return LeafEvalResult(node_ids=output.node_ids, node_values=values)
