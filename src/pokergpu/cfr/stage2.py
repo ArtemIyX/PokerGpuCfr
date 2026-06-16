@@ -163,7 +163,7 @@ def aggregate_prob_sum_prepacked(
             features=prepared.leaf_batch_features,
         )
     else:
-        if max_workers is None or max_workers <= 1 or tree.node_count <= 1:
+        if max_workers is None or max_workers <= 1 or prepared.node_count <= 1:
             _fill_node_card_reach(prepared.node_card_reach, prepared.node_reach, prepared.board_card_mask)
             _fill_node_hand_reach(prepared.node_hand_reach, prepared.node_reach, prepared.live_hand_mask)
         else:
@@ -366,17 +366,17 @@ def _board_cache_key(board: Board | None) -> tuple[int, tuple[tuple[str, str], .
 def _cached_board_card_features(
     board_key: tuple[int, tuple[tuple[str, str], ...]],
 ) -> tuple[tuple[bool, ...], tuple[float, ...], tuple[float, ...]]:
-    street_code, card_pairs = board_key
+    _, card_pairs = board_key
     if not card_pairs:
-        mask = tuple(False for _ in range(52))
+        mask = tuple([False] * 52)
         vector = tuple(0.0 for _ in range(52))
         return mask, vector, vector
-    mask = [False] * 52
+    mask_list: list[bool] = [False] * 52
     for rank_value, suit_value in card_pairs:
         rank = _rank_from_value(rank_value)
         suit = _suit_from_value(suit_value)
-        mask[_card_index(rank, suit)] = True
-    mask_tuple = tuple(mask)
+        mask_list[_card_index(rank, suit)] = True
+    mask_tuple = tuple(mask_list)
     board_vector = tuple(1.0 if present else 0.0 for present in mask_tuple)
     leaf_vector = _leaf_card_reach_vector(mask_tuple, len(card_pairs))
     return mask_tuple, board_vector, leaf_vector
