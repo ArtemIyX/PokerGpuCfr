@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from pokergpu.cfr.stage2 import AggregateProbSumResult
-from pokergpu.cfr.solver.infosets import DenseInfosetTable
-from pokergpu.cfr.solver.infosets import build_dense_infoset_table
+from pokergpu.cfr.infosets import DenseInfosetTable
+from pokergpu.cfr.infosets import build_dense_infoset_table
 from pokergpu.abstraction.hands import private_hand_count
 from pokergpu.tree.public_tree import PublicTree
 
