@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import pytest
+import numpy as np
 
 from pokergpu.core.betting import Chips
 from pokergpu.cfr.solver import (
+    evaluate_leaf_node_values,
     SolverState,
     aggregate_root_action_values,
     make_toy_pipeline_tree,
@@ -13,6 +15,8 @@ from pokergpu.cfr.solver import (
     run_tree_root_iteration,
     evaluate_showdown_node_values,
 )
+from pokergpu.cfr.leaf_eval import LEAF_EVAL_OUTPUT_WIDTH
+from pokergpu.cfr.leaf_eval import LeafEvalBatchInput, LeafEvalBatchOutput
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.core.board import Board
@@ -151,3 +155,25 @@ def test_evaluate_showdown_node_values_runs_stage3_then_stage4() -> None:
     assert len(result.node_showdown_equity) == 1
     assert len(result.output_rows) == 1
     assert result.output_rows[0].node_id == 0
+
+
+def test_evaluate_leaf_node_values_uses_leaf_batch_contract() -> None:
+    class _Backend:
+        def evaluate(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
+            values = np.full((len(batch.node_ids), LEAF_EVAL_OUTPUT_WIDTH), 0.25, dtype=np.float32)
+            return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values)
+
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
+
+    result = evaluate_leaf_node_values(tree, forward, backend=_Backend())
+
+    assert result.node_ids == (0,)
+    assert result.node_values == (0.25,)
