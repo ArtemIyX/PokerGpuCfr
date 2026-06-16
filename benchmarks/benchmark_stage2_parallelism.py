@@ -35,20 +35,7 @@ def main() -> None:
     tree = _make_leaf_tree(args.nodes)
     forward = _make_forward(tree)
     board = Board.from_str("AhKdTc")
-    board_card_mask, board_card_vector, leaf_card_reach_vector = stage2._board_card_features(board)
-    live_hand_mask = stage2.private_hand_mask(board.cards)
-    leaf_node_ids = tuple(range(tree.node_count))
-    leaf_indices = np.asarray(leaf_node_ids, dtype=np.int64)
-    node_reach = np.asarray(forward.node_reach, dtype=np.float64)
-    leaf_reach_sum = node_reach[leaf_indices]
-    leaf_shares = np.zeros_like(leaf_reach_sum, dtype=np.float32)
-    total_leaf_reach = float(np.sum(leaf_reach_sum, dtype=np.float64))
-    if total_leaf_reach > 0.0:
-        np.divide(leaf_reach_sum, np.float32(total_leaf_reach), out=leaf_shares)
-
-    node_card_reach = np.empty((tree.node_count, 52), dtype=np.float64)
-    node_hand_reach = np.empty((tree.node_count, stage2.private_hand_count()), dtype=np.float64)
-    leaf_features = np.empty((tree.node_count, stage2.LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
+    prepared = stage2.prepare_stage2_input(tree, board, forward)
 
     print("Stage 2 Numba benchmark")
     print(f"nodes={args.nodes} iterations={args.iterations}")
@@ -68,40 +55,16 @@ def main() -> None:
             for _ in range(args.warmup):
                 bench(
                     stage2,
-                    tree,
-                    forward,
+                    prepared,
                     board,
-                    board_card_mask,
-                    board_card_vector,
-                    leaf_card_reach_vector,
-                    live_hand_mask,
-                    leaf_node_ids,
-                    leaf_indices,
-                    leaf_reach_sum,
-                    leaf_shares,
-                    node_card_reach,
-                    node_hand_reach,
-                    leaf_features,
                     iterations=args.iterations,
                 )
             samples = [
                 _time_call(
                     bench,
                     stage2,
-                    tree,
-                    forward,
+                    prepared,
                     board,
-                    board_card_mask,
-                    board_card_vector,
-                    leaf_card_reach_vector,
-                    live_hand_mask,
-                    leaf_node_ids,
-                    leaf_indices,
-                    leaf_reach_sum,
-                    leaf_shares,
-                    node_card_reach,
-                    node_hand_reach,
-                    leaf_features,
                     iterations=args.iterations,
                 )
                 for _ in range(args.runs)
@@ -115,97 +78,52 @@ def main() -> None:
 
 def _bench_node_aggregates(
     stage2,
-    tree: PublicTree,
-    forward: ForwardProfileResult,
+    prepared,
     board: Board,
-    board_card_mask,
-    board_card_vector,
-    leaf_card_reach_vector,
-    live_hand_mask,
-    leaf_node_ids,
-    leaf_indices,
-    leaf_reach_sum,
-    leaf_shares,
-    node_card_reach,
-    node_hand_reach,
-    leaf_features,
     *,
     iterations: int,
 ) -> None:
-    node_reach = np.asarray(forward.node_reach, dtype=np.float64)
-    board_mask = np.asarray(board_card_mask, dtype=np.bool_)
     for _ in range(iterations):
         stage2._fill_node_aggregates_numba(
-            node_card_reach,
-            node_hand_reach,
-            node_reach,
-            board_mask,
-            live_hand_mask,
+            prepared.node_card_reach,
+            prepared.node_hand_reach,
+            prepared.node_reach,
+            prepared.board_card_mask,
+            prepared.live_hand_mask,
         )
 
 
 def _bench_leaf_features(
     stage2,
-    tree: PublicTree,
-    forward: ForwardProfileResult,
+    prepared,
     board: Board,
-    board_card_mask,
-    board_card_vector,
-    leaf_card_reach_vector,
-    live_hand_mask,
-    leaf_node_ids,
-    leaf_indices,
-    leaf_reach_sum,
-    leaf_shares,
-    node_card_reach,
-    node_hand_reach,
-    leaf_features,
     *,
     iterations: int,
 ) -> None:
-    node_reach = np.asarray(forward.node_reach, dtype=np.float64)
-    board_mask = np.where(np.asarray(board_card_mask, dtype=np.bool_), np.float32(1.0), np.float32(0.0))
-    board_vector = np.asarray(board_card_vector, dtype=np.float32)
-    leaf_vector = np.asarray(leaf_card_reach_vector, dtype=np.float32)
-    street = np.float32(stage2._street_code(board.street))
-    board_size = np.float32(len(board.cards))
-    board_signature = np.float32(stage2._board_signature(board))
     for _ in range(iterations):
         stage2._fill_leaf_features_numba(
-            leaf_features,
-            node_reach,
-            leaf_shares,
-            board_mask,
-            board_vector,
-            leaf_vector,
-            street,
-            board_size,
-            board_signature,
-            np.asarray(leaf_indices, dtype=np.int64),
+            prepared.leaf_batch_features,
+            prepared.node_reach,
+            prepared.leaf_shares,
+            prepared.board_card_block,
+            prepared.board_card_vector,
+            prepared.leaf_card_reach_vector,
+            np.float32(prepared.board_street),
+            np.float32(prepared.board_size),
+            np.float32(prepared.board_signature),
+            prepared.leaf_indices,
         )
 
 
 def _bench_full_stage2(
     stage2,
-    tree: PublicTree,
-    forward: ForwardProfileResult,
+    prepared,
     board: Board,
-    board_card_mask,
-    board_card_vector,
-    leaf_card_reach_vector,
-    live_hand_mask,
-    leaf_node_ids,
-    leaf_indices,
-    leaf_reach_sum,
-    leaf_shares,
-    node_card_reach,
-    node_hand_reach,
-    leaf_features,
     *,
     iterations: int,
 ) -> None:
     for _ in range(iterations):
-        stage2.aggregate_prob_sum(tree, forward, board, max_workers=16)
+        stage2.aggregate_prob_sum_prepacked(prepared, max_workers=16)
 
 
 def _time_call(func, *args, **kwargs) -> float:

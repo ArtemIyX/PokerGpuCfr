@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 import os
 
 import numpy as np
@@ -86,106 +87,161 @@ class AggregateProbSumResult:
             raise ValueError("leaf batch features must match leaf node ids")
 
 
+@dataclass(slots=True, frozen=True)
+class Stage2PreparedInput:
+    node_count: int
+    board_card_mask: NDArray[np.bool_]
+    board_card_block: NDArray[np.float32]
+    board_card_vector: NDArray[np.float32]
+    leaf_card_reach_vector: NDArray[np.float32]
+    live_hand_mask: NDArray[np.bool_]
+    leaf_node_ids: tuple[int, ...]
+    leaf_indices: NDArray[np.int64]
+    leaf_count: int
+    board_street: int
+    board_size: int
+    board_signature: int
+    node_card_reach: NDArray[np.float64]
+    node_hand_reach: NDArray[np.float64]
+    leaf_batch_features: NDArray[np.float32]
+    leaf_reach_sum: NDArray[np.float32]
+    leaf_shares: NDArray[np.float32]
+    node_reach: NDArray[np.float64]
+
+
 def aggregate_prob_sum(
     tree: PublicTree,
     forward: ForwardProfileResult,
     board: Board | None = None,
     max_workers: int | None = None,
 ) -> AggregateProbSumResult:
+    prepared = prepare_stage2_input(tree, board, forward)
+    return aggregate_prob_sum_prepacked(prepared, max_workers=max_workers)
+
+
+def aggregate_prob_sum_prepacked(
+    prepared: Stage2PreparedInput,
+    max_workers: int | None = None,
+) -> AggregateProbSumResult:
+    if prepared.node_count == 0:
+        raise ValueError("tree cannot be empty")
+    if _can_use_numba_parallel(max_workers):
+        board_street = prepared.board_street
+        _fill_node_aggregates_numba(
+            prepared.node_card_reach,
+            prepared.node_hand_reach,
+            prepared.node_reach,
+            prepared.board_card_mask,
+            prepared.live_hand_mask,
+        )
+        _fill_leaf_features_numba(
+            prepared.leaf_batch_features,
+            prepared.node_reach,
+            prepared.leaf_shares,
+            prepared.board_card_block,
+            prepared.board_card_vector,
+            prepared.leaf_card_reach_vector,
+            np.float32(board_street),
+            np.float32(prepared.board_size),
+            np.float32(prepared.board_signature),
+            prepared.leaf_indices,
+        )
+        leaf_batch = LeafBatchInput(
+            node_ids=prepared.leaf_node_ids,
+            reach=prepared.leaf_reach_sum,
+            features=prepared.leaf_batch_features,
+        )
+    else:
+        if max_workers is None or max_workers <= 1 or tree.node_count <= 1:
+            _fill_node_card_reach(prepared.node_card_reach, prepared.node_reach, prepared.board_card_mask)
+            _fill_node_hand_reach(prepared.node_hand_reach, prepared.node_reach, prepared.live_hand_mask)
+        else:
+            _fill_node_aggregates_parallel(
+                node_card_reach=prepared.node_card_reach,
+                node_hand_reach=prepared.node_hand_reach,
+                node_reach=prepared.node_reach,
+                board_card_mask=prepared.board_card_mask,
+                live_hand_mask=prepared.live_hand_mask,
+                max_workers=max_workers,
+            )
+        prepared.leaf_batch_features[:] = _build_leaf_feature_rows(
+            leaf_indices=prepared.leaf_indices,
+            node_reach=prepared.node_reach,
+            leaf_shares=prepared.leaf_shares,
+            street=prepared.board_street,
+            board_size=prepared.board_size,
+            board_signature=prepared.board_signature,
+            board_card_mask=prepared.board_card_mask,
+            board_card_vector=prepared.board_card_vector,
+            leaf_card_reach_vector=prepared.leaf_card_reach_vector,
+        )
+        leaf_batch = LeafBatchInput(
+            node_ids=prepared.leaf_node_ids,
+            reach=prepared.leaf_reach_sum,
+            features=prepared.leaf_batch_features,
+        )
+
+    return AggregateProbSumResult(
+        node_aggregate=NodeCardAggregate(
+            reach=tuple(float(value) for value in prepared.node_reach),
+            card_reach=prepared.node_card_reach,
+            hand_reach=prepared.node_hand_reach,
+        ),
+        leaf_node_ids=prepared.leaf_node_ids,
+        leaf_reach_sum=tuple(float(value) for value in prepared.leaf_reach_sum),
+        leaf_batch=leaf_batch,
+    )
+
+
+def prepare_stage2_input(
+    tree: PublicTree,
+    board: Board | None,
+    forward: ForwardProfileResult,
+) -> Stage2PreparedInput:
     if tree.node_count != len(forward.node_reach):
         raise ValueError("tree and forward pass must cover the same number of nodes")
     if tree.node_count == 0:
         raise ValueError("tree cannot be empty")
 
-    board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
+    board_card_mask, board_card_vector, leaf_card_reach_vector = _cached_board_card_features(_board_cache_key(board))
     board_card_mask_array = np.asarray(board_card_mask, dtype=np.bool_)
     board_card_block_array = np.where(board_card_mask_array, np.float32(0.0), np.float32(1.0))
     board_card_vector_array = np.asarray(board_card_vector, dtype=np.float32)
     leaf_card_reach_vector_array = np.asarray(leaf_card_reach_vector, dtype=np.float32)
     live_hand_mask = private_hand_mask(board.cards if board is not None else ())
     node_reach_array = np.asarray(forward.node_reach, dtype=np.float64)
-    leaf_node_ids = tuple(
-        node_index
-        for node_index, node_type in enumerate(tree.node_types)
-        if node_type is NodeType.LEAF
-    )
+    leaf_node_ids = _cached_leaf_node_ids(tree.node_types)
     leaf_indices = np.asarray(leaf_node_ids, dtype=np.int64)
     leaf_reach_sum_array = node_reach_array[leaf_indices]
     total_leaf_reach = float(np.sum(leaf_reach_sum_array, dtype=np.float64))
     leaf_shares = np.zeros_like(leaf_reach_sum_array, dtype=np.float32)
     if total_leaf_reach > 0.0:
         np.divide(leaf_reach_sum_array, np.float32(total_leaf_reach), out=leaf_shares)
-    node_card_reach = np.empty((len(forward.node_reach), 52), dtype=np.float64)
-    node_hand_reach = np.empty((len(forward.node_reach), private_hand_count()), dtype=np.float64)
-    if _can_use_numba_parallel(max_workers):
-        board_street = board.street if board is not None else Street.PREFLOP
-        street = _street_code(board_street)
-        board_size = len(board.cards) if board is not None else 0
-        board_signature = _board_signature(board)
-        leaf_batch_features = np.empty((len(leaf_node_ids), LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
-        _fill_node_aggregates_numba(
-            node_card_reach,
-            node_hand_reach,
-            node_reach_array,
-            board_card_mask_array,
-            live_hand_mask,
-        )
-        _fill_leaf_features_numba(
-            leaf_batch_features,
-            np.asarray(forward.node_reach, dtype=np.float64),
-            leaf_shares,
-            board_card_block_array,
-            board_card_vector_array,
-            leaf_card_reach_vector_array,
-            np.float32(street),
-            np.float32(board_size),
-            np.float32(board_signature),
-            leaf_indices,
-        )
-        leaf_batch = LeafBatchInput(
-            node_ids=leaf_node_ids,
-            reach=np.asarray(leaf_reach_sum_array, dtype=np.float32),
-            features=leaf_batch_features,
-        )
-    else:
-        if max_workers is None or max_workers <= 1 or tree.node_count <= 1:
-            _fill_node_card_reach(node_card_reach, node_reach_array, board_card_mask_array)
-            _fill_node_hand_reach(node_hand_reach, node_reach_array, live_hand_mask)
-        else:
-            _fill_node_aggregates_parallel(
-                node_card_reach=node_card_reach,
-                node_hand_reach=node_hand_reach,
-                node_reach=node_reach_array,
-                board_card_mask=board_card_mask_array,
-                live_hand_mask=live_hand_mask,
-                max_workers=max_workers,
-            )
-        leaf_feature_rows = _build_leaf_feature_rows(
-            leaf_indices=leaf_indices,
-            node_reach=node_reach_array,
-            leaf_shares=leaf_shares,
-            street=_street_code(board.street if board is not None else Street.PREFLOP),
-            board_size=len(board.cards) if board is not None else 0,
-            board_signature=_board_signature(board),
-            board_card_mask=board_card_mask_array,
-            board_card_vector=board_card_vector_array,
-            leaf_card_reach_vector=leaf_card_reach_vector_array,
-        )
-        leaf_batch = LeafBatchInput(
-            node_ids=leaf_node_ids,
-            reach=np.asarray(leaf_reach_sum_array, dtype=np.float32),
-            features=leaf_feature_rows,
-        )
-
-    return AggregateProbSumResult(
-        node_aggregate=NodeCardAggregate(
-            reach=forward.node_reach,
-            card_reach=node_card_reach,
-            hand_reach=node_hand_reach,
-        ),
+    board_street = _street_code(board.street if board is not None else Street.PREFLOP)
+    board_size = len(board.cards) if board is not None else 0
+    board_signature = _board_signature(board)
+    node_card_reach = np.empty((tree.node_count, 52), dtype=np.float64)
+    node_hand_reach = np.empty((tree.node_count, private_hand_count()), dtype=np.float64)
+    leaf_batch_features = np.empty((len(leaf_node_ids), LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
+    return Stage2PreparedInput(
+        node_count=tree.node_count,
+        board_card_mask=board_card_mask_array,
+        board_card_block=board_card_block_array,
+        board_card_vector=board_card_vector_array,
+        leaf_card_reach_vector=leaf_card_reach_vector_array,
+        live_hand_mask=live_hand_mask,
         leaf_node_ids=leaf_node_ids,
-        leaf_reach_sum=tuple(float(value) for value in leaf_reach_sum_array),
-        leaf_batch=leaf_batch,
+        leaf_indices=leaf_indices,
+        leaf_count=len(leaf_node_ids),
+        board_street=board_street,
+        board_size=board_size,
+        board_signature=board_signature,
+        node_card_reach=node_card_reach,
+        node_hand_reach=node_hand_reach,
+        leaf_batch_features=leaf_batch_features,
+        leaf_reach_sum=np.asarray(leaf_reach_sum_array, dtype=np.float32),
+        leaf_shares=leaf_shares,
+        node_reach=node_reach_array,
     )
 
 
@@ -283,6 +339,48 @@ def _board_card_features(
     board_vector = tuple(1.0 if present else 0.0 for present in mask_tuple)
     leaf_vector = _leaf_card_reach_vector(mask_tuple, len(board.cards))
     return mask_tuple, board_vector, leaf_vector
+
+
+def _board_cache_key(board: Board | None) -> tuple[int, tuple[tuple[str, str], ...]]:
+    if board is None:
+        return (0, ())
+    return (
+        _street_code(board.street),
+        tuple((card.rank.value, card.suit.value) for card in board.cards),
+    )
+
+
+@lru_cache(maxsize=256)
+def _cached_board_card_features(
+    board_key: tuple[int, tuple[tuple[str, str], ...]],
+) -> tuple[tuple[bool, ...], tuple[float, ...], tuple[float, ...]]:
+    street_code, card_pairs = board_key
+    if not card_pairs:
+        mask = tuple(False for _ in range(52))
+        vector = tuple(0.0 for _ in range(52))
+        return mask, vector, vector
+    mask = [False] * 52
+    for rank_value, suit_value in card_pairs:
+        rank = _rank_from_value(rank_value)
+        suit = _suit_from_value(suit_value)
+        mask[_card_index(rank, suit)] = True
+    mask_tuple = tuple(mask)
+    board_vector = tuple(1.0 if present else 0.0 for present in mask_tuple)
+    leaf_vector = _leaf_card_reach_vector(mask_tuple, len(card_pairs))
+    return mask_tuple, board_vector, leaf_vector
+
+
+@lru_cache(maxsize=32)
+def _cached_leaf_node_ids(node_types: tuple[NodeType, ...]) -> tuple[int, ...]:
+    return tuple(index for index, node_type in enumerate(node_types) if node_type is NodeType.LEAF)
+
+
+def _rank_from_value(value: str) -> Rank:
+    return Rank(value)
+
+
+def _suit_from_value(value: str) -> Suit:
+    return Suit(value)
 
 
 def _card_index(rank: Rank, suit: Suit) -> int:

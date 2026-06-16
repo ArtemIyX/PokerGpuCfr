@@ -9,6 +9,8 @@ from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.leaf_eval import LEAF_EVAL_FEATURE_WIDTH
 from pokergpu.cfr.stage2 import build_leaf_eval_batch
 from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.cfr.stage2 import aggregate_prob_sum_prepacked
+from pokergpu.cfr.stage2 import prepare_stage2_input
 from pokergpu.core.betting import Chips
 from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import InfosetId, NodeType, PublicTree
@@ -283,6 +285,32 @@ def test_aggregate_prob_sum_numba_path_matches_serial(monkeypatch: pytest.Monkey
     assert np.allclose(serial.node_aggregate.hand_reach, numba_result.node_aggregate.hand_reach)
     assert np.allclose(serial.leaf_batch.reach, numba_result.leaf_batch.reach)
     assert np.allclose(serial.leaf_batch.features, numba_result.leaf_batch.features)
+
+
+def test_aggregate_prob_sum_prepacked_matches_wrapper() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF, NodeType.LEAF),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(None, None),
+        terminal_payoffs=(None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(2.5, 1.25),
+        infoset_reach=(),
+        action_reach=((), ()),
+    )
+    board = Board.from_str("AhKdTc")
+
+    prepared = prepare_stage2_input(tree, board, forward)
+    wrapper = aggregate_prob_sum(tree, forward, board, max_workers=2)
+    prepacked = aggregate_prob_sum_prepacked(prepared, max_workers=2)
+
+    assert np.allclose(wrapper.node_aggregate.card_reach, prepacked.node_aggregate.card_reach)
+    assert np.allclose(wrapper.node_aggregate.hand_reach, prepacked.node_aggregate.hand_reach)
+    assert np.allclose(wrapper.leaf_batch.reach, prepacked.leaf_batch.reach)
+    assert np.allclose(wrapper.leaf_batch.features, prepacked.leaf_batch.features)
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
