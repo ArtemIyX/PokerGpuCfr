@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,6 +14,12 @@ from pokergpu.abstraction.hands import private_hand_count, private_hand_mask
 from pokergpu.core.cards import Rank, Suit
 from pokergpu.core.board import Board, Street
 from pokergpu.tree.public_tree import NodeType, PublicTree
+
+try:
+    from numba import njit, prange  # type: ignore[import-untyped]
+except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
+    njit = None
+    prange = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -93,7 +100,15 @@ def aggregate_prob_sum(
     board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
     node_card_reach = np.empty((len(forward.node_reach), 52), dtype=np.float64)
     node_hand_reach = np.empty((len(forward.node_reach), private_hand_count()), dtype=np.float64)
-    if max_workers is None or max_workers <= 1 or tree.node_count <= 1:
+    if _can_use_numba_parallel(max_workers):
+        _fill_node_aggregates_numba(
+            node_card_reach,
+            node_hand_reach,
+            np.asarray(forward.node_reach, dtype=np.float64),
+            np.asarray(board_card_mask, dtype=np.bool_),
+            private_hand_mask(board.cards if board is not None else ()),
+        )
+    elif max_workers is None or max_workers <= 1 or tree.node_count <= 1:
         _fill_node_card_reach(node_card_reach, forward.node_reach, board_card_mask)
         _fill_node_hand_reach(node_hand_reach, forward.node_reach, board)
     else:
@@ -380,3 +395,60 @@ def _chunk_bounds(node_count: int, worker_count: int) -> tuple[tuple[int, int], 
         (start, min(start + chunk_size, node_count))
         for start in range(0, node_count, chunk_size)
     )
+
+
+def _can_use_numba_parallel(max_workers: int | None) -> bool:
+    return (
+        os.environ.get("POKERGPU_STAGE2_NUMBA", "0") == "1"
+        and njit is not None
+        and prange is not None
+        and (max_workers is None or max_workers > 1)
+    )
+
+
+if njit is not None and prange is not None:
+
+    @njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
+    def _fill_node_aggregates_numba(
+        node_card_reach: NDArray[np.float64],
+        node_hand_reach: NDArray[np.float64],
+        node_reach: NDArray[np.float64],
+        board_card_mask: NDArray[np.bool_],
+        live_hand_mask: NDArray[np.bool_],
+    ) -> None:
+        node_count = node_reach.shape[0]
+        card_live_count = 0
+        for i in range(board_card_mask.shape[0]):
+            if not board_card_mask[i]:
+                card_live_count += 1
+        hand_live_count = 0
+        for i in range(live_hand_mask.shape[0]):
+            if live_hand_mask[i]:
+                hand_live_count += 1
+        for node_index in prange(node_count):
+            reach = node_reach[node_index]
+            if card_live_count <= 0 or reach <= 0.0:
+                for card_index in range(52):
+                    node_card_reach[node_index, card_index] = 0.0
+            else:
+                weight = reach / card_live_count
+                for card_index in range(52):
+                    node_card_reach[node_index, card_index] = weight if not board_card_mask[card_index] else 0.0
+            if hand_live_count <= 0 or reach <= 0.0:
+                for hand_index in range(live_hand_mask.shape[0]):
+                    node_hand_reach[node_index, hand_index] = 0.0
+            else:
+                hand_weight = reach / hand_live_count
+                for hand_index in range(live_hand_mask.shape[0]):
+                    node_hand_reach[node_index, hand_index] = hand_weight if live_hand_mask[hand_index] else 0.0
+
+else:
+
+    def _fill_node_aggregates_numba(
+        node_card_reach: NDArray[np.float64],
+        node_hand_reach: NDArray[np.float64],
+        node_reach: NDArray[np.float64],
+        board_card_mask: NDArray[np.bool_],
+        live_hand_mask: NDArray[np.bool_],
+    ) -> None:
+        raise RuntimeError("numba is not available")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -12,15 +14,16 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
-from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import NodeType, PublicTree
 
 
 @dataclass(slots=True)
-class BenchmarkSample:
+class ResultRow:
+    mode: str
     workers: int
     mean_ms: float
+    speedup: float
 
 
 def main() -> None:
@@ -38,22 +41,94 @@ def main() -> None:
     print("Stage 2 parallelism benchmark")
     print(f"nodes={args.nodes} iterations={args.iterations}")
     print(f"warmup_runs={args.warmup} timed_runs={args.runs}")
-    print("workers | mean_ms | speedup")
-    print("-" * 36)
+    print("mode    | workers | mean_ms | speedup")
+    print("-" * 44)
 
-    baseline = None
-    for workers in (1, 2, 4, 8, 16):
-        for _ in range(args.warmup):
-            _run_once(tree, forward, board, workers=workers, iterations=args.iterations)
-        samples = [
-            _run_once(tree, forward, board, workers=workers, iterations=args.iterations)
-            for _ in range(args.runs)
-        ]
-        mean_ms = sum(samples) / len(samples) * 1000.0
-        if baseline is None:
-            baseline = mean_ms
-        speedup = baseline / mean_ms if mean_ms > 0.0 else 0.0
-        print(f"{workers:>7} | {mean_ms:>7.3f} | {speedup:>7.3f}x")
+    rows: list[ResultRow] = []
+    for mode in ("serial", "threaded", "numba"):
+        baseline = None
+        for workers in (1, 2, 4, 8, 16):
+            if mode == "serial":
+                result = _run_mode(
+                    tree,
+                    forward,
+                    board,
+                    mode=mode,
+                    workers=1,
+                    iterations=args.iterations,
+                    warmup=args.warmup,
+                    runs=args.runs,
+                )
+            else:
+                result = _run_mode(
+                    tree,
+                    forward,
+                    board,
+                    mode=mode,
+                    workers=workers,
+                    iterations=args.iterations,
+                    warmup=args.warmup,
+                    runs=args.runs,
+                )
+            if baseline is None:
+                baseline = result.mean_ms
+            rows.append(
+                ResultRow(
+                    mode=mode,
+                    workers=workers,
+                    mean_ms=result.mean_ms,
+                    speedup=baseline / result.mean_ms if result.mean_ms > 0.0 else 0.0,
+                )
+            )
+
+    for row in rows:
+        print(f"{row.mode:<7} | {row.workers:>7} | {row.mean_ms:>7.3f} | {row.speedup:>7.3f}x")
+
+
+def _run_mode(
+    tree: PublicTree,
+    forward: ForwardProfileResult,
+    board: Board,
+    *,
+    mode: str,
+    workers: int,
+    iterations: int,
+    warmup: int,
+    runs: int,
+) -> ResultRow:
+    stage2 = _load_stage2(mode)
+    for _ in range(warmup):
+        _run_once(stage2, tree, forward, board, workers=workers, iterations=iterations)
+    samples = [
+        _run_once(stage2, tree, forward, board, workers=workers, iterations=iterations)
+        for _ in range(runs)
+    ]
+    mean_ms = sum(samples) / len(samples) * 1000.0
+    return ResultRow(mode=mode, workers=workers, mean_ms=mean_ms, speedup=0.0)
+
+
+def _run_once(
+    stage2,
+    tree: PublicTree,
+    forward: ForwardProfileResult,
+    board: Board,
+    *,
+    workers: int,
+    iterations: int,
+) -> float:
+    start = perf_counter()
+    for _ in range(iterations):
+        stage2.aggregate_prob_sum(tree, forward, board, max_workers=workers)
+    return perf_counter() - start
+
+
+def _load_stage2(mode: str):
+    if mode == "numba":
+        os.environ["POKERGPU_STAGE2_NUMBA"] = "1"
+    else:
+        os.environ.pop("POKERGPU_STAGE2_NUMBA", None)
+    module = importlib.import_module("pokergpu.cfr.stage2")
+    return importlib.reload(module)
 
 
 def _make_leaf_tree(node_count: int) -> PublicTree:
@@ -79,20 +154,6 @@ def _make_forward(tree: PublicTree) -> ForwardProfileResult:
         infoset_reach=(),
         action_reach=tuple(() for _ in range(tree.node_count)),
     )
-
-
-def _run_once(
-    tree: PublicTree,
-    forward: ForwardProfileResult,
-    board: Board,
-    *,
-    workers: int,
-    iterations: int,
-) -> float:
-    start = perf_counter()
-    for _ in range(iterations):
-        aggregate_prob_sum(tree, forward, board, max_workers=workers)
-    return perf_counter() - start
 
 
 if __name__ == "__main__":

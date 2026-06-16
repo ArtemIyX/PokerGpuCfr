@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 import pytest
 import numpy as np
 
@@ -248,6 +250,39 @@ def test_aggregate_prob_sum_parallel_matches_serial_dense_outputs() -> None:
     assert np.allclose(serial.node_aggregate.hand_reach, parallel.node_aggregate.hand_reach)
     assert np.allclose(serial.leaf_batch.reach, parallel.leaf_batch.reach)
     assert np.allclose(serial.leaf_batch.features, parallel.leaf_batch.features)
+
+
+def test_aggregate_prob_sum_numba_path_matches_serial(monkeypatch: pytest.MonkeyPatch) -> None:
+    stage2 = importlib.import_module("pokergpu.cfr.stage2")
+    tree = PublicTree(
+        node_types=(
+            NodeType.LEAF,
+            NodeType.LEAF,
+            NodeType.LEAF,
+        ),
+        first_child=(0, 0, 0),
+        child_count=(0, 0, 0),
+        children=(),
+        infoset_ids=(None, None, None),
+        terminal_payoffs=(None, None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 2.0, 3.0),
+        infoset_reach=(),
+        action_reach=((), (), ()),
+    )
+    board = Board.from_str("AhKdTc")
+
+    serial = stage2.aggregate_prob_sum(tree, forward, board, max_workers=2)
+
+    monkeypatch.setenv("POKERGPU_STAGE2_NUMBA", "1")
+    reloaded = importlib.reload(stage2)
+    numba_result = reloaded.aggregate_prob_sum(tree, forward, board, max_workers=2)
+
+    assert np.allclose(serial.node_aggregate.card_reach, numba_result.node_aggregate.card_reach)
+    assert np.allclose(serial.node_aggregate.hand_reach, numba_result.node_aggregate.hand_reach)
+    assert np.allclose(serial.leaf_batch.reach, numba_result.leaf_batch.reach)
+    assert np.allclose(serial.leaf_batch.features, numba_result.leaf_batch.features)
 
 
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
