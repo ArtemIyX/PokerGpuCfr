@@ -7,6 +7,8 @@ from collections.abc import Sequence
 import numpy as np
 
 from pokergpu.cfr.stage2 import AggregateProbSumResult
+from pokergpu.cfr.solver.infosets import DenseInfosetTable
+from pokergpu.cfr.solver.infosets import build_dense_infoset_table
 from pokergpu.abstraction.hands import private_hand_count
 from pokergpu.tree.public_tree import NodeType, PublicTree
 
@@ -37,7 +39,8 @@ def compute_opponent_reach(
     if len(hand_reach_rows) == 0:
         raise ValueError("node hand reach vectors cannot be empty")
 
-    infoset_nodes = _collect_infoset_nodes(tree)
+    infoset_table = _prepare_stage3_input(tree)
+    infoset_nodes = infoset_table.infoset_nodes
     hand_width = int(np.asarray(hand_reach_rows[0]).shape[0])
     if hand_width != private_hand_count():
         raise ValueError("node hand reach vectors must match the private hand count")
@@ -149,6 +152,11 @@ def compute_opponent_reach(
     )
 
 
+def _prepare_stage3_input(tree: PublicTree) -> DenseInfosetTable:
+    """Cache-backed dense infoset layout for Stage 3 parallel work."""
+    return build_dense_infoset_table(tree)
+
+
 def _normalize_card_reach_rows(
     node_card_reach_rows: list[tuple[float, ...]],
     card_total: tuple[float, ...],
@@ -237,24 +245,3 @@ def _validate_hand_ratio_rows(
             raise ValueError("hand ratio rows must have consistent width")
 
 
-def _collect_infoset_nodes(tree: PublicTree) -> tuple[tuple[int, ...], ...]:
-    infoset_to_nodes: dict[int, list[int]] = {}
-    for node_index, node_type in enumerate(tree.node_types):
-        if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
-            continue
-        raw_infoset_id = tree.infoset_ids[node_index]
-        if raw_infoset_id is None:
-            raise ValueError("player nodes must have infoset ids")
-        infoset_index = int(raw_infoset_id)
-        infoset_to_nodes.setdefault(infoset_index, []).append(node_index)
-
-    if not infoset_to_nodes:
-        return ()
-
-    max_infoset = max(infoset_to_nodes)
-    dense_nodes: list[tuple[int, ...]] = [tuple() for _ in range(max_infoset + 1)]
-    for infoset_id, nodes in infoset_to_nodes.items():
-        dense_nodes[int(infoset_id)] = tuple(nodes)
-    if any(not nodes for nodes in dense_nodes):
-        raise ValueError("infoset ids must be dense and contiguous")
-    return tuple(dense_nodes)

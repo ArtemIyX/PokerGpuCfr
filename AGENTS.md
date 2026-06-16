@@ -11,6 +11,7 @@ parallelism: **by information set and by tree node**
 ### Main working rules
 
 - Keep hot paths parallelized and vectorized in place; prefer NumPy, Numba, Triton, or Torch kernels over Python loops or wrapper objects in performance-critical code.
+- Try to not use tupples, nested tuples/lists, nested python nodes
 - Try not to use 'Any' (mypy errors)
 - Divide tasks on small subtasks that can be solved one by one
 - Create short plans for each large task/problem, before solving it

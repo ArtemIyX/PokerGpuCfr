@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 from pokergpu.tree.public_tree import NodeType, PublicTree
 
@@ -18,6 +19,7 @@ class DenseInfosetTable:
         return len(self.infoset_to_node)
 
 
+@lru_cache(maxsize=256)
 def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
     assert tree.node_count > 0, "public tree cannot be empty"
     node_to_infoset = [-1 for _ in range(tree.node_count)]

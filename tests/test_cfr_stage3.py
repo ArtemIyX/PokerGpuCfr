@@ -6,6 +6,7 @@ import pytest
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.cfr.stage3 import compute_opponent_reach
+from pokergpu.cfr.solver.infosets import build_dense_infoset_table
 from pokergpu.core.betting import Chips
 from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
@@ -335,3 +336,20 @@ def test_compute_opponent_reach_accepts_tuple_hand_reach_compatibility() -> None
     assert result.infoset_opponent_reach == (6.0,)
     assert result.infoset_hand_opponent_reach[0][0] == pytest.approx(3.0)
     assert result.node_hand_opponent_reach[0][0] == pytest.approx(2.0 / 3.0)
+
+
+def test_build_dense_infoset_table_is_cached_for_same_tree() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER1, NodeType.TERMINAL),
+        first_child=(0, 1, 0),
+        child_count=(1, 1, 0),
+        children=(ChildLink(child=NodeId(1)), ChildLink(child=NodeId(2))),
+        infoset_ids=(InfosetId(0), InfosetId(1), None),
+        terminal_payoffs=(None, None, Chips(0)),
+    )
+
+    first = build_dense_infoset_table(tree)
+    second = build_dense_infoset_table(tree)
+
+    assert first is second
+    assert first.infoset_nodes == ((0,), (1,))
