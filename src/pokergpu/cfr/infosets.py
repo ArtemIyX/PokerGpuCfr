@@ -53,6 +53,8 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         dense_action_counts = []
 
     ordered_infosets = sorted(infoset_nodes.items())
+    if any(infoset_id != index for index, (infoset_id, _) in enumerate(ordered_infosets)):
+        raise ValueError("infoset ids must be dense and contiguous")
     return DenseInfosetTable(
         node_to_infoset=tuple(node_to_infoset),
         infoset_to_node=tuple(dense_infoset_to_node),
