@@ -26,8 +26,9 @@ parallelism: **by information set and by tree node**
 - Lower count of ``cudaLaucnhKernel`` if possible
 - Lower using of aten::index, aten:: etc (batch, fuse, group)
 
-### PyTorch / Triton Optimization Rules
+### Python PyTorch / Triton Optimization Rules
 
+- Do not perfer “one worker per X”. Prefer “one worker per block of Xs"
 - Do not introduce Python-layer conversions or objects in hot paths if the same work can stay in NumPy, Numba, Torch, or Triton.
 Constraints: no dynamic control flow, no Python, fixed tensor shapes/addresses.
 - Pin tensors to CUDA at load time,  Never ``.item()`` in hot path — forces sync
