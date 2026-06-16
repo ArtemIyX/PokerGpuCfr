@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from collections.abc import Sequence
 
+import numpy as np
+
 from pokergpu.cfr.stage2 import AggregateProbSumResult
 from pokergpu.abstraction.hands import private_hand_count
 from pokergpu.tree.public_tree import NodeType, PublicTree
@@ -31,11 +33,12 @@ def compute_opponent_reach(
 ) -> OpponentReachResult:
     if tree.node_count != len(aggregate.node_aggregate.reach):
         raise ValueError("tree and aggregate result must cover the same number of nodes")
-    if not aggregate.node_aggregate.hand_reach:
+    hand_reach_rows = aggregate.node_aggregate.hand_reach
+    if len(hand_reach_rows) == 0:
         raise ValueError("node hand reach vectors cannot be empty")
 
     infoset_nodes = _collect_infoset_nodes(tree)
-    hand_width = len(aggregate.node_aggregate.hand_reach[0])
+    hand_width = int(np.asarray(hand_reach_rows[0]).shape[0])
     if hand_width != private_hand_count():
         raise ValueError("node hand reach vectors must match the private hand count")
 

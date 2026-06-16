@@ -34,26 +34,22 @@ def test_aggregate_prob_sum_preserves_node_reach_and_leaf_ids() -> None:
     result = aggregate_prob_sum(tree, forward)
 
     assert result.node_aggregate.reach == (1.0, 0.5, 0.25)
-    assert len(result.node_aggregate.card_reach) == 3
-    assert len(result.node_aggregate.card_reach[0]) == 52
-    assert len(result.node_aggregate.hand_reach) == 3
-    assert len(result.node_aggregate.hand_reach[0]) == 1326
+    assert result.node_aggregate.card_reach.shape == (3, 52)
+    assert result.node_aggregate.card_reach.dtype == np.float64
+    assert result.node_aggregate.hand_reach.shape == (3, 1326)
+    assert result.node_aggregate.hand_reach.dtype == np.float64
     assert result.node_aggregate.reach[0] == 1.0
     assert result.leaf_node_ids == (1,)
     assert result.leaf_reach_sum == (0.5,)
-    assert result.leaf_batch.rows[0].node_id == 1
-    assert result.leaf_batch.rows[0].reach == 0.5
-    assert result.leaf_batch.rows[0].features.reach == 0.5
-    assert result.leaf_batch.rows[0].features.share == 1.0
-    assert result.leaf_batch.rows[0].features.street == 0
-    assert result.leaf_batch.rows[0].features.board_size == 0
-    assert result.leaf_batch.rows[0].features.board_signature == 0
-    assert len(result.leaf_batch.rows[0].features.board_card_mask) == 52
-    assert not any(result.leaf_batch.rows[0].features.board_card_mask)
-    assert len(result.leaf_batch.rows[0].features.board_card_vector) == 52
-    assert sum(result.leaf_batch.rows[0].features.board_card_vector) == 0.0
-    assert len(result.leaf_batch.rows[0].features.leaf_card_reach_vector) == 52
-    assert sum(result.leaf_batch.rows[0].features.leaf_card_reach_vector) == 0.0
+    assert result.leaf_batch.node_ids == (1,)
+    assert result.leaf_batch.reach.shape == (1,)
+    assert result.leaf_batch.reach.dtype == np.float32
+    assert result.leaf_batch.reach[0] == pytest.approx(0.5)
+    assert result.leaf_batch.features.shape == (1, LEAF_EVAL_FEATURE_WIDTH)
+    assert result.leaf_batch.features.dtype == np.float32
+    assert result.leaf_batch.features[0, 0] == pytest.approx(0.5)
+    assert result.leaf_batch.features[0, 1] == pytest.approx(1.0)
+    assert result.leaf_batch.features[0, 2] == pytest.approx(0.0)
 
 
 def test_aggregate_prob_sum_uses_board_street() -> None:
@@ -73,14 +69,11 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
 
     result = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
 
-    assert result.leaf_batch.rows[0].features.street == 1
-    assert result.leaf_batch.rows[0].features.board_size == 3
-    assert result.leaf_batch.rows[0].features.board_signature != 0
-    assert sum(result.leaf_batch.rows[0].features.board_card_mask) == 3
-    assert sum(result.leaf_batch.rows[0].features.board_card_vector) == 3.0
-    assert sum(result.leaf_batch.rows[0].features.leaf_card_reach_vector) == pytest.approx(1.0)
+    assert result.leaf_batch.features.shape == (1, LEAF_EVAL_FEATURE_WIDTH)
+    assert result.leaf_batch.features[0, 0] == pytest.approx(1.0)
+    assert result.leaf_batch.features[0, 1] == pytest.approx(1.0)
     assert sum(
-        1 for value in result.leaf_batch.rows[0].features.leaf_card_reach_vector if value > 0.0
+        1 for value in result.leaf_batch.features[0, 109:161] if value > 0.0
     ) == 49
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(1.0)
     assert sum(result.node_aggregate.hand_reach[0]) == pytest.approx(1.0)
@@ -103,8 +96,8 @@ def test_aggregate_prob_sum_blocks_board_cards_in_dense_vectors() -> None:
 
     result = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
 
-    assert len(result.node_aggregate.card_reach) == 2
-    assert len(result.node_aggregate.hand_reach) == 2
+    assert result.node_aggregate.card_reach.shape == (2, 52)
+    assert result.node_aggregate.hand_reach.shape == (2, 1326)
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(4.0)
     assert sum(result.node_aggregate.card_reach[1]) == pytest.approx(8.0)
     assert result.node_aggregate.card_reach[0][8] == 0.0
@@ -135,11 +128,11 @@ def test_node_card_aggregate_holds_node_and_card_reach() -> None:
     result = aggregate_prob_sum(tree, forward)
 
     assert result.node_aggregate.reach == (2.0,)
-    assert len(result.node_aggregate.card_reach) == 1
-    assert len(result.node_aggregate.card_reach[0]) == 52
+    assert result.node_aggregate.card_reach.shape == (1, 52)
+    assert result.node_aggregate.card_reach.dtype == np.float64
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(2.0)
-    assert len(result.node_aggregate.hand_reach) == 1
-    assert len(result.node_aggregate.hand_reach[0]) == 1326
+    assert result.node_aggregate.hand_reach.shape == (1, 1326)
+    assert result.node_aggregate.hand_reach.dtype == np.float64
     assert sum(result.node_aggregate.hand_reach[0]) == pytest.approx(2.0)
 
 
@@ -164,7 +157,7 @@ def test_aggregate_prob_sum_parallel_node_card_reach() -> None:
 
     result = aggregate_prob_sum(tree, forward, max_workers=2)
 
-    assert len(result.node_aggregate.card_reach) == 3
+    assert result.node_aggregate.card_reach.shape == (3, 52)
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(1.0)
     assert sum(result.node_aggregate.card_reach[1]) == pytest.approx(2.0)
     assert sum(result.node_aggregate.card_reach[2]) == pytest.approx(3.0)

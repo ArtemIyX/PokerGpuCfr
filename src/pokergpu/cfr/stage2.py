@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.leaf_eval import LEAF_EVAL_FEATURE_WIDTH
@@ -34,14 +35,49 @@ class LeafBatchRow:
 
 @dataclass(slots=True, frozen=True)
 class LeafBatchInput:
-    rows: tuple[LeafBatchRow, ...]
+    node_ids: tuple[int, ...]
+    reach: NDArray[np.float32]
+    features: NDArray[np.float32]
+
+    def __post_init__(self) -> None:
+        if self.reach.ndim != 1:
+            raise ValueError("leaf batch reach must be a 1D tensor")
+        if self.reach.dtype != np.float32:
+            raise ValueError("leaf batch reach must use float32")
+        if self.features.ndim != 2:
+            raise ValueError("leaf batch features must be a 2D tensor")
+        if self.features.dtype != np.float32:
+            raise ValueError("leaf batch features must use float32")
+        if self.features.shape[0] != len(self.node_ids):
+            raise ValueError("leaf batch feature rows must match node ids")
+        if self.reach.shape[0] != len(self.node_ids):
+            raise ValueError("leaf batch reach rows must match node ids")
 
 
 @dataclass(slots=True, frozen=True)
 class NodeCardAggregate:
     reach: tuple[float, ...]
-    card_reach: tuple[tuple[float, ...], ...]
-    hand_reach: tuple[tuple[float, ...], ...]
+    card_reach: NDArray[np.float64]
+    hand_reach: NDArray[np.float64]
+
+    def __post_init__(self) -> None:
+        assert self.reach, "node reach cannot be empty"
+        if self.card_reach.ndim != 2:
+            raise ValueError("node card reach must be a 2D tensor")
+        if self.hand_reach.ndim != 2:
+            raise ValueError("node hand reach must be a 2D tensor")
+        if self.card_reach.dtype != np.float64:
+            raise ValueError("node card reach must use float64")
+        if self.hand_reach.dtype != np.float64:
+            raise ValueError("node hand reach must use float64")
+        if self.card_reach.shape[0] != len(self.reach):
+            raise ValueError("node card reach rows must match node reach")
+        if self.hand_reach.shape[0] != len(self.reach):
+            raise ValueError("node hand reach rows must match node reach")
+        if self.card_reach.shape[1] != 52:
+            raise ValueError("node card reach must have width 52")
+        if self.hand_reach.shape[1] != private_hand_count():
+            raise ValueError("node hand reach must match private hand count")
 
 
 @dataclass(slots=True, frozen=True)
@@ -50,6 +86,15 @@ class AggregateProbSumResult:
     leaf_node_ids: tuple[int, ...]
     leaf_reach_sum: tuple[float, ...]
     leaf_batch: LeafBatchInput
+
+    def __post_init__(self) -> None:
+        assert len(self.leaf_node_ids) == len(self.leaf_reach_sum), "leaf ids and reach must align"
+        if self.leaf_batch.node_ids != self.leaf_node_ids:
+            raise ValueError("leaf batch node ids must match leaf node ids")
+        if self.leaf_batch.reach.shape[0] != len(self.leaf_node_ids):
+            raise ValueError("leaf batch reach must match leaf node ids")
+        if self.leaf_batch.features.shape[0] != len(self.leaf_node_ids):
+            raise ValueError("leaf batch features must match leaf node ids")
 
 
 def aggregate_prob_sum(
@@ -60,6 +105,8 @@ def aggregate_prob_sum(
 ) -> AggregateProbSumResult:
     if tree.node_count != len(forward.node_reach):
         raise ValueError("tree and forward pass must cover the same number of nodes")
+    if tree.node_count == 0:
+        raise ValueError("tree cannot be empty")
 
     del max_workers
 
@@ -77,12 +124,14 @@ def aggregate_prob_sum(
     street = _street_code(board_street)
     board_size = len(board.cards) if board is not None else 0
     board_signature = _board_signature(board)
-    leaf_batch = LeafBatchInput(
-        rows=tuple(
-            LeafBatchRow(
-                node_id=node_index,
-                reach=forward.node_reach[node_index],
-                features=LeafFeatures(
+    leaf_node_id_tuple = tuple(leaf_node_ids)
+    leaf_reach_array = np.asarray(leaf_reach_sum, dtype=np.float32)
+    if leaf_reach_array.ndim != 1:
+        raise ValueError("leaf reach must be one-dimensional")
+    leaf_feature_rows = np.asarray(
+        [
+            _leaf_eval_feature_row(
+                LeafFeatures(
                     reach=forward.node_reach[node_index],
                     share=_safe_share(forward.node_reach[node_index], total_leaf_reach),
                     street=street,
@@ -91,10 +140,20 @@ def aggregate_prob_sum(
                     board_card_mask=board_card_mask,
                     board_card_vector=board_card_vector,
                     leaf_card_reach_vector=leaf_card_reach_vector,
-                ),
+                )
             )
             for node_index in leaf_node_ids
-        )
+        ],
+        dtype=np.float32,
+    )
+    if leaf_feature_rows.ndim == 1:
+        leaf_feature_rows = np.zeros((0, LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32)
+    if leaf_feature_rows.dtype != np.float32:
+        raise ValueError("leaf feature rows must use float32")
+    leaf_batch = LeafBatchInput(
+        node_ids=leaf_node_id_tuple,
+        reach=leaf_reach_array,
+        features=leaf_feature_rows,
     )
 
     return AggregateProbSumResult(
@@ -110,16 +169,9 @@ def aggregate_prob_sum(
 
 
 def build_leaf_eval_batch(leaf_batch: LeafBatchInput) -> LeafEvalBatchInput:
-    features = np.asarray(
-        [
-            _leaf_eval_feature_row(row.features)
-            for row in leaf_batch.rows
-        ],
-        dtype=np.float32,
-    )
     return LeafEvalBatchInput(
-        node_ids=tuple(row.node_id for row in leaf_batch.rows),
-        features=features,
+        node_ids=leaf_batch.node_ids,
+        features=leaf_batch.features,
     )
 
 
@@ -218,26 +270,24 @@ def _leaf_card_reach_vector(board_card_mask: tuple[bool, ...], board_size: int) 
 def _build_node_hand_reach(
     node_reach: tuple[float, ...],
     board: Board | None,
-) -> tuple[tuple[float, ...], ...]:
-    node_reach_array = np.asarray(node_reach, dtype=np.float32)
+) -> NDArray[np.float64]:
+    node_reach_array = np.asarray(node_reach, dtype=np.float64)
     live_mask = private_hand_mask(board.cards if board is not None else ())
     live_count = int(live_mask.sum())
     if live_count <= 0:
-        return tuple(tuple(0.0 for _ in range(private_hand_count())) for _ in node_reach)
-    weights = node_reach_array / np.float32(live_count)
-    reach = np.where(live_mask[None, :], weights[:, None], np.float32(0.0))
-    return tuple(tuple(float(value) for value in row) for row in reach)
+        return np.zeros((len(node_reach), private_hand_count()), dtype=np.float64)
+    weights = node_reach_array / np.float64(live_count)
+    return np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
 
 
 def _build_node_card_reach(
     node_reach: tuple[float, ...],
     board_card_mask: tuple[bool, ...],
-) -> tuple[tuple[float, ...], ...]:
-    node_reach_array = np.asarray(node_reach, dtype=np.float32)
+) -> NDArray[np.float64]:
+    node_reach_array = np.asarray(node_reach, dtype=np.float64)
     live_mask = np.asarray([not blocked for blocked in board_card_mask], dtype=np.bool_)
     live_count = int(live_mask.sum())
     if live_count <= 0:
-        return tuple(tuple(0.0 for _ in range(52)) for _ in node_reach)
-    weights = node_reach_array / np.float32(live_count)
-    reach = np.where(live_mask[None, :], weights[:, None], np.float32(0.0))
-    return tuple(tuple(float(value) for value in row) for row in reach)
+        return np.zeros((len(node_reach), 52), dtype=np.float64)
+    weights = node_reach_array / np.float64(live_count)
+    return np.where(live_mask[None, :], weights[:, None], np.float64(0.0))

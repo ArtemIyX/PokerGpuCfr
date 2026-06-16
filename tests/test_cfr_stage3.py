@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
@@ -270,3 +271,67 @@ def test_compute_opponent_reach_matches_reference_baseline_with_repeated_infoset
     assert result.infoset_node_hand_ratio[0][1][0] == pytest.approx(2.0 / 3.0)
     assert result.infoset_node_hand_ratio[0][0][1] == pytest.approx(2.0 / 6.0)
     assert result.infoset_node_hand_ratio[0][1][1] == pytest.approx(4.0 / 6.0)
+
+
+def test_compute_opponent_reach_accepts_numpy_hand_reach_from_stage2() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER0),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(InfosetId(0), InfosetId(0)),
+        terminal_payoffs=(None, None),
+    )
+    aggregate = aggregate_prob_sum(
+        tree,
+        ForwardProfileResult(
+            node_reach=(1.0, 2.0),
+            infoset_reach=(3.0,),
+            action_reach=((), ()),
+        ),
+    )
+
+    result = compute_opponent_reach(tree, aggregate)
+
+    assert isinstance(aggregate.node_aggregate.hand_reach, np.ndarray)
+    assert aggregate.node_aggregate.hand_reach.shape == (2, 1326)
+    assert result.infoset_opponent_reach == (3.0,)
+    assert len(result.infoset_hand_opponent_reach[0]) == 1326
+    assert len(result.node_hand_opponent_reach[0]) == 1326
+
+
+def test_compute_opponent_reach_accepts_tuple_hand_reach_compatibility() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.PLAYER0, NodeType.PLAYER0),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(InfosetId(0), InfosetId(0)),
+        terminal_payoffs=(None, None),
+    )
+    aggregate = aggregate_prob_sum(
+        tree,
+        ForwardProfileResult(
+            node_reach=(2.0, 4.0),
+            infoset_reach=(6.0,),
+            action_reach=((), ()),
+        ),
+    )
+    node0_hand = [0.0 for _ in range(1326)]
+    node1_hand = [0.0 for _ in range(1326)]
+    node0_hand[0] = 2.0
+    node1_hand[0] = 1.0
+    object.__setattr__(
+        aggregate.node_aggregate,
+        "hand_reach",
+        (
+            tuple(node0_hand),
+            tuple(node1_hand),
+        ),
+    )
+
+    result = compute_opponent_reach(tree, aggregate)
+
+    assert result.infoset_opponent_reach == (6.0,)
+    assert result.infoset_hand_opponent_reach[0][0] == pytest.approx(3.0)
+    assert result.node_hand_opponent_reach[0][0] == pytest.approx(2.0 / 3.0)

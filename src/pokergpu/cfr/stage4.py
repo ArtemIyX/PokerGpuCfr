@@ -100,8 +100,8 @@ def build_showdown_equity_input(
     if tree.node_count != len(opponent_reach.node_opponent_reach):
         raise ValueError("tree and opponent reach result must cover the same number of nodes")
 
-    live_board = board or Board(())
-    cache = cache or build_showdown_equity_board_cache(live_board)
+    live_board = board if board is not None else Board(())
+    cache = cache if cache is not None else build_showdown_equity_board_cache(live_board)
     rows = tuple(
         ShowdownEquityNodeInput(
             node_id=node_id,
