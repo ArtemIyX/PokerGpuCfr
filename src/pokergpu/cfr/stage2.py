@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from numpy.typing import NDArray
@@ -89,11 +90,21 @@ def aggregate_prob_sum(
     if tree.node_count == 0:
         raise ValueError("tree cannot be empty")
 
-    del max_workers
-
     board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
-    node_card_reach = _build_node_card_reach(forward.node_reach, board_card_mask)
-    node_hand_reach = _build_node_hand_reach(forward.node_reach, board)
+    node_card_reach = np.empty((len(forward.node_reach), 52), dtype=np.float64)
+    node_hand_reach = np.empty((len(forward.node_reach), private_hand_count()), dtype=np.float64)
+    if max_workers is None or max_workers <= 1 or tree.node_count <= 1:
+        _fill_node_card_reach(node_card_reach, forward.node_reach, board_card_mask)
+        _fill_node_hand_reach(node_hand_reach, forward.node_reach, board)
+    else:
+        _fill_node_aggregates_parallel(
+            node_card_reach=node_card_reach,
+            node_hand_reach=node_hand_reach,
+            node_reach=forward.node_reach,
+            board=board,
+            board_card_mask=board_card_mask,
+            max_workers=max_workers,
+        )
     leaf_node_ids = tuple(
         node_index
         for node_index, node_type in enumerate(tree.node_types)
@@ -275,27 +286,97 @@ def _leaf_card_reach_vector(board_card_mask: tuple[bool, ...], board_size: int) 
     return tuple(0.0 if blocked else weight for blocked in board_card_mask)
 
 
-def _build_node_hand_reach(
+def _fill_node_hand_reach(
+    out: NDArray[np.float64],
     node_reach: tuple[float, ...],
     board: Board | None,
-) -> NDArray[np.float64]:
+) -> None:
     node_reach_array = np.asarray(node_reach, dtype=np.float64)
     live_mask = private_hand_mask(board.cards if board is not None else ())
     live_count = int(live_mask.sum())
     if live_count <= 0:
-        return np.zeros((len(node_reach), private_hand_count()), dtype=np.float64)
+        out.fill(0.0)
+        return
     weights = node_reach_array / np.float64(live_count)
-    return np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
+    out[:] = np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
 
 
-def _build_node_card_reach(
+def _fill_node_card_reach(
+    out: NDArray[np.float64],
     node_reach: tuple[float, ...],
     board_card_mask: tuple[bool, ...],
-) -> NDArray[np.float64]:
+) -> None:
     node_reach_array = np.asarray(node_reach, dtype=np.float64)
     live_mask = np.asarray([not blocked for blocked in board_card_mask], dtype=np.bool_)
     live_count = int(live_mask.sum())
     if live_count <= 0:
-        return np.zeros((len(node_reach), 52), dtype=np.float64)
+        out.fill(0.0)
+        return
     weights = node_reach_array / np.float64(live_count)
-    return np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
+    out[:] = np.where(live_mask[None, :], weights[:, None], np.float64(0.0))
+
+
+def _fill_node_aggregates_parallel(
+    *,
+    node_card_reach: NDArray[np.float64],
+    node_hand_reach: NDArray[np.float64],
+    node_reach: tuple[float, ...],
+    board: Board | None,
+    board_card_mask: tuple[bool, ...],
+    max_workers: int,
+) -> None:
+    node_count = len(node_reach)
+    worker_count = min(max_workers, node_count)
+    if worker_count <= 1:
+        _fill_node_card_reach(node_card_reach, node_reach, board_card_mask)
+        _fill_node_hand_reach(node_hand_reach, node_reach, board)
+        return
+
+    bounds = _chunk_bounds(node_count, worker_count)
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        list(
+            executor.map(
+                lambda span: _fill_node_aggregate_chunk(
+                    node_card_reach=node_card_reach,
+                    node_hand_reach=node_hand_reach,
+                    node_reach=node_reach,
+                    board=board,
+                    board_card_mask=board_card_mask,
+                    start=span[0],
+                    stop=span[1],
+                ),
+                bounds,
+            )
+        )
+
+
+def _fill_node_aggregate_chunk(
+    *,
+    node_card_reach: NDArray[np.float64],
+    node_hand_reach: NDArray[np.float64],
+    node_reach: tuple[float, ...],
+    board: Board | None,
+    board_card_mask: tuple[bool, ...],
+    start: int,
+    stop: int,
+) -> None:
+    if start >= stop:
+        return
+    _fill_node_card_reach(
+        node_card_reach[start:stop],
+        node_reach[start:stop],
+        board_card_mask,
+    )
+    _fill_node_hand_reach(
+        node_hand_reach[start:stop],
+        node_reach[start:stop],
+        board,
+    )
+
+
+def _chunk_bounds(node_count: int, worker_count: int) -> tuple[tuple[int, int], ...]:
+    chunk_size = (node_count + worker_count - 1) // worker_count
+    return tuple(
+        (start, min(start + chunk_size, node_count))
+        for start in range(0, node_count, chunk_size)
+    )

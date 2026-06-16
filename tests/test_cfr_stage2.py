@@ -221,6 +221,35 @@ def test_aggregate_prob_sum_parallel_node_card_reach() -> None:
     assert sum(result.node_aggregate.hand_reach[2]) == pytest.approx(3.0)
 
 
+def test_aggregate_prob_sum_parallel_matches_serial_dense_outputs() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.LEAF,
+            NodeType.LEAF,
+            NodeType.LEAF,
+            NodeType.LEAF,
+        ),
+        first_child=(0, 0, 0, 0),
+        child_count=(0, 0, 0, 0),
+        children=(),
+        infoset_ids=(None, None, None, None),
+        terminal_payoffs=(None, None, None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 2.0, 3.0, 4.0),
+        infoset_reach=(),
+        action_reach=((), (), (), ()),
+    )
+
+    serial = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
+    parallel = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"), max_workers=2)
+
+    assert np.allclose(serial.node_aggregate.card_reach, parallel.node_aggregate.card_reach)
+    assert np.allclose(serial.node_aggregate.hand_reach, parallel.node_aggregate.hand_reach)
+    assert np.allclose(serial.leaf_batch.reach, parallel.leaf_batch.reach)
+    assert np.allclose(serial.leaf_batch.features, parallel.leaf_batch.features)
+
+
 def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0,),
