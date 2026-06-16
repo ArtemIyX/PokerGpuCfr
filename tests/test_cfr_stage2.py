@@ -86,6 +86,37 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
     assert sum(result.node_aggregate.hand_reach[0]) == pytest.approx(1.0)
 
 
+def test_aggregate_prob_sum_blocks_board_cards_in_dense_vectors() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF, NodeType.LEAF),
+        first_child=(0, 0),
+        child_count=(0, 0),
+        children=(),
+        infoset_ids=(None, None),
+        terminal_payoffs=(None, None),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(4.0, 8.0),
+        infoset_reach=(),
+        action_reach=((), ()),
+    )
+
+    result = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
+
+    assert len(result.node_aggregate.card_reach) == 2
+    assert len(result.node_aggregate.hand_reach) == 2
+    assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(4.0)
+    assert sum(result.node_aggregate.card_reach[1]) == pytest.approx(8.0)
+    assert result.node_aggregate.card_reach[0][8] == 0.0
+    assert result.node_aggregate.card_reach[0][24] == 0.0
+    assert result.node_aggregate.card_reach[0][38] == 0.0
+    assert result.node_aggregate.card_reach[1][8] == 0.0
+    assert result.node_aggregate.card_reach[1][24] == 0.0
+    assert result.node_aggregate.card_reach[1][38] == 0.0
+    assert sum(result.node_aggregate.hand_reach[0]) == pytest.approx(4.0)
+    assert sum(result.node_aggregate.hand_reach[1]) == pytest.approx(8.0)
+
+
 def test_node_card_aggregate_holds_node_and_card_reach() -> None:
     tree = PublicTree(
         node_types=(NodeType.LEAF,),

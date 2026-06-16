@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
@@ -62,12 +61,10 @@ def aggregate_prob_sum(
     if tree.node_count != len(forward.node_reach):
         raise ValueError("tree and forward pass must cover the same number of nodes")
 
+    del max_workers
+
     board_card_mask, board_card_vector, leaf_card_reach_vector = _board_card_features(board)
-    node_card_reach = _build_node_card_reach(
-        forward.node_reach,
-        board_card_mask,
-        max_workers=max_workers,
-    )
+    node_card_reach = _build_node_card_reach(forward.node_reach, board_card_mask)
     node_hand_reach = _build_node_hand_reach(forward.node_reach, board)
     leaf_node_ids = tuple(
         node_index
@@ -218,54 +215,29 @@ def _leaf_card_reach_vector(board_card_mask: tuple[bool, ...], board_size: int) 
     return tuple(0.0 if blocked else weight for blocked in board_card_mask)
 
 
-def _node_card_reach_vector(node_reach: float, board_card_mask: tuple[bool, ...]) -> tuple[float, ...]:
-    live_count = sum(1 for blocked in board_card_mask if not blocked)
-    if live_count <= 0 or node_reach <= 0.0:
-        return tuple(0.0 for _ in range(52))
-    weight = node_reach / live_count
-    return tuple(0.0 if blocked else weight for blocked in board_card_mask)
-
-
-def _node_hand_reach_vector(node_reach: float, board: Board | None) -> tuple[float, ...]:
-    live_mask = private_hand_mask(board.cards if board is not None else ())
-    live_count = int(live_mask.sum())
-    if live_count <= 0 or node_reach <= 0.0:
-        return tuple(0.0 for _ in range(private_hand_count()))
-    weight = node_reach / live_count
-    return tuple(weight if live else 0.0 for live in live_mask)
-
-
 def _build_node_hand_reach(
     node_reach: tuple[float, ...],
     board: Board | None,
-    *,
-    max_workers: int | None = None,
 ) -> tuple[tuple[float, ...], ...]:
-    if max_workers is None or max_workers <= 1 or len(node_reach) <= 1:
-        return tuple(_node_hand_reach_vector(value, board) for value in node_reach)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return tuple(
-            executor.map(
-                lambda value: _node_hand_reach_vector(value, board),
-                node_reach,
-            )
-        )
+    node_reach_array = np.asarray(node_reach, dtype=np.float32)
+    live_mask = private_hand_mask(board.cards if board is not None else ())
+    live_count = int(live_mask.sum())
+    if live_count <= 0:
+        return tuple(tuple(0.0 for _ in range(private_hand_count())) for _ in node_reach)
+    weights = node_reach_array / np.float32(live_count)
+    reach = np.where(live_mask[None, :], weights[:, None], np.float32(0.0))
+    return tuple(tuple(float(value) for value in row) for row in reach)
 
 
 def _build_node_card_reach(
     node_reach: tuple[float, ...],
     board_card_mask: tuple[bool, ...],
-    *,
-    max_workers: int | None,
 ) -> tuple[tuple[float, ...], ...]:
-    if max_workers is None or max_workers <= 1 or len(node_reach) <= 1:
-        return tuple(_node_card_reach_vector(value, board_card_mask) for value in node_reach)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return tuple(
-            executor.map(
-                lambda value: _node_card_reach_vector(value, board_card_mask),
-                node_reach,
-            )
-        )
+    node_reach_array = np.asarray(node_reach, dtype=np.float32)
+    live_mask = np.asarray([not blocked for blocked in board_card_mask], dtype=np.bool_)
+    live_count = int(live_mask.sum())
+    if live_count <= 0:
+        return tuple(tuple(0.0 for _ in range(52)) for _ in node_reach)
+    weights = node_reach_array / np.float32(live_count)
+    reach = np.where(live_mask[None, :], weights[:, None], np.float32(0.0))
+    return tuple(tuple(float(value) for value in row) for row in reach)
