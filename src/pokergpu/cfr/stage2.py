@@ -3,7 +3,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+import numpy as np
+
 from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.cfr.leaf_eval import LEAF_EVAL_FEATURE_WIDTH
+from pokergpu.cfr.leaf_eval import LeafEvalBatchInput
 from pokergpu.abstraction.hands import private_hand_count, private_hand_mask
 from pokergpu.core.cards import Rank, Suit
 from pokergpu.core.board import Board, Street
@@ -108,10 +112,40 @@ def aggregate_prob_sum(
     )
 
 
+def build_leaf_eval_batch(leaf_batch: LeafBatchInput) -> LeafEvalBatchInput:
+    features = np.asarray(
+        [
+            _leaf_eval_feature_row(row.features)
+            for row in leaf_batch.rows
+        ],
+        dtype=np.float32,
+    )
+    return LeafEvalBatchInput(
+        node_ids=tuple(row.node_id for row in leaf_batch.rows),
+        features=features,
+    )
+
+
 def _safe_share(value: float, total: float) -> float:
     if total <= 0.0:
         return 0.0
     return value / total
+
+
+def _leaf_eval_feature_row(features: LeafFeatures) -> tuple[float, ...]:
+    row = (
+        features.reach,
+        features.share,
+        float(features.street),
+        float(features.board_size),
+        float(features.board_signature),
+        *tuple(1.0 if blocked else 0.0 for blocked in features.board_card_mask),
+        *features.board_card_vector,
+        *features.leaf_card_reach_vector,
+    )
+    if len(row) != LEAF_EVAL_FEATURE_WIDTH:
+        raise ValueError("leaf eval feature row has an unexpected width")
+    return row
 
 
 def _street_code(street: Street) -> int:

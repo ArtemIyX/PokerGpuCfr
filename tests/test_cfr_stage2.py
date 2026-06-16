@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pytest
+import numpy as np
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.cfr.leaf_eval import LEAF_EVAL_FEATURE_WIDTH
+from pokergpu.cfr.stage2 import build_leaf_eval_batch
 from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.core.betting import Chips
 from pokergpu.core.board import Board
@@ -156,3 +159,28 @@ def test_aggregate_prob_sum_rejects_mismatched_tree_and_forward_sizes() -> None:
 
     with pytest.raises(ValueError):
         aggregate_prob_sum(tree, forward)
+
+
+def test_build_leaf_eval_batch_creates_fixed_width_tensor() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0,),
+        infoset_reach=(),
+        action_reach=((),),
+    )
+
+    aggregate = aggregate_prob_sum(tree, forward)
+    batch = build_leaf_eval_batch(aggregate.leaf_batch)
+
+    assert batch.node_ids == (0,)
+    assert batch.features.shape == (1, LEAF_EVAL_FEATURE_WIDTH)
+    assert batch.features.dtype == np.float32
+    assert batch.features[0, 0] == pytest.approx(1.0)
+    assert batch.features[0, 1] == pytest.approx(1.0)
