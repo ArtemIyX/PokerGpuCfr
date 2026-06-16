@@ -8,11 +8,11 @@ from typing import Protocol
 
 import numpy as np
 
-from pokergpu.cfr.leaf_eval import LEAF_EVAL_FEATURE_WIDTH
-from pokergpu.cfr.leaf_eval import LEAF_EVAL_OUTPUT_WIDTH
 from pokergpu.cfr.leaf_eval import LeafEvalBatchInput
 from pokergpu.cfr.leaf_eval import LeafEvalBatchOutput
 from pokergpu.cfr.leaf_eval import LeafEvalBackend
+from pokergpu.cfr.leaf_model_spec import GpuLeafModelSpec
+from pokergpu.cfr.triton_leaf_backend import TritonLeafKernel
 
 if TYPE_CHECKING:
     import torch.nn as nn
@@ -27,15 +27,6 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     _TORCH_IMPORT_ERROR = exc
 else:
     _TORCH_IMPORT_ERROR = None
-
-
-@dataclass(slots=True, frozen=True)
-class GpuLeafModelSpec:
-    input_width: int = LEAF_EVAL_FEATURE_WIDTH
-    output_width: int = LEAF_EVAL_OUTPUT_WIDTH
-    hidden_widths: tuple[int, ...] = (256, 256)
-    activation: str = "relu"
-    dtype: str = "float32"
 
 
 class GpuLeafKernel(Protocol):
@@ -91,3 +82,7 @@ def create_default_leaf_backend(spec: GpuLeafModelSpec = GpuLeafModelSpec()) -> 
     if _torch is None:
         raise ModuleNotFoundError("torch is required for GPU leaf evaluation") from _TORCH_IMPORT_ERROR
     return GpuLeafBackend(kernel=TorchLeafKernel(spec=spec), spec=spec)
+
+
+def create_triton_leaf_backend(spec: GpuLeafModelSpec = GpuLeafModelSpec()) -> GpuLeafBackend:
+    return GpuLeafBackend(kernel=TritonLeafKernel(spec=spec), spec=spec)
