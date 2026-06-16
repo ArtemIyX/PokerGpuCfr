@@ -30,6 +30,7 @@ class LeafBatchInput:
     features: NDArray[np.float32]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "node_ids", tuple(self.node_ids))
         if self.reach.ndim != 1:
             raise ValueError("leaf batch reach must be a 1D tensor")
         if self.reach.dtype != np.float32:
@@ -51,7 +52,8 @@ class NodeCardAggregate:
     hand_reach: NDArray[np.float64]
 
     def __post_init__(self) -> None:
-        assert self.reach, "node reach cannot be empty"
+        if len(self.reach) == 0:
+            raise ValueError("node reach cannot be empty")
         if self.card_reach.ndim != 2:
             raise ValueError("node card reach must be a 2D tensor")
         if self.hand_reach.ndim != 2:
@@ -74,15 +76,14 @@ class NodeCardAggregate:
 class AggregateProbSumResult:
     node_aggregate: NodeCardAggregate
     leaf_node_ids: tuple[int, ...]
-    leaf_reach_sum: NDArray[np.float32]
+    leaf_reach_sum: tuple[float, ...]
     leaf_batch: LeafBatchInput
 
     def __post_init__(self) -> None:
-        if self.leaf_reach_sum.ndim != 1:
-            raise ValueError("leaf reach sum must be a 1D tensor")
-        if self.leaf_reach_sum.dtype != np.float32:
-            raise ValueError("leaf reach sum must use float32")
-        assert len(self.leaf_node_ids) == self.leaf_reach_sum.shape[0], "leaf ids and reach must align"
+        object.__setattr__(self, "leaf_node_ids", tuple(self.leaf_node_ids))
+        object.__setattr__(self, "leaf_reach_sum", tuple(self.leaf_reach_sum))
+        if len(self.leaf_node_ids) != len(self.leaf_reach_sum):
+            raise ValueError("leaf ids and reach must align")
         if self.leaf_batch.node_ids != self.leaf_node_ids:
             raise ValueError("leaf batch node ids must match leaf node ids")
         if self.leaf_batch.reach.shape[0] != len(self.leaf_node_ids):
@@ -125,7 +126,7 @@ def aggregate_prob_sum(
     return AggregateProbSumResult(
         node_aggregate=result.node_aggregate,
         leaf_node_ids=result.leaf_node_ids,
-        leaf_reach_sum=np.asarray(result.leaf_reach_sum, dtype=np.float32),
+        leaf_reach_sum=tuple(float(value) for value in result.leaf_reach_sum),
         leaf_batch=result.leaf_batch,
     )
 
@@ -149,7 +150,7 @@ def aggregate_prob_sum_prepacked(
             prepared.leaf_batch_features,
             prepared.node_reach,
             prepared.leaf_shares,
-            prepared.board_card_block,
+            prepared.board_card_mask,
             prepared.board_card_vector,
             prepared.leaf_card_reach_vector,
             np.float32(board_street),
@@ -571,7 +572,7 @@ if njit is not None and prange is not None:
         leaf_features: NDArray[np.float32],
         node_reach: NDArray[np.float64],
         leaf_shares: NDArray[np.float32],
-        board_mask: NDArray[np.float32],
+        board_mask: NDArray[np.bool_],
         board_vector: NDArray[np.float32],
         leaf_vector: NDArray[np.float32],
         street: np.float32,
