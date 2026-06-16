@@ -10,6 +10,7 @@ parallelism: **by information set and by tree node**
 
 ### Main working rules
 
+- Keep hot paths parallelized and vectorized in place; prefer NumPy, Numba, Triton, or Torch kernels over Python loops or wrapper objects in performance-critical code.
 - Try not to use 'Any' (mypy errors)
 - Divide tasks on small subtasks that can be solved one by one
 - Create short plans for each large task/problem, before solving it
@@ -26,6 +27,8 @@ parallelism: **by information set and by tree node**
 
 ### PyTorch / Triton Optimization Rules
 
+- Do not introduce Python-layer conversions or objects in hot paths if the same work can stay in NumPy, Numba, Torch, or Triton.
+Constraints: no dynamic control flow, no Python, fixed tensor shapes/addresses.
 - Pin tensors to CUDA at load time,  Never ``.item()`` in hot path — forces sync
 - ``torch.compile``, Fuses ops, reduces kernel launches. Use `fullgraph=True` if no graph breaks.
 - inference_mode over no_grad: faster than `no_grad`, disables version tracking entirely.
@@ -37,7 +40,6 @@ parallelism: **by information set and by tree node**
 - Profile before optimizing
 - CUDA Graphs + torch.compile (combined)
 - Eliminate CPU-side kernel launch overhead. Best for fixed-shape inference loops.
-Constraints: no dynamic control flow, no Python, fixed tensor shapes/addresses.
 
 Use static input buffer: `x.copy_(new_data)` before `g.replay()`.
 ```python
