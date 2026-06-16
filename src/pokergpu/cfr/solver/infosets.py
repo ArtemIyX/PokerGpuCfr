@@ -13,6 +13,7 @@ class DenseInfosetTable:
     action_counts: tuple[int, ...]
     infoset_nodes: tuple[tuple[int, ...], ...]
     infoset_order: tuple[int, ...]
+    infoset_node_counts: tuple[int, ...]
 
     @property
     def infoset_count(self) -> int:
@@ -57,4 +58,5 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         action_counts=tuple(dense_action_counts),
         infoset_nodes=tuple(tuple(nodes) for _, nodes in sorted(infoset_nodes.items())),
         infoset_order=tuple(sorted(infoset_nodes)),
+        infoset_node_counts=tuple(len(nodes) for _, nodes in sorted(infoset_nodes.items())),
     )
