@@ -15,6 +15,7 @@ from pokergpu.cfr.solver import (
     run_tree_root_iteration,
     evaluate_showdown_node_values,
 )
+from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
 from pokergpu.cfr.leaf_eval import LEAF_EVAL_OUTPUT_WIDTH
 from pokergpu.cfr.leaf_eval import LeafEvalBatchInput, LeafEvalBatchOutput
 from pokergpu.cfr.stage1 import ForwardProfileResult
@@ -158,8 +159,8 @@ def test_evaluate_showdown_node_values_runs_stage3_then_stage4() -> None:
 
 
 def test_evaluate_leaf_node_values_uses_leaf_batch_contract() -> None:
-    class _Backend:
-        def evaluate(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
+    class _Kernel:
+        def __call__(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
             values = np.full((len(batch.node_ids), LEAF_EVAL_OUTPUT_WIDTH), 0.25, dtype=np.float32)
             return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values)
 
@@ -173,22 +174,7 @@ def test_evaluate_leaf_node_values_uses_leaf_batch_contract() -> None:
     )
     forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
 
-    result = evaluate_leaf_node_values(tree, forward, backend=_Backend())
+    result = evaluate_leaf_node_values(tree, forward, backend=GpuLeafBackend(kernel=_Kernel()))
 
     assert result.node_ids == (0,)
     assert result.node_values == (0.25,)
-
-
-def test_evaluate_leaf_node_values_defaults_to_gpu_backend() -> None:
-    tree = PublicTree(
-        node_types=(NodeType.LEAF,),
-        first_child=(0,),
-        child_count=(0,),
-        children=(),
-        infoset_ids=(None,),
-        terminal_payoffs=(None,),
-    )
-    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
-
-    with pytest.raises(NotImplementedError, match="GPU leaf evaluation backend is not implemented yet"):
-        evaluate_leaf_node_values(tree, forward)
