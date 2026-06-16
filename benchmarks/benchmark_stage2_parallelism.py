@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import cProfile
 import os
+import pstats
 import sys
 from pathlib import Path
+from io import StringIO
 from time import perf_counter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +17,11 @@ if str(SRC) not in sys.path:
 
 import numpy as np
 from numba import set_num_threads
+
+try:
+    import torch
+except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
+    torch = None
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.core.board import Board
@@ -26,6 +34,8 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--runs", type=int, default=8)
+    parser.add_argument("--profile", choices=("none", "cprofile", "torch"), default="none")
+    parser.add_argument("--profile-threads", type=int, default=16)
     args = parser.parse_args()
 
     os.environ["POKERGPU_STAGE2_NUMBA"] = "1"
@@ -74,6 +84,9 @@ def main() -> None:
                 baseline = mean_ms
             speedup = baseline / mean_ms if mean_ms > 0.0 else 0.0
             print(f"{step_name:<20} | {threads:>7} | {mean_ms:>7.3f}  ({speedup:>5.2f}x)")
+
+    if args.profile != "none":
+        _run_profile(args.profile, args.profile_threads, stage2, prepared, board, args.iterations)
 
 
 def _bench_node_aggregates(
@@ -124,6 +137,42 @@ def _bench_full_stage2(
 ) -> None:
     for _ in range(iterations):
         stage2.aggregate_prob_sum_prepacked(prepared, max_workers=16)
+
+
+def _run_profile(
+    profile: str,
+    threads: int,
+    stage2,
+    prepared,
+    board: Board,
+    iterations: int,
+) -> None:
+    set_num_threads(threads)
+    _ = stage2.aggregate_prob_sum_prepacked(prepared, max_workers=threads)
+    if profile == "cprofile":
+        profiler = cProfile.Profile()
+        profiler.enable()
+        _bench_full_stage2(stage2, prepared, board, iterations=iterations)
+        profiler.disable()
+        stream = StringIO()
+        stats = pstats.Stats(profiler, stream=stream).sort_stats("cumulative")
+        stats.print_stats(50)
+        print(stream.getvalue())
+        return
+    if profile == "torch":
+        if torch is None:
+            raise ModuleNotFoundError("torch is required for torch profiling")
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        ) as prof:
+            with torch.profiler.record_function("stage2_full_prepacked"):
+                _bench_full_stage2(stage2, prepared, board, iterations=iterations)
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=50))
+        return
+    raise ValueError(f"unknown profile mode: {profile}")
 
 
 def _time_call(func, *args, **kwargs) -> float:

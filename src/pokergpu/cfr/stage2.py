@@ -74,11 +74,15 @@ class NodeCardAggregate:
 class AggregateProbSumResult:
     node_aggregate: NodeCardAggregate
     leaf_node_ids: tuple[int, ...]
-    leaf_reach_sum: tuple[float, ...]
+    leaf_reach_sum: NDArray[np.float32]
     leaf_batch: LeafBatchInput
 
     def __post_init__(self) -> None:
-        assert len(self.leaf_node_ids) == len(self.leaf_reach_sum), "leaf ids and reach must align"
+        if self.leaf_reach_sum.ndim != 1:
+            raise ValueError("leaf reach sum must be a 1D tensor")
+        if self.leaf_reach_sum.dtype != np.float32:
+            raise ValueError("leaf reach sum must use float32")
+        assert len(self.leaf_node_ids) == self.leaf_reach_sum.shape[0], "leaf ids and reach must align"
         if self.leaf_batch.node_ids != self.leaf_node_ids:
             raise ValueError("leaf batch node ids must match leaf node ids")
         if self.leaf_batch.reach.shape[0] != len(self.leaf_node_ids):
@@ -107,6 +111,7 @@ class Stage2PreparedInput:
     leaf_reach_sum: NDArray[np.float32]
     leaf_shares: NDArray[np.float32]
     node_reach: NDArray[np.float64]
+    node_reach_tuple: tuple[float, ...]
 
 
 def aggregate_prob_sum(
@@ -116,7 +121,13 @@ def aggregate_prob_sum(
     max_workers: int | None = None,
 ) -> AggregateProbSumResult:
     prepared = prepare_stage2_input(tree, board, forward)
-    return aggregate_prob_sum_prepacked(prepared, max_workers=max_workers)
+    result = aggregate_prob_sum_prepacked(prepared, max_workers=max_workers)
+    return AggregateProbSumResult(
+        node_aggregate=result.node_aggregate,
+        leaf_node_ids=result.leaf_node_ids,
+        leaf_reach_sum=np.asarray(result.leaf_reach_sum, dtype=np.float32),
+        leaf_batch=result.leaf_batch,
+    )
 
 
 def aggregate_prob_sum_prepacked(
@@ -183,12 +194,12 @@ def aggregate_prob_sum_prepacked(
 
     return AggregateProbSumResult(
         node_aggregate=NodeCardAggregate(
-            reach=tuple(float(value) for value in prepared.node_reach),
+            reach=prepared.node_reach_tuple,
             card_reach=prepared.node_card_reach,
             hand_reach=prepared.node_hand_reach,
         ),
         leaf_node_ids=prepared.leaf_node_ids,
-        leaf_reach_sum=tuple(float(value) for value in prepared.leaf_reach_sum),
+        leaf_reach_sum=prepared.leaf_reach_sum,
         leaf_batch=leaf_batch,
     )
 
@@ -242,6 +253,7 @@ def prepare_stage2_input(
         leaf_reach_sum=np.asarray(leaf_reach_sum_array, dtype=np.float32),
         leaf_shares=leaf_shares,
         node_reach=node_reach_array,
+        node_reach_tuple=tuple(float(value) for value in node_reach_array),
     )
 
 
