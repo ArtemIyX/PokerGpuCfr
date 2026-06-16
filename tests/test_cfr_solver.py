@@ -177,3 +177,18 @@ def test_evaluate_leaf_node_values_uses_leaf_batch_contract() -> None:
 
     assert result.node_ids == (0,)
     assert result.node_values == (0.25,)
+
+
+def test_evaluate_leaf_node_values_defaults_to_gpu_backend() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
+
+    with pytest.raises(NotImplementedError, match="GPU leaf evaluation backend is not implemented yet"):
+        evaluate_leaf_node_values(tree, forward)
