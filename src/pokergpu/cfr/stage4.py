@@ -24,6 +24,8 @@ class ShowdownEquityNodeInput:
     node_id: int
     board: Board
     opponent_reach: np.ndarray
+    positive_opponent_reach: np.ndarray
+    positive_opponent_mask: np.ndarray
     live_hand_mask: tuple[bool, ...]
     pot_size: float
 
@@ -59,6 +61,11 @@ class ShowdownEquityBoardCache:
     hand_buckets_array: np.ndarray
     live_hand_indices: tuple[int, ...]
     feasible_opponent_indices: tuple[np.ndarray, ...]
+    feasible_opponent_values: tuple[np.ndarray, ...]
+    feasible_opponent_win_masks: tuple[np.ndarray, ...]
+    feasible_opponent_tie_masks: tuple[np.ndarray, ...]
+    feasible_opponent_offsets: np.ndarray
+    feasible_opponent_flat: np.ndarray
     hand_card_masks: tuple[int, ...]
 
     def __post_init__(self) -> None:
@@ -78,6 +85,16 @@ class ShowdownEquityBoardCache:
             raise ValueError("live hand indices must match live hand mask")
         if len(self.feasible_opponent_indices) != private_hand_count():
             raise ValueError("feasible opponent indices must match private hand count")
+        if len(self.feasible_opponent_values) != private_hand_count():
+            raise ValueError("feasible opponent values must match private hand count")
+        if len(self.feasible_opponent_win_masks) != private_hand_count():
+            raise ValueError("feasible opponent win masks must match private hand count")
+        if len(self.feasible_opponent_tie_masks) != private_hand_count():
+            raise ValueError("feasible opponent tie masks must match private hand count")
+        if self.feasible_opponent_offsets.ndim != 1:
+            raise ValueError("feasible opponent offsets must be one-dimensional")
+        if self.feasible_opponent_flat.ndim != 1:
+            raise ValueError("feasible opponent flat indices must be one-dimensional")
         if len(self.hand_card_masks) != private_hand_count():
             raise ValueError("hand card masks must match private hand count")
         for row in self.feasible_opponent_indices:
@@ -107,6 +124,14 @@ def build_showdown_equity_input(
             node_id=node_id,
             board=live_board,
             opponent_reach=np.asarray(opponent_reach.node_hand_opponent_reach[node_id], dtype=np.float64),
+            positive_opponent_reach=np.maximum(
+                np.asarray(opponent_reach.node_hand_opponent_reach[node_id], dtype=np.float64),
+                0.0,
+            ),
+            positive_opponent_mask=np.asarray(
+                np.asarray(opponent_reach.node_hand_opponent_reach[node_id], dtype=np.float64) > 0.0,
+                dtype=np.bool_,
+            ),
             live_hand_mask=cache.live_hand_mask,
             pot_size=max(1.0, aggregate.node_aggregate.reach[node_id]),
         )
@@ -168,6 +193,9 @@ def _build_showdown_equity_board_cache_uncached(
     hand_buckets_array = np.asarray(hand_buckets, dtype=np.int32)
 
     feasible_opponent_rows: list[np.ndarray] = [np.empty(0, dtype=np.int32) for _ in range(private_hand_count())]
+    feasible_opponent_values: list[np.ndarray] = [np.empty(0, dtype=np.int32) for _ in range(private_hand_count())]
+    feasible_opponent_win_masks: list[np.ndarray] = [np.empty(0, dtype=np.bool_) for _ in range(private_hand_count())]
+    feasible_opponent_tie_masks: list[np.ndarray] = [np.empty(0, dtype=np.bool_) for _ in range(private_hand_count())]
     live_indices = np.asarray(live_hand_indices, dtype=np.int32)
     hand_masks = hand_card_masks_array
     for hero_index in range(private_hand_count()):
@@ -177,8 +205,34 @@ def _build_showdown_equity_board_cache_uncached(
         compatibility = (hand_masks & hero_mask) == 0
         compatible_live = live_mask_array & compatibility
         compatible_live[hero_index] = False
-        feasible_opponent_rows[hero_index] = np.flatnonzero(compatible_live).astype(np.int32, copy=False)
+        opponent_indices = np.flatnonzero(compatible_live).astype(np.int32, copy=False)
+        feasible_opponent_rows[hero_index] = opponent_indices
+        feasible_opponent_values[hero_index] = (
+            hand_scores_array[opponent_indices]
+            if board.street is Street.RIVER
+            else hand_buckets_array[opponent_indices]
+        )
+        hero_value = hand_scores_array[hero_index] if board.street is Street.RIVER else hand_buckets_array[hero_index]
+        feasible_opponent_win_masks[hero_index] = feasible_opponent_values[hero_index] > hero_value
+        feasible_opponent_tie_masks[hero_index] = feasible_opponent_values[hero_index] == hero_value
     feasible_opponent_indices = tuple(feasible_opponent_rows)
+    feasible_opponent_values_tuple = tuple(feasible_opponent_values)
+    feasible_opponent_win_masks_tuple = tuple(feasible_opponent_win_masks)
+    feasible_opponent_tie_masks_tuple = tuple(feasible_opponent_tie_masks)
+    feasible_opponent_offsets = np.empty(private_hand_count() + 1, dtype=np.int32)
+    feasible_opponent_flat_parts: list[np.ndarray] = []
+    running_offset = 0
+    for hero_index, row in enumerate(feasible_opponent_rows):
+        feasible_opponent_offsets[hero_index] = running_offset
+        if row.size > 0:
+            feasible_opponent_flat_parts.append(row)
+            running_offset += row.size
+    feasible_opponent_offsets[private_hand_count()] = running_offset
+    feasible_opponent_flat = (
+        np.concatenate(feasible_opponent_flat_parts).astype(np.int32, copy=False)
+        if feasible_opponent_flat_parts
+        else np.empty(0, dtype=np.int32)
+    )
     return ShowdownEquityBoardCache(
         board=board,
         street=board.street,
@@ -189,6 +243,11 @@ def _build_showdown_equity_board_cache_uncached(
         hand_buckets_array=hand_buckets_array,
         live_hand_indices=live_hand_indices,
         feasible_opponent_indices=feasible_opponent_indices,
+        feasible_opponent_values=feasible_opponent_values_tuple,
+        feasible_opponent_win_masks=feasible_opponent_win_masks_tuple,
+        feasible_opponent_tie_masks=feasible_opponent_tie_masks_tuple,
+        feasible_opponent_offsets=feasible_opponent_offsets,
+        feasible_opponent_flat=feasible_opponent_flat,
         hand_card_masks=hand_card_masks,
     )
 
@@ -250,10 +309,34 @@ def _compute_node_showdown_equity(
             for row in showdown_input.rows
         )
 
+    chunks = _chunk_rows(showdown_input.rows, max_workers)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return tuple(
-            executor.map(lambda row: compute_showdown_equity_node(row, cache=cache), showdown_input.rows)
-        )
+        results = executor.map(lambda chunk: _compute_node_showdown_equity_chunk(chunk, cache=cache), chunks)
+        flattened: list[float] = []
+        for chunk_values in results:
+            flattened.extend(chunk_values)
+        return tuple(flattened)
+
+
+def _compute_node_showdown_equity_chunk(
+    rows: tuple[ShowdownEquityNodeInput, ...],
+    *,
+    cache: ShowdownEquityBoardCache,
+) -> tuple[float, ...]:
+    return tuple(compute_showdown_equity_node(row, cache=cache) for row in rows)
+
+
+def _chunk_rows(
+    rows: tuple[ShowdownEquityNodeInput, ...],
+    worker_count: int,
+) -> tuple[tuple[ShowdownEquityNodeInput, ...], ...]:
+    row_count = len(rows)
+    chunk_count = min(worker_count, row_count)
+    chunk_size = (row_count + chunk_count - 1) // chunk_count
+    return tuple(
+        rows[start : min(start + chunk_size, row_count)]
+        for start in range(0, row_count, chunk_size)
+    )
 
 
 def compute_showdown_equity_node(
@@ -265,6 +348,10 @@ def compute_showdown_equity_node(
         raise ValueError("opponent reach must match private hand count")
     if len(row.live_hand_mask) != private_hand_count():
         raise ValueError("live hand mask must match private hand count")
+    if len(row.positive_opponent_reach) != private_hand_count():
+        raise ValueError("positive opponent reach must match private hand count")
+    if len(row.positive_opponent_mask) != private_hand_count():
+        raise ValueError("positive opponent mask must match private hand count")
     if row.pot_size <= 0.0:
         raise ValueError("pot size must be positive")
     if row.board != cache.board:
@@ -277,7 +364,7 @@ def compute_showdown_equity_node(
     opponent_weights = row.opponent_reach
     if opponent_weights.ndim != 1 or len(opponent_weights) != private_hand_count():
         raise ValueError("opponent reach must be one-dimensional and match private hand count")
-    opponent_total = float(np.sum(np.maximum(opponent_weights, 0.0), dtype=np.float64))
+    opponent_total = float(np.sum(row.positive_opponent_reach, dtype=np.float64))
     if opponent_total <= 0.0:
         return 0.0
 
@@ -288,16 +375,14 @@ def compute_showdown_equity_node(
         feasible_opponents = cache.feasible_opponent_indices[hero_index]
         if feasible_opponents.size == 0:
             continue
-        feasible_weights = np.maximum(opponent_weights[feasible_opponents], 0.0)
-        if not np.any(feasible_weights > 0.0):
+        feasible_weights = row.positive_opponent_reach[feasible_opponents]
+        if not np.any(feasible_weights):
             continue
-        opponent_values = (
-            cache.hand_scores_array[feasible_opponents]
-            if cache.street is Street.RIVER
-            else cache.hand_buckets_array[feasible_opponents]
-        )
-        hero_equity = float(np.dot(feasible_weights, _compare_scores_vector(hero_value, opponent_values)))
-        hero_opponent_weight = float(np.sum(feasible_weights, dtype=np.float64))
+        win_mask = cache.feasible_opponent_win_masks[hero_index]
+        tie_mask = cache.feasible_opponent_tie_masks[hero_index]
+        win_weight, tie_weight = _sum_win_tie_weights(feasible_weights, win_mask, tie_mask)
+        hero_equity = win_weight + (0.5 * tie_weight)
+        hero_opponent_weight = win_weight + tie_weight
         if hero_opponent_weight > 0.0:
             total_equity += hero_equity / hero_opponent_weight
             hero_count += 1
@@ -324,10 +409,14 @@ def _compare_scores(hero_score: int, opponent_score: int) -> float:
     return 0.0
 
 
-def _compare_scores_vector(hero_score: int, opponent_scores: np.ndarray) -> np.ndarray:
-    wins = opponent_scores > hero_score
-    ties = opponent_scores == hero_score
-    return np.where(wins, 1.0, np.where(ties, 0.5, 0.0)).astype(np.float64)
+def _sum_win_tie_weights(
+    feasible_weights: np.ndarray,
+    win_mask: np.ndarray,
+    tie_mask: np.ndarray,
+) -> tuple[float, float]:
+    win_weight = float(np.sum(feasible_weights * win_mask, dtype=np.float64))
+    tie_weight = float(np.sum(feasible_weights * tie_mask, dtype=np.float64))
+    return win_weight, tie_weight
 
 
 def _approximate_hand_strength_bucket(hand: PrivateHand, board: Board) -> int:
