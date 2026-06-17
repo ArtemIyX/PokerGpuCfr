@@ -78,7 +78,18 @@ def _run_profile(tree, aggregate, *, iterations: int) -> None:
     _bench(tree, aggregate, iterations=iterations, max_workers=16)
     profiler.disable()
     stream = StringIO()
-    pstats.Stats(profiler, stream=stream).sort_stats("cumulative").print_stats(80)
+    stats = pstats.Stats(profiler, stream=stream)
+    stats.sort_stats("cumulative").print_stats(50)
+    print(stream.getvalue())
+
+    stream = StringIO()
+    stats = pstats.Stats(profiler, stream=stream)
+    stats.sort_stats("tottime").print_stats(50)
+    print(stream.getvalue())
+
+    stream = StringIO()
+    stats = pstats.Stats(profiler, stream=stream)
+    stats.print_callees("pokergpu.cfr.stage3")
     print(stream.getvalue())
 
 
