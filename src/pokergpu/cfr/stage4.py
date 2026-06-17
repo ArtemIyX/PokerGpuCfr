@@ -309,32 +309,63 @@ def _compute_node_showdown_equity(
             for row in showdown_input.rows
         )
 
-    chunks = _chunk_rows(showdown_input.rows, max_workers)
+    chunk_spans = _chunk_row_spans(showdown_input.rows, max_workers)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = executor.map(lambda chunk: _compute_node_showdown_equity_chunk(chunk, cache=cache), chunks)
+        results = executor.map(
+            lambda span: _compute_node_showdown_equity_block(showdown_input.rows, start=span[0], stop=span[1], cache=cache),
+            chunk_spans,
+        )
         flattened: list[float] = []
         for chunk_values in results:
-            flattened.extend(chunk_values)
+            flattened.extend(float(value) for value in chunk_values)
         return tuple(flattened)
 
 
-def _compute_node_showdown_equity_chunk(
+def _compute_node_showdown_equity_block(
     rows: tuple[ShowdownEquityNodeInput, ...],
     *,
+    start: int,
+    stop: int,
     cache: ShowdownEquityBoardCache,
-) -> tuple[float, ...]:
-    return tuple(compute_showdown_equity_node(row, cache=cache) for row in rows)
+) -> np.ndarray:
+    block_rows = rows[start:stop]
+    block_count = len(block_rows)
+    if block_count == 0:
+        return np.empty(0, dtype=np.float64)
+    positive_reach_block = np.stack([row.positive_opponent_reach for row in block_rows], axis=0)
+    total_equity = np.zeros(block_count, dtype=np.float64)
+    hero_count = np.zeros(block_count, dtype=np.float64)
+    for hero_index in cache.live_hand_indices:
+        feasible_opponents = cache.feasible_opponent_indices[hero_index]
+        if feasible_opponents.size == 0:
+            continue
+        feasible_weights = positive_reach_block[:, feasible_opponents]
+        win_mask = cache.feasible_opponent_win_masks[hero_index]
+        tie_mask = cache.feasible_opponent_tie_masks[hero_index]
+        win_weight = np.sum(feasible_weights * win_mask, axis=1, dtype=np.float64)
+        tie_weight = np.sum(feasible_weights * tie_mask, axis=1, dtype=np.float64)
+        hero_opponent_weight = win_weight + tie_weight
+        valid = hero_opponent_weight > 0.0
+        if not np.any(valid):
+            continue
+        hero_equity = win_weight + (0.5 * tie_weight)
+        total_equity[valid] += hero_equity[valid] / hero_opponent_weight[valid]
+        hero_count[valid] += 1.0
+    output = np.zeros(block_count, dtype=np.float64)
+    valid_rows = hero_count > 0.0
+    output[valid_rows] = total_equity[valid_rows] / hero_count[valid_rows]
+    return output
 
 
-def _chunk_rows(
+def _chunk_row_spans(
     rows: tuple[ShowdownEquityNodeInput, ...],
     worker_count: int,
-) -> tuple[tuple[ShowdownEquityNodeInput, ...], ...]:
+) -> tuple[tuple[int, int], ...]:
     row_count = len(rows)
     chunk_count = min(worker_count, row_count)
     chunk_size = (row_count + chunk_count - 1) // chunk_count
     return tuple(
-        rows[start : min(start + chunk_size, row_count)]
+        (start, min(start + chunk_size, row_count))
         for start in range(0, row_count, chunk_size)
     )
 
@@ -343,6 +374,21 @@ def compute_showdown_equity_node(
     row: ShowdownEquityNodeInput,
     *,
     cache: ShowdownEquityBoardCache,
+) -> float:
+    return _compute_showdown_equity_node_fast(row, cache)
+
+
+def _compute_showdown_equity_node_fast(
+    row: ShowdownEquityNodeInput,
+    cache: ShowdownEquityBoardCache,
+) -> float:
+    return _compute_showdown_equity_node_fast_with_positive_reach(row, cache, row.positive_opponent_reach)
+
+
+def _compute_showdown_equity_node_fast_with_positive_reach(
+    row: ShowdownEquityNodeInput,
+    cache: ShowdownEquityBoardCache,
+    positive_reach: np.ndarray,
 ) -> float:
     if len(row.opponent_reach) != private_hand_count():
         raise ValueError("opponent reach must match private hand count")
@@ -364,7 +410,7 @@ def compute_showdown_equity_node(
     opponent_weights = row.opponent_reach
     if opponent_weights.ndim != 1 or len(opponent_weights) != private_hand_count():
         raise ValueError("opponent reach must be one-dimensional and match private hand count")
-    opponent_total = float(np.sum(row.positive_opponent_reach, dtype=np.float64))
+    opponent_total = float(np.sum(positive_reach, dtype=np.float64))
     if opponent_total <= 0.0:
         return 0.0
 
@@ -375,12 +421,13 @@ def compute_showdown_equity_node(
         feasible_opponents = cache.feasible_opponent_indices[hero_index]
         if feasible_opponents.size == 0:
             continue
-        feasible_weights = row.positive_opponent_reach[feasible_opponents]
+        feasible_weights = positive_reach[feasible_opponents]
         if not np.any(feasible_weights):
             continue
         win_mask = cache.feasible_opponent_win_masks[hero_index]
         tie_mask = cache.feasible_opponent_tie_masks[hero_index]
-        win_weight, tie_weight = _sum_win_tie_weights(feasible_weights, win_mask, tie_mask)
+        win_weight = float(np.sum(feasible_weights * win_mask, dtype=np.float64))
+        tie_weight = float(np.sum(feasible_weights * tie_mask, dtype=np.float64))
         hero_equity = win_weight + (0.5 * tie_weight)
         hero_opponent_weight = win_weight + tie_weight
         if hero_opponent_weight > 0.0:
@@ -407,16 +454,6 @@ def _compare_scores(hero_score: int, opponent_score: int) -> float:
     if hero_score == opponent_score:
         return 0.5
     return 0.0
-
-
-def _sum_win_tie_weights(
-    feasible_weights: np.ndarray,
-    win_mask: np.ndarray,
-    tie_mask: np.ndarray,
-) -> tuple[float, float]:
-    win_weight = float(np.sum(feasible_weights * win_mask, dtype=np.float64))
-    tie_weight = float(np.sum(feasible_weights * tie_mask, dtype=np.float64))
-    return win_weight, tie_weight
 
 
 def _approximate_hand_strength_bucket(hand: PrivateHand, board: Board) -> int:
