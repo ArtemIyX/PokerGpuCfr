@@ -362,7 +362,9 @@ def _chunk_row_spans(
     worker_count: int,
 ) -> tuple[tuple[int, int], ...]:
     row_count = len(rows)
-    chunk_count = min(worker_count, row_count)
+    chunk_count = min(max(1, worker_count // 2), row_count)
+    if chunk_count <= 0:
+        chunk_count = 1
     chunk_size = (row_count + chunk_count - 1) // chunk_count
     return tuple(
         (start, min(start + chunk_size, row_count))
