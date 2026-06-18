@@ -71,7 +71,10 @@ def backward_cfv(stage6_input: BackwardCFVInput) -> BackwardCFVResult:
         if node_type is NodeType.LEAF:
             continue
         if node_type is NodeType.TERMINAL:
-            node_values[node_index] = float(stage6_input.showdown.node_showdown_equity[node_index])
+            payoff = tree.terminal_payoffs[node_index]
+            if payoff is None:
+                raise ValueError("terminal nodes must carry payoffs")
+            node_values[node_index] = float(payoff)
             continue
         if node_type is NodeType.CHANCE:
             node_values[node_index] = _combine_chance_node(tree, node_index, node_values)

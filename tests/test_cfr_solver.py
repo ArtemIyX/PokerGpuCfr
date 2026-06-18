@@ -5,6 +5,7 @@ import numpy as np
 
 from pokergpu.core.betting import Chips
 from pokergpu.cfr.solver import (
+    evaluate_backward_cfv,
     evaluate_leaf_node_values,
     SolverState,
     aggregate_root_action_values,
@@ -178,3 +179,24 @@ def test_evaluate_leaf_node_values_uses_leaf_batch_contract() -> None:
 
     assert result.node_ids == (0,)
     assert result.node_values == (0.25,)
+
+
+def test_evaluate_backward_cfv_runs_on_toy_pipeline_tree() -> None:
+    class _Kernel:
+        def __call__(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
+            values = np.full((len(batch.node_ids), LEAF_EVAL_OUTPUT_WIDTH), 0.5, dtype=np.float32)
+            return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values)
+
+    tree = make_toy_pipeline_tree()
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 0.5, 0.5, 0.5),
+        infoset_reach=(1.0, 0.5),
+        action_reach=((0.5, 0.5), (1.0,), (), ()),
+    )
+
+    result = evaluate_backward_cfv(tree, forward, backend=GpuLeafBackend(kernel=_Kernel()))
+
+    assert result.node_values.shape == (tree.node_count,)
+    assert result.infoset_values.shape == (2,)
+    assert result.node_values[2] == pytest.approx(0.5)
+    assert result.node_values[3] == pytest.approx(2.0)
