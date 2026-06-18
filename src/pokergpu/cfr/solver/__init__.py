@@ -1,6 +1,11 @@
 from .state import DenseCfrState, SolverIterationResult, SolverState
 from .aggregation import aggregate_action_values, aggregate_root_action_values
-from .evaluation import evaluate_leaf_node_values, evaluate_root_action_values, evaluate_showdown_node_values
+from .evaluation import (
+    evaluate_backward_cfv,
+    evaluate_leaf_node_values,
+    evaluate_root_action_values,
+    evaluate_showdown_node_values,
+)
 from .iteration import run_solver_iteration, run_tree_root_iteration
 from .infosets import DenseInfosetTable, build_dense_infoset_table
 from .kuhn import make_kuhn_public_tree
@@ -22,6 +27,7 @@ __all__ = [
     "evaluate_root_action_values",
     "evaluate_leaf_node_values",
     "evaluate_showdown_node_values",
+    "evaluate_backward_cfv",
     "ReachResult",
     "build_dense_infoset_table",
     "make_kuhn_public_tree",

@@ -16,6 +16,7 @@ from .solver import (
     DenseCfrState,
     SolverIterationResult,
     SolverState,
+    evaluate_backward_cfv,
     make_toy_public_tree,
     run_solver_iteration,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "backward_cfv",
     "SolverIterationResult",
     "SolverState",
+    "evaluate_backward_cfv",
     "make_toy_public_tree",
     "aggregate_prob_sum",
     "compute_opponent_reach",
