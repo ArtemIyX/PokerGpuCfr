@@ -11,6 +11,7 @@ from pokergpu.cfr.solver import (
     SolverState,
     aggregate_root_action_values,
     run_dense_backward_cfv_iteration,
+    run_dense_backward_cfv_iterations,
     make_toy_pipeline_tree,
     make_toy_public_tree,
     propagate_reach,
@@ -251,3 +252,30 @@ def test_run_dense_backward_cfv_iteration_updates_dense_state() -> None:
 
     assert result.regret_sums[0] == (-1.125, 0.375)
     assert result.strategy_sums[0] == (0.5, 0.5)
+
+
+def test_run_dense_backward_cfv_iterations_accumulates_changes() -> None:
+    class _Kernel:
+        def __call__(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
+            values = np.full((len(batch.node_ids), LEAF_EVAL_OUTPUT_WIDTH), 0.5, dtype=np.float32)
+            return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values)
+
+    tree = make_toy_pipeline_tree()
+    state = DenseCfrState(
+        regret_sums=((0.0, 0.0), (0.0,),),
+        strategy_sums=((0.0, 0.0), (0.0,),),
+    )
+
+    result = run_dense_backward_cfv_iterations(
+        tree,
+        state,
+        3,
+        backend=GpuLeafBackend(kernel=_Kernel()),
+        infoset_strategies={
+            InfosetId(0): (0.25, 0.75),
+            InfosetId(1): (1.0,),
+        },
+    )
+
+    assert result != state
+    assert result.regret_sums[0] == (-3.375, 1.125)

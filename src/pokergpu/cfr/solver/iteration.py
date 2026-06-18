@@ -88,3 +88,27 @@ def run_dense_backward_cfv_iteration(
         backward,
         infoset_table=table,
     )
+
+
+def run_dense_backward_cfv_iterations(
+    tree: PublicTree,
+    state: DenseCfrState,
+    iterations: int,
+    *,
+    board: Board | None = None,
+    backend: GpuLeafBackend | None = None,
+    infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
+    max_workers: int | None = None,
+) -> DenseCfrState:
+    assert iterations > 0, "iterations must be positive"
+    current = state
+    for _ in range(iterations):
+        current = run_dense_backward_cfv_iteration(
+            tree,
+            current,
+            board=board,
+            backend=backend,
+            infoset_strategies=infoset_strategies,
+            max_workers=max_workers,
+        )
+    return current

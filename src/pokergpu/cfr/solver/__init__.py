@@ -8,6 +8,7 @@ from .evaluation import (
 )
 from .iteration import (
     run_dense_backward_cfv_iteration,
+    run_dense_backward_cfv_iterations,
     run_solver_iteration,
     run_tree_backward_cfv_iteration,
     run_tree_root_iteration,
@@ -51,6 +52,7 @@ __all__ = [
     "run_leduc_root_iteration",
     "run_solver_iteration",
     "run_dense_backward_cfv_iteration",
+    "run_dense_backward_cfv_iterations",
     "run_tree_backward_cfv_iteration",
     "run_tree_root_iteration",
 ]
