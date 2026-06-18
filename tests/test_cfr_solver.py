@@ -222,3 +222,4 @@ def test_run_tree_backward_cfv_iteration_matches_solver_wrapper() -> None:
     assert result.node_values.shape == (tree.node_count,)
     assert result.infoset_values.shape == (2,)
     assert result.node_values[0] == pytest.approx(1.625)
+    assert result.action_values[0] == (0.5, 2.0)

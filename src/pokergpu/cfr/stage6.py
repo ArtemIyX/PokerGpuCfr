@@ -19,6 +19,7 @@ from pokergpu.tree.public_tree import PublicTree
 class BackwardCFVResult:
     node_values: NDArray[np.float64]
     infoset_values: NDArray[np.float64]
+    action_values: tuple[tuple[float, ...], ...]
 
     def __post_init__(self) -> None:
         if self.node_values.ndim != 1:
@@ -29,6 +30,8 @@ class BackwardCFVResult:
             raise ValueError("node values must use float64")
         if self.infoset_values.dtype != np.float64:
             raise ValueError("infoset values must use float64")
+        if len(self.action_values) != self.node_values.shape[0]:
+            raise ValueError("action values must align with node values")
 
 
 @dataclass(slots=True, frozen=True)
@@ -58,6 +61,7 @@ class BackwardCFVInput:
 def backward_cfv(stage6_input: BackwardCFVInput) -> BackwardCFVResult:
     tree = stage6_input.tree
     node_values = np.zeros(tree.node_count, dtype=np.float64)
+    action_values: list[tuple[float, ...]] = [() for _ in range(tree.node_count)]
     leaf_node_ids = stage6_input.aggregate.leaf_node_ids
 
     if len(leaf_node_ids) != len(stage6_input.leaf_values):
@@ -75,16 +79,21 @@ def backward_cfv(stage6_input: BackwardCFVInput) -> BackwardCFVResult:
             if payoff is None:
                 raise ValueError("terminal nodes must carry payoffs")
             node_values[node_index] = float(payoff)
+            action_values[node_index] = ()
             continue
         if node_type is NodeType.CHANCE:
-            node_values[node_index] = _combine_chance_node(tree, node_index, node_values)
+            child_values = _child_values(tree, node_index, node_values)
+            node_values[node_index] = _combine_chance_node(tree, node_index, child_values)
+            action_values[node_index] = child_values
             continue
+        child_values = _child_values(tree, node_index, node_values)
         node_values[node_index] = _combine_player_node(
             tree,
             node_index,
-            node_values,
+            child_values,
             stage6_input.forward.action_reach,
         )
+        action_values[node_index] = child_values
 
     infoset_table = build_dense_infoset_table(tree)
     infoset_values = np.zeros(infoset_table.infoset_count, dtype=np.float64)
@@ -102,13 +111,17 @@ def backward_cfv(stage6_input: BackwardCFVInput) -> BackwardCFVResult:
         if total > 0.0:
             infoset_values[infoset_index] /= total
 
-    return BackwardCFVResult(node_values=node_values, infoset_values=infoset_values)
+    return BackwardCFVResult(
+        node_values=node_values,
+        infoset_values=infoset_values,
+        action_values=tuple(action_values),
+    )
 
 
 def _combine_player_node(
     tree: PublicTree,
     node_index: int,
-    node_values: NDArray[np.float64],
+    child_values: tuple[float, ...],
     action_reach: tuple[tuple[float, ...], ...],
 ) -> float:
     child_links = tree.child_links(NodeId(node_index))
@@ -118,22 +131,32 @@ def _combine_player_node(
     if len(strategy) != len(child_links):
         raise ValueError("action reach must match the node branching factor")
     total = 0.0
-    for action_index, link in enumerate(child_links):
-        total += float(strategy[action_index]) * float(node_values[int(link.child)])
+    for action_index, value in enumerate(child_values):
+        total += float(strategy[action_index]) * float(value)
     return total
 
 
 def _combine_chance_node(
     tree: PublicTree,
     node_index: int,
-    node_values: NDArray[np.float64],
+    child_values: tuple[float, ...],
 ) -> float:
     child_links = tree.child_links(NodeId(node_index))
     if not child_links:
         raise ValueError("chance nodes must have children")
+    if len(child_values) != len(child_links):
+        raise ValueError("child values must match the node branching factor")
     total = 0.0
-    for link in child_links:
+    for link, child_value in zip(child_links, child_values, strict=True):
         if link.chance_prob is None:
             raise ValueError("chance children must define probabilities")
-        total += float(link.chance_prob) * float(node_values[int(link.child)])
+        total += float(link.chance_prob) * float(child_value)
     return total
+
+
+def _child_values(
+    tree: PublicTree,
+    node_index: int,
+    node_values: NDArray[np.float64],
+) -> tuple[float, ...]:
+    return tuple(float(node_values[int(link.child)]) for link in tree.child_links(NodeId(node_index)))

@@ -59,6 +59,7 @@ def test_backward_cfv_combines_leaf_showdown_and_infoset_values() -> None:
     assert result.node_values[2] == 2.0
     assert result.node_values[0] == 1.875
     assert result.infoset_values[0] == 1.875
+    assert result.action_values[0] == (1.5, 2.0)
 
 
 def test_backward_cfv_propagates_through_chance_nodes() -> None:
@@ -104,6 +105,7 @@ def test_backward_cfv_propagates_through_chance_nodes() -> None:
     assert result.node_values[0] == pytest.approx(1.0)
     assert result.node_values[1] == pytest.approx(4.0)
     assert result.node_values[2] == pytest.approx(0.0)
+    assert result.action_values[0] == (4.0, 0.0)
 
 
 def test_update_regret_still_matches_stage7_contract() -> None:
