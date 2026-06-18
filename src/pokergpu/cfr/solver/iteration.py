@@ -5,7 +5,10 @@ from collections.abc import Mapping
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage1 import propagate_forward
 from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
+from pokergpu.cfr.infosets import build_dense_infoset_table
 from pokergpu.cfr.stage6 import BackwardCFVResult
+from pokergpu.cfr.stage7 import apply_dense_backward_cfv_update
+from pokergpu.cfr.solver.state import DenseCfrState
 from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import InfosetId
 from pokergpu.tree.public_tree import PublicTree
@@ -51,7 +54,7 @@ def run_tree_backward_cfv_iteration(
     backend: GpuLeafBackend | None = None,
     infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
-) -> BackwardCFVResult:
+    ) -> BackwardCFVResult:
     forward = propagate_forward(tree, infoset_strategies=infoset_strategies)
     return evaluate_backward_cfv(
         tree,
@@ -59,4 +62,29 @@ def run_tree_backward_cfv_iteration(
         board=board,
         backend=backend,
         max_workers=max_workers,
+    )
+
+
+def run_dense_backward_cfv_iteration(
+    tree: PublicTree,
+    state: DenseCfrState,
+    *,
+    board: Board | None = None,
+    backend: GpuLeafBackend | None = None,
+    infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
+    max_workers: int | None = None,
+) -> DenseCfrState:
+    table = build_dense_infoset_table(tree)
+    forward = propagate_forward(tree, infoset_strategies=infoset_strategies)
+    backward = evaluate_backward_cfv(
+        tree,
+        forward,
+        board=board,
+        backend=backend,
+        max_workers=max_workers,
+    )
+    return apply_dense_backward_cfv_update(
+        state,
+        backward,
+        infoset_table=table,
     )

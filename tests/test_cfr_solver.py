@@ -5,10 +5,12 @@ import numpy as np
 
 from pokergpu.core.betting import Chips
 from pokergpu.cfr.solver import (
+    DenseCfrState,
     evaluate_backward_cfv,
     evaluate_leaf_node_values,
     SolverState,
     aggregate_root_action_values,
+    run_dense_backward_cfv_iteration,
     make_toy_pipeline_tree,
     make_toy_public_tree,
     propagate_reach,
@@ -223,3 +225,29 @@ def test_run_tree_backward_cfv_iteration_matches_solver_wrapper() -> None:
     assert result.infoset_values.shape == (2,)
     assert result.node_values[0] == pytest.approx(1.625)
     assert result.action_values[0] == (0.5, 2.0)
+
+
+def test_run_dense_backward_cfv_iteration_updates_dense_state() -> None:
+    class _Kernel:
+        def __call__(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
+            values = np.full((len(batch.node_ids), LEAF_EVAL_OUTPUT_WIDTH), 0.5, dtype=np.float32)
+            return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values)
+
+    tree = make_toy_pipeline_tree()
+    state = DenseCfrState(
+        regret_sums=((0.0, 0.0), (0.0,),),
+        strategy_sums=((0.0, 0.0), (0.0,),),
+    )
+
+    result = run_dense_backward_cfv_iteration(
+        tree,
+        state,
+        backend=GpuLeafBackend(kernel=_Kernel()),
+        infoset_strategies={
+            InfosetId(0): (0.25, 0.75),
+            InfosetId(1): (1.0,),
+        },
+    )
+
+    assert result.regret_sums[0] == (-1.125, 0.375)
+    assert result.strategy_sums[0] == (0.5, 0.5)

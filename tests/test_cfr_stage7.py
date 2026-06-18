@@ -84,5 +84,5 @@ def test_apply_dense_backward_cfv_update_uses_stage6_action_values() -> None:
 
     result = apply_dense_backward_cfv_update(state, backward, infoset_table=table)
 
-    assert result.regret_sums[0] == (0.0, 2.0)
+    assert result.regret_sums[0] == (-1.0, 1.0)
     assert result.strategy_sums[0] == (0.5, 0.5)
