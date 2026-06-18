@@ -19,6 +19,7 @@ from .solver import (
     evaluate_backward_cfv,
     make_toy_public_tree,
     run_solver_iteration,
+    run_tree_backward_cfv_iteration,
 )
 from .stage7 import regret_matching, update_average_strategy, update_regret
 
@@ -48,6 +49,7 @@ __all__ = [
     "propagate_forward",
     "regret_matching",
     "run_solver_iteration",
+    "run_tree_backward_cfv_iteration",
     "update_average_strategy",
     "update_regret",
 ]

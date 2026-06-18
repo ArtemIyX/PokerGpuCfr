@@ -6,7 +6,7 @@ from .evaluation import (
     evaluate_root_action_values,
     evaluate_showdown_node_values,
 )
-from .iteration import run_solver_iteration, run_tree_root_iteration
+from .iteration import run_solver_iteration, run_tree_backward_cfv_iteration, run_tree_root_iteration
 from .infosets import DenseInfosetTable, build_dense_infoset_table
 from .kuhn import make_kuhn_public_tree
 from .kuhn_solver import run_kuhn_dense_iteration, run_kuhn_dense_iterations, run_kuhn_root_iteration
@@ -45,5 +45,6 @@ __all__ = [
     "run_kuhn_root_iteration",
     "run_leduc_root_iteration",
     "run_solver_iteration",
+    "run_tree_backward_cfv_iteration",
     "run_tree_root_iteration",
 ]

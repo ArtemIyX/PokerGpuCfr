@@ -13,6 +13,7 @@ from pokergpu.cfr.solver import (
     make_toy_public_tree,
     propagate_reach,
     propagate_opponent_reach,
+    run_tree_backward_cfv_iteration,
     run_tree_root_iteration,
     evaluate_showdown_node_values,
 )
@@ -200,3 +201,11 @@ def test_evaluate_backward_cfv_runs_on_toy_pipeline_tree() -> None:
     assert result.infoset_values.shape == (2,)
     assert result.node_values[2] == pytest.approx(0.5)
     assert result.node_values[3] == pytest.approx(2.0)
+
+
+def test_run_tree_backward_cfv_iteration_matches_solver_wrapper() -> None:
+    tree = make_toy_pipeline_tree()
+    result = run_tree_backward_cfv_iteration(tree)
+
+    assert result.node_values.shape == (tree.node_count,)
+    assert result.infoset_values.shape == (2,)

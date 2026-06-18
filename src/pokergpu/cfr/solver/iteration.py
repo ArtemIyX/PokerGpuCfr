@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.cfr.stage1 import propagate_forward
+from pokergpu.cfr.stage6 import BackwardCFVResult
+from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import PublicTree
 
+from .evaluation import evaluate_backward_cfv
 from .evaluation import evaluate_root_action_values
 from .state import SolverIterationResult, SolverState
 from .strategy_update import apply_solver_strategy_update
@@ -33,3 +38,13 @@ def run_tree_root_iteration(
         evaluate_root_action_values(tree, max_workers=max_workers),
         reach_weight=reach_weight,
     )
+
+
+def run_tree_backward_cfv_iteration(
+    tree: PublicTree,
+    *,
+    board: Board | None = None,
+    max_workers: int | None = None,
+) -> BackwardCFVResult:
+    forward = propagate_forward(tree)
+    return evaluate_backward_cfv(tree, forward, board=board, max_workers=max_workers)
