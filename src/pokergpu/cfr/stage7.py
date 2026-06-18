@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from pokergpu.cfr.infosets import DenseInfosetTable
+from pokergpu.cfr.stage1 import normalize_strategy
+from pokergpu.cfr.stage6 import BackwardCFVResult
 from .solver.state import DenseCfrState
 
 __all__ = [
     "DenseCfrState",
+    "apply_dense_backward_cfv_update",
     "regret_matching",
     "update_average_strategy",
     "update_regret",
@@ -43,4 +47,49 @@ def update_average_strategy(
     return tuple(
         old_sum + reach_weight * action_prob
         for old_sum, action_prob in zip(strategy_sums, strategy, strict=True)
+    )
+
+
+def apply_dense_backward_cfv_update(
+    state: DenseCfrState,
+    backward: BackwardCFVResult,
+    *,
+    infoset_table: DenseInfosetTable,
+    reach_weights: tuple[float, ...] | None = None,
+) -> DenseCfrState:
+    if len(state.regret_sums) != infoset_table.infoset_count:
+        raise ValueError("dense state must match infoset count")
+    if len(backward.infoset_values) != infoset_table.infoset_count:
+        raise ValueError("backward CFV infoset values must match infoset count")
+
+    reach_vector = reach_weights or tuple(1.0 for _ in range(infoset_table.infoset_count))
+    if len(reach_vector) != infoset_table.infoset_count:
+        raise ValueError("reach weights must match infoset count")
+
+    new_regrets: list[tuple[float, ...]] = [() for _ in range(infoset_table.infoset_count)]
+    new_strategy_sums: list[tuple[float, ...]] = [() for _ in range(infoset_table.infoset_count)]
+
+    for infoset_id, node_index in enumerate(infoset_table.infoset_to_node):
+        if node_index < 0:
+            continue
+        regrets = state.regret_sums[infoset_id]
+        strategy_sums = state.strategy_sums[infoset_id]
+        values = backward.action_values[node_index]
+        if len(regrets) != len(values):
+            raise ValueError("action values must match regret row width")
+        if len(strategy_sums) != len(values):
+            raise ValueError("strategy row must match action value width")
+
+        node_value = float(backward.infoset_values[infoset_id])
+        strategy = normalize_strategy(regret_matching(regrets))
+        new_regrets[infoset_id] = update_regret(regrets, values, node_value)
+        new_strategy_sums[infoset_id] = update_average_strategy(
+            strategy_sums,
+            strategy,
+            reach_vector[infoset_id],
+        )
+
+    return DenseCfrState(
+        regret_sums=tuple(new_regrets),
+        strategy_sums=tuple(new_strategy_sums),
     )

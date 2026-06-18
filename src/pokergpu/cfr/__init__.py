@@ -21,7 +21,7 @@ from .solver import (
     run_solver_iteration,
     run_tree_backward_cfv_iteration,
 )
-from .stage7 import regret_matching, update_average_strategy, update_regret
+from .stage7 import apply_dense_backward_cfv_update, regret_matching, update_average_strategy, update_regret
 
 __all__ = [
     "DenseCfrState",
@@ -45,6 +45,7 @@ __all__ = [
     "build_showdown_equity_input",
     "compute_showdown_equity",
     "compute_showdown_equity_node",
+    "apply_dense_backward_cfv_update",
     "normalize_strategy",
     "propagate_forward",
     "regret_matching",

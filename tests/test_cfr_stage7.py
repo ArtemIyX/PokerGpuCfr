@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
+from pokergpu.cfr.stage1 import ForwardProfileResult
+from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.cfr.stage3 import compute_opponent_reach
+from pokergpu.cfr.stage4 import ShowdownEquityBatchInput, ShowdownEquityResult
+from pokergpu.cfr.stage6 import BackwardCFVInput, backward_cfv
+from pokergpu.cfr.stage7 import apply_dense_backward_cfv_update
 from pokergpu.cfr.stage7 import (
     DenseCfrState,
     regret_matching,
     update_average_strategy,
     update_regret,
 )
+from pokergpu.cfr.solver import build_dense_infoset_table
+from pokergpu.core.betting import Chips
+from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
 def test_regret_matching_uses_positive_regrets() -> None:
@@ -29,3 +39,50 @@ def test_update_average_strategy_accumulates_reach_weight() -> None:
 def test_dense_cfr_state_rejects_mismatched_shapes() -> None:
     with pytest.raises(ValueError):
         DenseCfrState(regret_sums=((0.0, 1.0),), strategy_sums=((0.0,),))
+
+
+def test_apply_dense_backward_cfv_update_uses_stage6_action_values() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+        ),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(2)),
+        ),
+        infoset_ids=(InfosetId(0), None, None),
+        terminal_payoffs=(None, Chips(1), Chips(3)),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 0.5, 0.5),
+        infoset_reach=(1.0,),
+        action_reach=((0.5, 0.5), (), ()),
+    )
+    aggregate = aggregate_prob_sum(tree, forward)
+    opponent = compute_opponent_reach(tree, aggregate)
+    backward = backward_cfv(
+        BackwardCFVInput(
+            tree=tree,
+            forward=forward,
+            aggregate=aggregate,
+            opponent_reach=opponent,
+            showdown=ShowdownEquityResult(
+                node_showdown_equity=(0.0, 1.0, 3.0),
+                node_showdown_equity_bb=(0.0, 1.0, 3.0),
+                input_rows=ShowdownEquityBatchInput(rows=()),
+                output_rows=(),
+            ),
+            leaf_values=np.asarray((), dtype=np.float64),
+        )
+    )
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(regret_sums=((0.0, 0.0),), strategy_sums=((0.0, 0.0),))
+
+    result = apply_dense_backward_cfv_update(state, backward, infoset_table=table)
+
+    assert result.regret_sums[0] == (0.0, 2.0)
+    assert result.strategy_sums[0] == (0.5, 0.5)
