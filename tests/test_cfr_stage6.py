@@ -108,5 +108,55 @@ def test_backward_cfv_propagates_through_chance_nodes() -> None:
     assert result.action_values[0] == (4.0, 0.0)
 
 
+def test_backward_cfv_with_workers_matches_serial_result() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.PLAYER1,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+        ),
+        first_child=(0, 2, 4, 4, 4, 4),
+        child_count=(2, 2, 0, 0, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(2)),
+            ChildLink(child=NodeId(3)),
+            ChildLink(child=NodeId(4)),
+        ),
+        infoset_ids=(InfosetId(0), InfosetId(1), None, None, None, None),
+        terminal_payoffs=(None, None, Chips(1), Chips(-1), Chips(2), Chips(-2)),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 0.5, 0.25, 0.25, 0.25, 0.25),
+        infoset_reach=(1.0, 0.5),
+        action_reach=((0.5, 0.5), (0.5, 0.5), (), (), (), ()),
+    )
+    aggregate = aggregate_prob_sum(tree, forward)
+    opponent = compute_opponent_reach(tree, aggregate)
+    showdown = ShowdownEquityResult(
+        node_showdown_equity=(0.0, 0.0, 1.0, -1.0, 2.0, -2.0),
+        node_showdown_equity_bb=(0.0, 0.0, 1.0, -1.0, 2.0, -2.0),
+        input_rows=ShowdownEquityBatchInput(rows=()),
+        output_rows=(),
+    )
+    stage6_input = BackwardCFVInput(
+        tree=tree,
+        forward=forward,
+        aggregate=aggregate,
+        opponent_reach=opponent,
+        showdown=showdown,
+        leaf_values=np.asarray((), dtype=np.float64),
+    )
+
+    serial = backward_cfv(stage6_input, max_workers=1)
+    threaded = backward_cfv(stage6_input, max_workers=4)
+
+    assert threaded.node_values.tolist() == serial.node_values.tolist()
+    assert threaded.action_values == serial.action_values
+
+
 def test_update_regret_still_matches_stage7_contract() -> None:
     assert update_regret((1.0, 2.0), (3.0, 4.0), 2.5) == (1.5, 3.5)

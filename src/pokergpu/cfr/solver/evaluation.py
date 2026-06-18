@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Executor
 import numpy as np
 
 from pokergpu.cfr.leaf_eval import LeafEvalResult
@@ -61,6 +62,7 @@ def evaluate_backward_cfv(
     board: Board | None = None,
     backend: GpuLeafBackend | None = None,
     max_workers: int | None = None,
+    executor: Executor | None = None,
 ) -> BackwardCFVResult:
     aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
     opponent_reach = compute_opponent_reach(tree, aggregate, max_workers=max_workers)
@@ -97,7 +99,7 @@ def evaluate_backward_cfv(
         showdown=showdown,
         leaf_values=leaf_values,
     )
-    return backward_cfv(backward_input)
+    return backward_cfv(backward_input, max_workers=max_workers, executor=executor)
 
 
 def evaluate_root_action_values(

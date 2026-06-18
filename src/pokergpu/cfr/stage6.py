@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import Executor
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
@@ -58,8 +61,20 @@ class BackwardCFVInput:
             raise ValueError("leaf values must use float64")
 
 
-def backward_cfv(stage6_input: BackwardCFVInput) -> BackwardCFVResult:
+@dataclass(slots=True, frozen=True)
+class Stage6Layout:
+    child_nodes: tuple[tuple[int, ...], ...]
+    node_levels: tuple[tuple[int, ...], ...]
+
+
+def backward_cfv(
+    stage6_input: BackwardCFVInput,
+    *,
+    max_workers: int | None = None,
+    executor: Executor | None = None,
+) -> BackwardCFVResult:
     tree = stage6_input.tree
+    layout = _get_stage6_layout(tree)
     node_values = np.zeros(tree.node_count, dtype=np.float64)
     action_values: list[tuple[float, ...]] = [() for _ in range(tree.node_count)]
     leaf_node_ids = stage6_input.aggregate.leaf_node_ids
@@ -70,30 +85,48 @@ def backward_cfv(stage6_input: BackwardCFVInput) -> BackwardCFVResult:
     for leaf_index, node_id in enumerate(leaf_node_ids):
         node_values[int(node_id)] = float(stage6_input.leaf_values[leaf_index])
 
-    for node_index in range(tree.node_count - 1, -1, -1):
-        node_type = tree.node_types[node_index]
-        if node_type is NodeType.LEAF:
-            continue
-        if node_type is NodeType.TERMINAL:
-            payoff = tree.terminal_payoffs[node_index]
-            if payoff is None:
-                raise ValueError("terminal nodes must carry payoffs")
-            node_values[node_index] = float(payoff)
-            action_values[node_index] = ()
-            continue
-        if node_type is NodeType.CHANCE:
-            child_values = _child_values(tree, node_index, node_values)
-            node_values[node_index] = _combine_chance_node(tree, node_index, child_values)
-            action_values[node_index] = child_values
-            continue
-        child_values = _child_values(tree, node_index, node_values)
-        node_values[node_index] = _combine_player_node(
-            tree,
-            node_index,
-            child_values,
-            stage6_input.forward.action_reach,
-        )
-        action_values[node_index] = child_values
+    if max_workers is None or max_workers <= 1:
+        for level in layout.node_levels:
+            for node_index in level:
+                _evaluate_stage6_node(
+                    tree=tree,
+                    node_index=node_index,
+                    node_values=node_values,
+                    action_values=action_values,
+                    action_reach=stage6_input.forward.action_reach,
+                    child_nodes=layout.child_nodes[node_index],
+                )
+    elif executor is not None:
+        for level in layout.node_levels:
+            chunk_bounds = _chunk_bounds(len(level), max_workers)
+            tasks = [
+                (
+                    level[start:stop],
+                    tree,
+                    node_values,
+                    action_values,
+                    stage6_input.forward.action_reach,
+                    layout.child_nodes,
+                )
+                for start, stop in chunk_bounds
+            ]
+            list(executor.map(_evaluate_stage6_chunk, tasks))
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for level in layout.node_levels:
+                chunk_bounds = _chunk_bounds(len(level), max_workers)
+                tasks = [
+                    (
+                        level[start:stop],
+                        tree,
+                        node_values,
+                        action_values,
+                        stage6_input.forward.action_reach,
+                        layout.child_nodes,
+                    )
+                    for start, stop in chunk_bounds
+                ]
+                list(executor.map(_evaluate_stage6_chunk, tasks))
 
     infoset_table = build_dense_infoset_table(tree)
     infoset_values = np.zeros(infoset_table.infoset_count, dtype=np.float64)
@@ -136,27 +169,102 @@ def _combine_player_node(
     return total
 
 
-def _combine_chance_node(
-    tree: PublicTree,
-    node_index: int,
-    child_values: tuple[float, ...],
-) -> float:
-    child_links = tree.child_links(NodeId(node_index))
-    if not child_links:
-        raise ValueError("chance nodes must have children")
-    if len(child_values) != len(child_links):
-        raise ValueError("child values must match the node branching factor")
-    total = 0.0
-    for link, child_value in zip(child_links, child_values, strict=True):
-        if link.chance_prob is None:
-            raise ValueError("chance children must define probabilities")
-        total += float(link.chance_prob) * float(child_value)
-    return total
-
-
-def _child_values(
+def _evaluate_stage6_node(
+    *,
     tree: PublicTree,
     node_index: int,
     node_values: NDArray[np.float64],
-) -> tuple[float, ...]:
-    return tuple(float(node_values[int(link.child)]) for link in tree.child_links(NodeId(node_index)))
+    action_values: list[tuple[float, ...]],
+    action_reach: tuple[tuple[float, ...], ...],
+    child_nodes: tuple[int, ...],
+) -> None:
+    node_type = tree.node_types[node_index]
+    if node_type is NodeType.LEAF:
+        return
+    if node_type is NodeType.TERMINAL:
+        payoff = tree.terminal_payoffs[node_index]
+        if payoff is None:
+            raise ValueError("terminal nodes must carry payoffs")
+        node_values[node_index] = float(payoff)
+        action_values[node_index] = ()
+        return
+    if not child_nodes:
+        raise ValueError("non-terminal nodes must have children")
+    child_values = tuple(float(node_values[child_index]) for child_index in child_nodes)
+    action_values[node_index] = child_values
+    if node_type is NodeType.CHANCE:
+        child_links = tree.child_links(NodeId(node_index))
+        total = 0.0
+        for link, child_value in zip(child_links, child_values, strict=True):
+            if link.chance_prob is None:
+                raise ValueError("chance children must define probabilities")
+            total += float(link.chance_prob) * float(child_value)
+        node_values[node_index] = total
+        return
+    node_values[node_index] = _combine_player_node(
+        tree,
+        node_index,
+        child_values,
+        action_reach,
+    )
+
+
+def _evaluate_stage6_chunk(
+    args: tuple[
+        tuple[int, ...],
+        PublicTree,
+        NDArray[np.float64],
+        list[tuple[float, ...]],
+        tuple[tuple[float, ...], ...],
+        tuple[tuple[int, ...], ...],
+    ],
+) -> None:
+    level, tree, node_values, action_values, action_reach, child_nodes = args
+    for node_index in level:
+        _evaluate_stage6_node(
+            tree=tree,
+            node_index=node_index,
+            node_values=node_values,
+            action_values=action_values,
+            action_reach=action_reach,
+            child_nodes=child_nodes[node_index],
+        )
+
+
+@lru_cache(maxsize=32)
+def _get_stage6_layout(tree: PublicTree) -> Stage6Layout:
+    child_nodes = tuple(
+        tuple(int(link.child) for link in tree.child_links(NodeId(node_index)))
+        for node_index in range(tree.node_count)
+    )
+    levels = _build_node_levels(tree)
+    return Stage6Layout(child_nodes=child_nodes, node_levels=levels)
+
+
+def _build_node_levels(tree: PublicTree) -> tuple[tuple[int, ...], ...]:
+    levels: list[list[int]] = []
+    current = [0]
+    seen = {0}
+    while current:
+        levels.append(current)
+        next_level: list[int] = []
+        for node_index in current:
+            for child_index in tree.child_links(NodeId(node_index)):
+                child = int(child_index.child)
+                if child in seen:
+                    continue
+                seen.add(child)
+                next_level.append(child)
+        current = next_level
+    levels.reverse()
+    return tuple(tuple(level) for level in levels)
+
+
+def _chunk_bounds(count: int, workers: int) -> tuple[tuple[int, int], ...]:
+    if count <= 0:
+        return ()
+    chunk_size = (count + workers - 1) // workers
+    return tuple(
+        (start, min(start + chunk_size, count))
+        for start in range(0, count, chunk_size)
+    )

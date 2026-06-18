@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from concurrent.futures import Executor
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage1 import propagate_forward
@@ -54,6 +55,7 @@ def run_tree_backward_cfv_iteration(
     backend: GpuLeafBackend | None = None,
     infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
+    executor: Executor | None = None,
     ) -> BackwardCFVResult:
     forward = propagate_forward(tree, infoset_strategies=infoset_strategies)
     return evaluate_backward_cfv(
@@ -62,6 +64,7 @@ def run_tree_backward_cfv_iteration(
         board=board,
         backend=backend,
         max_workers=max_workers,
+        executor=executor,
     )
 
 
@@ -73,6 +76,7 @@ def run_dense_backward_cfv_iteration(
     backend: GpuLeafBackend | None = None,
     infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
+    executor: Executor | None = None,
 ) -> DenseCfrState:
     table = build_dense_infoset_table(tree)
     forward = propagate_forward(tree, infoset_strategies=infoset_strategies)
@@ -82,11 +86,14 @@ def run_dense_backward_cfv_iteration(
         board=board,
         backend=backend,
         max_workers=max_workers,
+        executor=executor,
     )
     return apply_dense_backward_cfv_update(
         state,
         backward,
         infoset_table=table,
+        max_workers=max_workers,
+        executor=executor,
     )
 
 
@@ -99,6 +106,7 @@ def run_dense_backward_cfv_iterations(
     backend: GpuLeafBackend | None = None,
     infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
+    executor: Executor | None = None,
 ) -> DenseCfrState:
     assert iterations > 0, "iterations must be positive"
     current = state
@@ -110,5 +118,6 @@ def run_dense_backward_cfv_iterations(
             backend=backend,
             infoset_strategies=infoset_strategies,
             max_workers=max_workers,
+            executor=executor,
         )
     return current
