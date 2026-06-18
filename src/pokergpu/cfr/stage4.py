@@ -64,6 +64,8 @@ class ShowdownEquityBoardCache:
     feasible_opponent_values: tuple[np.ndarray, ...]
     feasible_opponent_win_masks: tuple[np.ndarray, ...]
     feasible_opponent_tie_masks: tuple[np.ndarray, ...]
+    feasible_opponent_win_mask_matrix: np.ndarray
+    feasible_opponent_tie_mask_matrix: np.ndarray
     feasible_opponent_offsets: np.ndarray
     feasible_opponent_flat: np.ndarray
     hand_card_masks: tuple[int, ...]
@@ -91,6 +93,10 @@ class ShowdownEquityBoardCache:
             raise ValueError("feasible opponent win masks must match private hand count")
         if len(self.feasible_opponent_tie_masks) != private_hand_count():
             raise ValueError("feasible opponent tie masks must match private hand count")
+        if self.feasible_opponent_win_mask_matrix.shape != (private_hand_count(), private_hand_count()):
+            raise ValueError("feasible opponent win mask matrix must be square and match hand count")
+        if self.feasible_opponent_tie_mask_matrix.shape != (private_hand_count(), private_hand_count()):
+            raise ValueError("feasible opponent tie mask matrix must be square and match hand count")
         if self.feasible_opponent_offsets.ndim != 1:
             raise ValueError("feasible opponent offsets must be one-dimensional")
         if self.feasible_opponent_flat.ndim != 1:
@@ -196,6 +202,8 @@ def _build_showdown_equity_board_cache_uncached(
     feasible_opponent_values: list[np.ndarray] = [np.empty(0, dtype=np.int32) for _ in range(private_hand_count())]
     feasible_opponent_win_masks: list[np.ndarray] = [np.empty(0, dtype=np.bool_) for _ in range(private_hand_count())]
     feasible_opponent_tie_masks: list[np.ndarray] = [np.empty(0, dtype=np.bool_) for _ in range(private_hand_count())]
+    feasible_opponent_win_mask_matrix = np.zeros((private_hand_count(), private_hand_count()), dtype=np.float64)
+    feasible_opponent_tie_mask_matrix = np.zeros((private_hand_count(), private_hand_count()), dtype=np.float64)
     live_indices = np.asarray(live_hand_indices, dtype=np.int32)
     hand_masks = hand_card_masks_array
     for hero_index in range(private_hand_count()):
@@ -213,8 +221,12 @@ def _build_showdown_equity_board_cache_uncached(
             else hand_buckets_array[opponent_indices]
         )
         hero_value = hand_scores_array[hero_index] if board.street is Street.RIVER else hand_buckets_array[hero_index]
-        feasible_opponent_win_masks[hero_index] = feasible_opponent_values[hero_index] > hero_value
-        feasible_opponent_tie_masks[hero_index] = feasible_opponent_values[hero_index] == hero_value
+        win_mask = feasible_opponent_values[hero_index] > hero_value
+        tie_mask = feasible_opponent_values[hero_index] == hero_value
+        feasible_opponent_win_masks[hero_index] = win_mask
+        feasible_opponent_tie_masks[hero_index] = tie_mask
+        feasible_opponent_win_mask_matrix[hero_index, opponent_indices] = win_mask.astype(np.float64, copy=False)
+        feasible_opponent_tie_mask_matrix[hero_index, opponent_indices] = tie_mask.astype(np.float64, copy=False)
     feasible_opponent_indices = tuple(feasible_opponent_rows)
     feasible_opponent_values_tuple = tuple(feasible_opponent_values)
     feasible_opponent_win_masks_tuple = tuple(feasible_opponent_win_masks)
@@ -246,6 +258,8 @@ def _build_showdown_equity_board_cache_uncached(
         feasible_opponent_values=feasible_opponent_values_tuple,
         feasible_opponent_win_masks=feasible_opponent_win_masks_tuple,
         feasible_opponent_tie_masks=feasible_opponent_tie_masks_tuple,
+        feasible_opponent_win_mask_matrix=feasible_opponent_win_mask_matrix,
+        feasible_opponent_tie_mask_matrix=feasible_opponent_tie_mask_matrix,
         feasible_opponent_offsets=feasible_opponent_offsets,
         feasible_opponent_flat=feasible_opponent_flat,
         hand_card_masks=hand_card_masks,
@@ -335,15 +349,11 @@ def _compute_node_showdown_equity_block(
     positive_reach_block = np.stack([row.positive_opponent_reach for row in block_rows], axis=0)
     total_equity = np.zeros(block_count, dtype=np.float64)
     hero_count = np.zeros(block_count, dtype=np.float64)
+    win_weight_block = positive_reach_block @ cache.feasible_opponent_win_mask_matrix.T
+    tie_weight_block = positive_reach_block @ cache.feasible_opponent_tie_mask_matrix.T
     for hero_index in cache.live_hand_indices:
-        feasible_opponents = cache.feasible_opponent_indices[hero_index]
-        if feasible_opponents.size == 0:
-            continue
-        feasible_weights = positive_reach_block[:, feasible_opponents]
-        win_mask = cache.feasible_opponent_win_masks[hero_index]
-        tie_mask = cache.feasible_opponent_tie_masks[hero_index]
-        win_weight = np.sum(feasible_weights * win_mask, axis=1, dtype=np.float64)
-        tie_weight = np.sum(feasible_weights * tie_mask, axis=1, dtype=np.float64)
+        win_weight = win_weight_block[:, hero_index]
+        tie_weight = tie_weight_block[:, hero_index]
         hero_opponent_weight = win_weight + tie_weight
         valid = hero_opponent_weight > 0.0
         if not np.any(valid):
@@ -362,9 +372,7 @@ def _chunk_row_spans(
     worker_count: int,
 ) -> tuple[tuple[int, int], ...]:
     row_count = len(rows)
-    chunk_count = min(max(1, worker_count // 2), row_count)
-    if chunk_count <= 0:
-        chunk_count = 1
+    chunk_count = min(4, row_count)
     chunk_size = (row_count + chunk_count - 1) // chunk_count
     return tuple(
         (start, min(start + chunk_size, row_count))
