@@ -11,6 +11,7 @@ from .stage4 import (
     compute_showdown_equity,
     compute_showdown_equity_node,
 )
+from .stage6 import BackwardCFVInput, BackwardCFVResult, backward_cfv
 from .solver import (
     DenseCfrState,
     SolverIterationResult,
@@ -30,6 +31,9 @@ __all__ = [
     "ShowdownEquityNodeInput",
     "ShowdownEquityNodeOutput",
     "ShowdownEquityResult",
+    "BackwardCFVInput",
+    "BackwardCFVResult",
+    "backward_cfv",
     "SolverIterationResult",
     "SolverState",
     "make_toy_public_tree",
