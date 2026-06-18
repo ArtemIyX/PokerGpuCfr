@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage1 import propagate_forward
+from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
 from pokergpu.cfr.stage6 import BackwardCFVResult
 from pokergpu.core.board import Board
+from pokergpu.tree.public_tree import InfosetId
 from pokergpu.tree.public_tree import PublicTree
 
 from .evaluation import evaluate_backward_cfv
@@ -44,7 +48,15 @@ def run_tree_backward_cfv_iteration(
     tree: PublicTree,
     *,
     board: Board | None = None,
+    backend: GpuLeafBackend | None = None,
+    infoset_strategies: Mapping[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
 ) -> BackwardCFVResult:
-    forward = propagate_forward(tree)
-    return evaluate_backward_cfv(tree, forward, board=board, max_workers=max_workers)
+    forward = propagate_forward(tree, infoset_strategies=infoset_strategies)
+    return evaluate_backward_cfv(
+        tree,
+        forward,
+        board=board,
+        backend=backend,
+        max_workers=max_workers,
+    )

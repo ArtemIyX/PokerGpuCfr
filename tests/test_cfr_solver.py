@@ -204,8 +204,21 @@ def test_evaluate_backward_cfv_runs_on_toy_pipeline_tree() -> None:
 
 
 def test_run_tree_backward_cfv_iteration_matches_solver_wrapper() -> None:
+    class _Kernel:
+        def __call__(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
+            values = np.full((len(batch.node_ids), LEAF_EVAL_OUTPUT_WIDTH), 0.5, dtype=np.float32)
+            return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values)
+
     tree = make_toy_pipeline_tree()
-    result = run_tree_backward_cfv_iteration(tree)
+    result = run_tree_backward_cfv_iteration(
+        tree,
+        backend=GpuLeafBackend(kernel=_Kernel()),
+        infoset_strategies={
+            InfosetId(0): (0.25, 0.75),
+            InfosetId(1): (1.0,),
+        },
+    )
 
     assert result.node_values.shape == (tree.node_count,)
     assert result.infoset_values.shape == (2,)
+    assert result.node_values[0] == pytest.approx(1.625)
