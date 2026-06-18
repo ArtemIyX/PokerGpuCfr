@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
@@ -58,6 +59,51 @@ def test_backward_cfv_combines_leaf_showdown_and_infoset_values() -> None:
     assert result.node_values[2] == 2.0
     assert result.node_values[0] == 1.875
     assert result.infoset_values[0] == 1.875
+
+
+def test_backward_cfv_propagates_through_chance_nodes() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.CHANCE,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+        ),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1), chance_prob=0.25),
+            ChildLink(child=NodeId(2), chance_prob=0.75),
+        ),
+        infoset_ids=(None, None, None),
+        terminal_payoffs=(None, Chips(4), Chips(0)),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 0.25, 0.75),
+        infoset_reach=(),
+        action_reach=((), (), ()),
+    )
+    aggregate = aggregate_prob_sum(tree, forward)
+    opponent = compute_opponent_reach(tree, aggregate)
+    showdown = ShowdownEquityResult(
+        node_showdown_equity=(0.0, 4.0, 0.0),
+        node_showdown_equity_bb=(0.0, 4.0, 0.0),
+        input_rows=ShowdownEquityBatchInput(rows=()),
+        output_rows=(),
+    )
+    stage6_input = BackwardCFVInput(
+        tree=tree,
+        forward=forward,
+        aggregate=aggregate,
+        opponent_reach=opponent,
+        showdown=showdown,
+        leaf_values=np.asarray((), dtype=np.float64),
+    )
+
+    result = backward_cfv(stage6_input)
+
+    assert result.node_values[0] == pytest.approx(1.0)
+    assert result.node_values[1] == pytest.approx(4.0)
+    assert result.node_values[2] == pytest.approx(0.0)
 
 
 def test_update_regret_still_matches_stage7_contract() -> None:
