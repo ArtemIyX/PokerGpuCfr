@@ -22,6 +22,11 @@ def test_run_solver_stage_runs_forward_prefix_branch_split_and_join(monkeypatch:
         game=GameVariant.KUHN,
         cfr_variant=CfrVariant.CFR,
         depth_limit=2,
+        cpu_workers=4,
+        cpu_workers_stage3=2,
+        cpu_workers_stage4=3,
+        cpu_workers_stage6=5,
+        cpu_workers_stage7=6,
     )
     dense_state = DenseCfrState(
         regret_sums=tuple((0.0, 0.0) for _ in range(6)),
@@ -43,12 +48,12 @@ def test_run_solver_stage_runs_forward_prefix_branch_split_and_join(monkeypatch:
     monkeypatch.setattr(
         service,
         "compute_opponent_reach",
-        lambda *args, **kwargs: _record_opponent_reach(calls, tree.node_count),
+        lambda *args, **kwargs: _record_opponent_reach(calls, tree.node_count, kwargs.get("max_workers")),
     )
     monkeypatch.setattr(
         service,
         "compute_showdown_equity",
-        lambda *args, **kwargs: _record_showdown(calls, tree.node_count),
+        lambda *args, **kwargs: _record_showdown(calls, tree.node_count, kwargs.get("max_workers")),
     )
     monkeypatch.setattr(
         service,
@@ -58,12 +63,12 @@ def test_run_solver_stage_runs_forward_prefix_branch_split_and_join(monkeypatch:
     monkeypatch.setattr(
         service,
         "backward_cfv",
-        lambda *args, **kwargs: _record_call(calls, "stage6"),
+        lambda *args, **kwargs: _record_backward(calls, kwargs.get("max_workers")),
     )
     monkeypatch.setattr(
         service,
         "apply_dense_backward_cfv_update",
-        lambda *args, **kwargs: _record_stage7(calls, dense_state),
+        lambda *args, **kwargs: _record_stage7(calls, dense_state, kwargs.get("max_workers")),
     )
 
     result = run_solver_stage(
@@ -83,6 +88,9 @@ def test_run_solver_stage_runs_forward_prefix_branch_split_and_join(monkeypatch:
     assert calls.count("stage5") == 1
     assert calls.count("stage6") == 1
     assert calls.count("stage7") == 1
+    assert "cpu3:2" in calls
+    assert "cpu6:5" in calls
+    assert "cpu7:6" in calls
 
 
 @pytest.mark.parametrize(
@@ -118,7 +126,7 @@ def test_run_solver_stage_routes_cfr_variants_through_stage7(
     monkeypatch.setattr(
         service,
         "compute_opponent_reach",
-        lambda *args, **kwargs: _record_opponent_reach([], tree.node_count),
+        lambda *args, **kwargs: _record_opponent_reach([], tree.node_count, kwargs.get("max_workers")),
     )
     monkeypatch.setattr(
         service,
@@ -176,8 +184,9 @@ def _record_aggregate(calls: list[str], node_count: int) -> SimpleNamespace:
     )
 
 
-def _record_opponent_reach(calls: list[str], node_count: int) -> SimpleNamespace:
+def _record_opponent_reach(calls: list[str], node_count: int, max_workers: int | None) -> SimpleNamespace:
     calls.append("stage3")
+    calls.append(f"cpu3:{max_workers}")
     return SimpleNamespace(
         node_opponent_reach=tuple(1.0 for _ in range(node_count)),
         node_opponent_share=tuple(1.0 for _ in range(node_count)),
@@ -185,8 +194,9 @@ def _record_opponent_reach(calls: list[str], node_count: int) -> SimpleNamespace
     )
 
 
-def _record_showdown(calls: list[str], node_count: int) -> SimpleNamespace:
+def _record_showdown(calls: list[str], node_count: int, max_workers: int | None) -> SimpleNamespace:
     calls.append("stage4")
+    calls.append(f"cpu4:{max_workers}")
     return SimpleNamespace(
         node_showdown_equity=(0.0,) * node_count,
         node_showdown_equity_bb=(0.0,) * node_count,
@@ -200,6 +210,13 @@ def _record_leaf_values(calls: list[str], node_count: int) -> SimpleNamespace:
     return SimpleNamespace(node_values=(1.0,) * node_count)
 
 
-def _record_stage7(calls: list[str], dense_state: DenseCfrState) -> DenseCfrState:
+def _record_backward(calls: list[str], max_workers: int | None) -> SimpleNamespace:
+    calls.append("stage6")
+    calls.append(f"cpu6:{max_workers}")
+    return SimpleNamespace()
+
+
+def _record_stage7(calls: list[str], dense_state: DenseCfrState, max_workers: int | None) -> DenseCfrState:
     calls.append("stage7")
+    calls.append(f"cpu7:{max_workers}")
     return dense_state

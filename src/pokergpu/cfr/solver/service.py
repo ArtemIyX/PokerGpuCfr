@@ -11,6 +11,7 @@ from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage1 import propagate_forward
 from pokergpu.cfr.stage2 import AggregateProbSumResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
+from pokergpu.cfr.stage3 import OpponentReachResult
 from pokergpu.cfr.stage3 import compute_opponent_reach
 from pokergpu.cfr.stage4 import ShowdownEquityBatchInput
 from pokergpu.cfr.stage4 import ShowdownEquityResult
@@ -55,6 +56,10 @@ class SolverStageService:
             infoset_strategies=infoset_strategies,
         )
         aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
+        cpu_workers_stage3 = request.effective_cpu_workers_stage3
+        cpu_workers_stage4 = request.effective_cpu_workers_stage4
+        cpu_workers_stage6 = request.effective_cpu_workers_stage6
+        cpu_workers_stage7 = request.effective_cpu_workers_stage7
 
         branch_executor = executor
         close_executor = False
@@ -68,7 +73,8 @@ class SolverStageService:
                 tree,
                 aggregate,
                 board,
-                max_workers,
+                cpu_workers_stage3,
+                cpu_workers_stage4,
             )
             gpu_future = branch_executor.submit(
                 _run_gpu_branch,
@@ -79,7 +85,7 @@ class SolverStageService:
                 max_workers,
             )
 
-            showdown = cpu_future.result()
+            showdown, opponent_reach = cpu_future.result()
             leaf_values = gpu_future.result()
         finally:
             if close_executor:
@@ -90,8 +96,9 @@ class SolverStageService:
             forward=forward,
             aggregate=aggregate,
             showdown=showdown,
+            opponent_reach=opponent_reach,
             leaf_values=leaf_values,
-            max_workers=max_workers,
+            max_workers=cpu_workers_stage6,
             executor=executor,
         )
         final_state = _apply_variant_update(
@@ -100,7 +107,7 @@ class SolverStageService:
             dense_state=dense_state,
             backward=backward,
             table=table,
-            max_workers=max_workers,
+            max_workers=cpu_workers_stage7,
             executor=executor,
         )
 
@@ -142,25 +149,29 @@ def _run_cpu_branch(
     tree: PublicTree,
     aggregate: AggregateProbSumResult,
     board: Board | None,
-    max_workers: int | None,
-) -> ShowdownEquityResult:
+    stage3_workers: int | None,
+    stage4_workers: int | None,
+) -> tuple[ShowdownEquityResult, OpponentReachResult]:
     if board is None or board.is_preflop:
-        return ShowdownEquityResult(
+        empty_showdown = ShowdownEquityResult(
             node_showdown_equity=tuple(0.0 for _ in range(tree.node_count)),
             node_showdown_equity_bb=tuple(0.0 for _ in range(tree.node_count)),
             input_rows=ShowdownEquityBatchInput(rows=()),
             output_rows=(),
         )
-    opponent_reach = compute_opponent_reach(tree, aggregate, max_workers=max_workers)
+        empty_opponent = compute_opponent_reach(tree, aggregate, max_workers=stage3_workers)
+        return empty_showdown, empty_opponent
+    opponent_reach = compute_opponent_reach(tree, aggregate, max_workers=stage3_workers)
     cache = build_showdown_equity_board_cache(board)
-    return compute_showdown_equity(
+    showdown = compute_showdown_equity(
         tree,
         aggregate,
         opponent_reach,
         board=board,
         cache=cache,
-        max_workers=max_workers,
+        max_workers=stage4_workers,
     )
+    return showdown, opponent_reach
 
 
 def _run_gpu_branch(
@@ -187,6 +198,7 @@ def _run_backward(
     forward: ForwardProfileResult,
     aggregate: AggregateProbSumResult,
     showdown: ShowdownEquityResult,
+    opponent_reach: OpponentReachResult,
     leaf_values: tuple[float, ...],
     max_workers: int | None,
     executor: Executor | None,
@@ -195,7 +207,7 @@ def _run_backward(
         tree=tree,
         forward=forward,
         aggregate=aggregate,
-        opponent_reach=compute_opponent_reach(tree, aggregate, max_workers=max_workers),
+        opponent_reach=opponent_reach,
         showdown=showdown,
         leaf_values=np.asarray(leaf_values, dtype=np.float64),
     )

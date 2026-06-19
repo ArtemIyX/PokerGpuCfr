@@ -76,13 +76,13 @@ Optional future request fields:
 
 ### Phase 3: Parallel execution
 
-- [ ] Use CPU workers for Stage 3
-- [ ] Use CPU workers for Stage 4
-- [ ] Use CPU workers for Stage 6
-- [ ] Use CPU workers for Stage 7
-- [ ] Keep GPU leaf evaluation isolated from CPU work
-- [ ] Make branch execution deterministic under fixed seed
-- [ ] Avoid leaking thread-pool details into stage modules
+- [x] Use CPU workers for Stage 3
+- [x] Use CPU workers for Stage 4
+- [x] Use CPU workers for Stage 6
+- [x] Use CPU workers for Stage 7
+- [x] Keep GPU leaf evaluation isolated from CPU work
+- [x] Make branch execution deterministic under fixed seed
+- [x] Avoid leaking thread-pool details into stage modules
 
 ### Phase 4: Game support
 
