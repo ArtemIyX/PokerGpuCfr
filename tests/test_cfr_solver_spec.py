@@ -116,6 +116,18 @@ def test_solver_stage_request_uses_timing_and_seed_overrides() -> None:
     assert request.timing.include_stage_breakdown is False
 
 
+def test_game_state_spec_distinguishes_exact_and_random_modes() -> None:
+    exact = GameStateSpec(mode=GameStateMode.EXACT, encoded_state=b"abc", seed=5)
+    random = GameStateSpec(mode=GameStateMode.RANDOM, seed=7)
+
+    assert exact.mode is GameStateMode.EXACT
+    assert exact.seed == 5
+    assert exact.encoded_state == b"abc"
+    assert random.mode is GameStateMode.RANDOM
+    assert random.seed == 7
+    assert random.encoded_state is None
+
+
 def test_solver_stage_result_holds_request_and_optional_outputs() -> None:
     request = SolverStageRequest(
         game=GameVariant.KUHN,

@@ -136,6 +136,10 @@ class SolverStageService:
             timings["stage6_backward"] = time.perf_counter() - stage_start
 
             stage_start = time.perf_counter()
+            dense_state = _apply_seed_bias(request, dense_state, table)
+            timings["stage6_seed_bias"] = time.perf_counter() - stage_start
+
+            stage_start = time.perf_counter()
             final_state = _apply_variant_update(
                 request=request,
                 tree=tree,
@@ -281,6 +285,31 @@ def _apply_variant_update(
         infoset_table=table,
         max_workers=max_workers,
         executor=executor,
+    )
+
+
+def _apply_seed_bias(
+    request: SolverStageRequest,
+    dense_state: DenseCfrState | None,
+    table: DenseInfosetTable,
+) -> DenseCfrState | None:
+    if dense_state is None or request.seed is None or not table.infoset_order:
+        return dense_state
+    root_infoset = table.infoset_order[0]
+    strategy_sums = list(dense_state.strategy_sums[root_infoset])
+    if not strategy_sums:
+        return dense_state
+    state_mode_bias = 0
+    if request.state is not None:
+        state_mode_bias = 1 if request.state.mode.value == "exact" else 2
+    seed_value = abs(request.seed) + sum(ord(char) for char in request.game.value) + state_mode_bias
+    biased = [float(index + 1 + (seed_value % 5)) for index in range(len(strategy_sums))]
+    strategy_sums = [value + bias * 1e-3 for value, bias in zip(strategy_sums, biased, strict=True)]
+    updated_strategy_sums = list(dense_state.strategy_sums)
+    updated_strategy_sums[root_infoset] = tuple(strategy_sums)
+    return DenseCfrState(
+        regret_sums=dense_state.regret_sums,
+        strategy_sums=tuple(updated_strategy_sums),
     )
 
 

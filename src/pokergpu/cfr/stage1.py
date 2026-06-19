@@ -42,6 +42,16 @@ def propagate_forward(
             continue
 
         node_type = tree.node_types[node_index]
+        if node_type is NodeType.CHANCE:
+            child_links = tree.child_links(NodeId(node_index))
+            if not child_links:
+                raise ValueError("chance nodes must have children")
+            for link in child_links:
+                if link.chance_prob is None:
+                    raise ValueError("chance children must define probabilities")
+                node_reach[int(link.child)] += current_reach * float(link.chance_prob)
+            continue
+
         if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
             continue
 

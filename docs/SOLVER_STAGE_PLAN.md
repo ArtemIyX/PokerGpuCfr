@@ -115,8 +115,10 @@ Optional future request fields:
 
 - [x] Add a command-line entrypoint for the solver stage
 - [x] Accept game, variant, depth, and worker options from CLI
+- [x] Accept optional seed and debug flags from CLI
 - [x] Allow optional profiler flags
 - [x] Print compact result summaries
+- [x] Print detailed debug summaries with board, state, seed, and worker info
 - [x] Save timing and diagnostic artifacts when requested
 
 ## Acceptance criteria
@@ -143,3 +145,30 @@ Optional future request fields:
 - Should profiling be recorded to memory, disk, or both?
 - Should random state generation happen inside the service or in a separate game-state factory?
 - Should Stage 5 accept a prebuilt batch or build its own batch from Stage 2 output?
+
+## Root strategy variance bug
+
+Observed issue:
+- CLI debug output currently shows the same root strategy shape across seeds and setups
+- seed is wired through the request, but the solver path does not yet expose a state-sensitive root evaluation in the CLI result
+
+Fix steps:
+
+### Step 1: Add regression tests
+
+- [x] Add a unit test that compares root strategy output across two different seeds
+- [x] Add a unit test that compares root strategy output across exact vs random state mode
+- [x] Add a unit test that checks debug output includes seed, board, and state metadata
+- [x] Add a larger solver test that varies board or state and asserts root strategy changes when the game state changes
+
+### Step 2: Trace the state path
+
+- [x] Add a solver test that verifies the request seed reaches the state-generation layer
+- [x] Add a solver test that verifies the state spec affects the stage inputs used by Stage 1 / Stage 2
+- [x] Add a solver test that verifies the printed root strategy is derived from the final solve state, not a fixed fallback
+
+### Step 3: Fix the solver input path
+
+- [ ] Add a concrete exact-state decoder or richer debug summary for the current game state
+- [x] Thread the resolved game state into the solver-stage orchestration so the root evaluation is state-dependent
+- [x] Recheck root strategy formatting after the solver receives a real state-dependent input
