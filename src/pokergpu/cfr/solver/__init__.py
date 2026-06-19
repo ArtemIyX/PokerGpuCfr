@@ -21,6 +21,17 @@ from .leduc_solver import run_leduc_dense_iteration, run_leduc_dense_iterations,
 from .strategy_update import apply_dense_solver_strategy_update, apply_solver_strategy_update
 from .reach import ReachResult, propagate_reach
 from .opponent_reach import propagate_opponent_reach
+from .spec import (
+    CfrVariant,
+    GameStateMode,
+    GameStateSpec,
+    GameVariant,
+    ProfilingKind,
+    ProfilerSpec,
+    SolverStageRequest,
+    SolverStageResult,
+    TimingSpec,
+)
 from .tree import make_toy_pipeline_tree, make_toy_public_tree
 
 __all__ = [
@@ -29,6 +40,15 @@ __all__ = [
     "aggregate_action_values",
     "aggregate_root_action_values",
     "DenseCfrState",
+    "GameVariant",
+    "CfrVariant",
+    "GameStateMode",
+    "GameStateSpec",
+    "ProfilingKind",
+    "ProfilerSpec",
+    "TimingSpec",
+    "SolverStageRequest",
+    "SolverStageResult",
     "DenseInfosetTable",
     "evaluate_root_action_values",
     "evaluate_leaf_node_values",

@@ -55,14 +55,14 @@ Optional future request fields:
 
 ### Phase 1: API and data model
 
-- [ ] Define `GameVariant` enum or literal type
-- [ ] Define `CfrVariant` enum or literal type
-- [ ] Define `GameStateSpec`
-- [ ] Define `ProfilerSpec`
-- [ ] Define `TimingSpec`
-- [ ] Define `SolverStageRequest`
-- [ ] Define `SolverStageResult`
-- [ ] Add clear defaults for worker counts and timing flags
+- [x] Define `GameVariant` enum or literal type
+- [x] Define `CfrVariant` enum or literal type
+- [x] Define `GameStateSpec`
+- [x] Define `ProfilerSpec`
+- [x] Define `TimingSpec`
+- [x] Define `SolverStageRequest`
+- [x] Define `SolverStageResult`
+- [x] Add clear defaults for worker counts and timing flags
 
 ### Phase 2: Orchestration service
 
@@ -143,4 +143,3 @@ Optional future request fields:
 - Should profiling be recorded to memory, disk, or both?
 - Should random state generation happen inside the service or in a separate game-state factory?
 - Should Stage 5 accept a prebuilt batch or build its own batch from Stage 2 output?
-
