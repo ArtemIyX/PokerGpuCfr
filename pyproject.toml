@@ -41,3 +41,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+pokergpu-solver = "pokergpu.solver_cli:main"

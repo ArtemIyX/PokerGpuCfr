@@ -113,11 +113,11 @@ Optional future request fields:
 
 ### Phase 7: CLI / entrypoint integration
 
-- [ ] Add a command-line entrypoint for the solver stage
-- [ ] Accept game, variant, depth, and worker options from CLI
-- [ ] Allow optional profiler flags
-- [ ] Print compact result summaries
-- [ ] Save timing and diagnostic artifacts when requested
+- [x] Add a command-line entrypoint for the solver stage
+- [x] Accept game, variant, depth, and worker options from CLI
+- [x] Allow optional profiler flags
+- [x] Print compact result summaries
+- [x] Save timing and diagnostic artifacts when requested
 
 ## Acceptance criteria
 
