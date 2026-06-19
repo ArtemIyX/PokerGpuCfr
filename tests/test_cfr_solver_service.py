@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from pokergpu.cfr.solver import CfrVariant
+from pokergpu.cfr.solver import DenseCfrState
+from pokergpu.cfr.solver import GameVariant
+from pokergpu.cfr.solver import SolverStageRequest
+from pokergpu.cfr.solver import run_solver_stage
+from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
+from pokergpu.cfr.solver.spec import SolverStageResult
+from pokergpu.core.board import Board
+
+
+def test_run_solver_stage_runs_forward_prefix_branch_split_and_join(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pokergpu.cfr.solver.service as service
+
+    tree = make_kuhn_public_tree()
+    request = SolverStageRequest(
+        game=GameVariant.KUHN,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=2,
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple((0.0, 0.0) for _ in range(6)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(6)),
+    )
+    board = Board(cards=())
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        service,
+        "propagate_forward",
+        lambda *args, **kwargs: _record_forward(calls, tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "aggregate_prob_sum",
+        lambda *args, **kwargs: _record_aggregate(calls, tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "compute_opponent_reach",
+        lambda *args, **kwargs: _record_opponent_reach(calls, tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "compute_showdown_equity",
+        lambda *args, **kwargs: _record_showdown(calls, tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "evaluate_leaf_node_values",
+        lambda *args, **kwargs: _record_leaf_values(calls, tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "backward_cfv",
+        lambda *args, **kwargs: _record_call(calls, "stage6"),
+    )
+    monkeypatch.setattr(
+        service,
+        "apply_dense_backward_cfv_update",
+        lambda *args, **kwargs: _record_stage7(calls, dense_state),
+    )
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+    )
+
+    assert isinstance(result, SolverStageResult)
+    assert result.request == request
+    assert result.final_state == dense_state
+    assert calls.count("stage1") == 1
+    assert calls.count("stage2") == 1
+    assert calls.count("stage3") == 1
+    assert calls.count("stage4") == 0
+    assert calls.count("stage5") == 1
+    assert calls.count("stage6") == 1
+    assert calls.count("stage7") == 1
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        CfrVariant.CFR,
+        CfrVariant.CFR_PLUS,
+        CfrVariant.DCFR,
+        CfrVariant.PREDICTIVE_CFR_PLUS,
+    ],
+)
+def test_run_solver_stage_routes_cfr_variants_through_stage7(
+    monkeypatch: pytest.MonkeyPatch,
+    variant: CfrVariant,
+) -> None:
+    import pokergpu.cfr.solver.service as service
+
+    tree = make_kuhn_public_tree()
+    request = SolverStageRequest(
+        game=GameVariant.KUHN,
+        cfr_variant=variant,
+        depth_limit=2,
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple((0.0, 0.0) for _ in range(6)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(6)),
+    )
+    board = Board(cards=())
+    routed: list[CfrVariant] = []
+
+    monkeypatch.setattr(service, "propagate_forward", lambda *args, **kwargs: _record_forward([], tree.node_count))
+    monkeypatch.setattr(service, "aggregate_prob_sum", lambda *args, **kwargs: _record_aggregate([], tree.node_count))
+    monkeypatch.setattr(
+        service,
+        "compute_opponent_reach",
+        lambda *args, **kwargs: _record_opponent_reach([], tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "compute_showdown_equity",
+        lambda *args, **kwargs: SimpleNamespace(
+            node_showdown_equity=(0.0,) * tree.node_count,
+            node_showdown_equity_bb=(0.0,) * tree.node_count,
+            input_rows=SimpleNamespace(rows=()),
+            output_rows=(),
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "evaluate_leaf_node_values",
+        lambda *args, **kwargs: SimpleNamespace(node_values=(1.0,) * tree.node_count),
+    )
+    monkeypatch.setattr(service, "backward_cfv", lambda *args, **kwargs: SimpleNamespace())
+
+    def fake_stage7(*args: object, **kwargs: object) -> DenseCfrState:
+        routed.append(variant)
+        return dense_state
+
+    monkeypatch.setattr(service, "apply_dense_backward_cfv_update", fake_stage7)
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+    )
+
+    assert result.final_state == dense_state
+    assert routed == [variant]
+
+
+def _record_call(calls: list[str], stage: str) -> SimpleNamespace:
+    calls.append(stage)
+    return SimpleNamespace()
+
+
+def _record_forward(calls: list[str], node_count: int) -> SimpleNamespace:
+    calls.append("stage1")
+    return SimpleNamespace(
+        node_reach=tuple(1.0 for _ in range(node_count)),
+        infoset_reach=tuple(1.0 for _ in range(6)),
+        action_reach=tuple(() for _ in range(node_count)),
+    )
+
+
+def _record_aggregate(calls: list[str], node_count: int) -> SimpleNamespace:
+    calls.append("stage2")
+    return SimpleNamespace(
+        node_aggregate=SimpleNamespace(reach=tuple(1.0 for _ in range(node_count))),
+        leaf_node_ids=tuple(),
+    )
+
+
+def _record_opponent_reach(calls: list[str], node_count: int) -> SimpleNamespace:
+    calls.append("stage3")
+    return SimpleNamespace(
+        node_opponent_reach=tuple(1.0 for _ in range(node_count)),
+        node_opponent_share=tuple(1.0 for _ in range(node_count)),
+        node_hand_opponent_reach=tuple(() for _ in range(node_count)),
+    )
+
+
+def _record_showdown(calls: list[str], node_count: int) -> SimpleNamespace:
+    calls.append("stage4")
+    return SimpleNamespace(
+        node_showdown_equity=(0.0,) * node_count,
+        node_showdown_equity_bb=(0.0,) * node_count,
+        input_rows=SimpleNamespace(rows=()),
+        output_rows=(),
+    )
+
+
+def _record_leaf_values(calls: list[str], node_count: int) -> SimpleNamespace:
+    calls.append("stage5")
+    return SimpleNamespace(node_values=(1.0,) * node_count)
+
+
+def _record_stage7(calls: list[str], dense_state: DenseCfrState) -> DenseCfrState:
+    calls.append("stage7")
+    return dense_state

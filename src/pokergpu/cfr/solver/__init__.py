@@ -21,6 +21,7 @@ from .leduc_solver import run_leduc_dense_iteration, run_leduc_dense_iterations,
 from .strategy_update import apply_dense_solver_strategy_update, apply_solver_strategy_update
 from .reach import ReachResult, propagate_reach
 from .opponent_reach import propagate_opponent_reach
+from .service import SolverStageService, run_solver_stage
 from .spec import (
     CfrVariant,
     GameStateMode,
@@ -75,4 +76,6 @@ __all__ = [
     "run_dense_backward_cfv_iterations",
     "run_tree_backward_cfv_iteration",
     "run_tree_root_iteration",
+    "SolverStageService",
+    "run_solver_stage",
 ]

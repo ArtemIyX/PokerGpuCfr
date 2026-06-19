@@ -66,13 +66,13 @@ Optional future request fields:
 
 ### Phase 2: Orchestration service
 
-- [ ] Add a solver-stage service module
-- [ ] Implement one public entrypoint for a full solve iteration
-- [ ] Wire Stage 1 and Stage 2 as the forward prefix
-- [ ] Split Stage 3/4 and Stage 5 into independent branches
-- [ ] Join branch outputs before Stage 6
-- [ ] Route CFR-variant selection only through Stage 7
-- [ ] Keep stage modules unchanged unless a bug requires a local fix
+- [x] Add a solver-stage service module
+- [x] Implement one public entrypoint for a full solve iteration
+- [x] Wire Stage 1 and Stage 2 as the forward prefix
+- [x] Split Stage 3/4 and Stage 5 into independent branches
+- [x] Join branch outputs before Stage 6
+- [x] Route CFR-variant selection only through Stage 7
+- [x] Keep stage modules unchanged unless a bug requires a local fix
 
 ### Phase 3: Parallel execution
 
