@@ -110,13 +110,13 @@ def _patch_service_stages(
     node_count: int,
     dense_state: DenseCfrState,
 ) -> None:
-    monkeypatch.setattr(service, "propagate_forward", lambda *args, **kwargs: _forward(node_count))
-    monkeypatch.setattr(service, "aggregate_prob_sum", lambda *args, **kwargs: _aggregate(node_count))
-    monkeypatch.setattr(service, "compute_opponent_reach", lambda *args, **kwargs: _opponent(node_count))
-    monkeypatch.setattr(service, "compute_showdown_equity", lambda *args, **kwargs: _showdown(node_count))
-    monkeypatch.setattr(service, "evaluate_leaf_node_values", lambda *args, **kwargs: _leaf_values(node_count))
-    monkeypatch.setattr(service, "backward_cfv", lambda *args, **kwargs: _backward())
-    monkeypatch.setattr(service, "apply_dense_backward_cfv_update", lambda *args, **kwargs: dense_state)
+    monkeypatch.setattr(service, "propagate_forward", _make_forward_stub(node_count))
+    monkeypatch.setattr(service, "aggregate_prob_sum", _make_aggregate_stub(node_count))
+    monkeypatch.setattr(service, "compute_opponent_reach", _make_opponent_stub(node_count))
+    monkeypatch.setattr(service, "compute_showdown_equity", _make_showdown_stub(node_count))
+    monkeypatch.setattr(service, "evaluate_leaf_node_values", _make_leaf_stub(node_count))
+    monkeypatch.setattr(service, "backward_cfv", _make_backward_stub())
+    monkeypatch.setattr(service, "apply_dense_backward_cfv_update", _make_update_stub(dense_state))
 
 
 def _service_time(service: ModuleType) -> Any:
@@ -177,3 +177,52 @@ def _leaf_values(node_count: int) -> object:
 
 def _backward() -> object:
     return type("Backward", (), {})()
+
+
+def _make_forward_stub(node_count: int) -> Any:
+    def _stub(*args: object, **kwargs: object) -> object:
+        return _forward(node_count)
+
+    return _stub
+
+
+def _make_aggregate_stub(node_count: int) -> Any:
+    def _stub(*args: object, **kwargs: object) -> object:
+        return _aggregate(node_count)
+
+    return _stub
+
+
+def _make_opponent_stub(node_count: int) -> Any:
+    def _stub(*args: object, **kwargs: object) -> object:
+        return _opponent(node_count)
+
+    return _stub
+
+
+def _make_showdown_stub(node_count: int) -> Any:
+    def _stub(*args: object, **kwargs: object) -> object:
+        return _showdown(node_count)
+
+    return _stub
+
+
+def _make_leaf_stub(node_count: int) -> Any:
+    def _stub(*args: object, **kwargs: object) -> object:
+        return _leaf_values(node_count)
+
+    return _stub
+
+
+def _make_backward_stub() -> Any:
+    def _stub(*args: object, **kwargs: object) -> object:
+        return _backward()
+
+    return _stub
+
+
+def _make_update_stub(dense_state: DenseCfrState) -> Any:
+    def _stub(*args: object, **kwargs: object) -> DenseCfrState:
+        return dense_state
+
+    return _stub

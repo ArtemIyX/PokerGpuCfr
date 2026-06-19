@@ -103,13 +103,13 @@ Optional future request fields:
 
 ### Phase 6: Tests
 
-- [ ] Add unit tests for request validation
-- [ ] Add unit tests for branch orchestration
-- [ ] Add tests for CFR-variant routing in Stage 7
-- [ ] Add tests for game-variant selection
-- [ ] Add tests for exact vs random state setup
-- [ ] Add tests for timing metadata when enabled
-- [ ] Add tests for default worker behavior
+- [x] Add unit tests for request validation
+- [x] Add unit tests for branch orchestration
+- [x] Add tests for CFR-variant routing in Stage 7
+- [x] Add tests for game-variant selection
+- [x] Add tests for exact vs random state setup
+- [x] Add tests for timing metadata when enabled
+- [x] Add tests for default worker behavior
 
 ### Phase 7: CLI / entrypoint integration
 
