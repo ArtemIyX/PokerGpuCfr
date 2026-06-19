@@ -33,7 +33,7 @@ from .spec import (
     SolverStageResult,
     TimingSpec,
 )
-from .tree import make_toy_pipeline_tree, make_toy_public_tree
+from .tree import make_game_public_tree, make_toy_pipeline_tree, make_toy_public_tree, resolve_game_state_spec
 
 __all__ = [
     "apply_solver_strategy_update",
@@ -67,6 +67,8 @@ __all__ = [
     "SolverState",
     "make_toy_public_tree",
     "make_toy_pipeline_tree",
+    "make_game_public_tree",
+    "resolve_game_state_spec",
     "propagate_reach",
     "propagate_opponent_reach",
     "run_kuhn_root_iteration",

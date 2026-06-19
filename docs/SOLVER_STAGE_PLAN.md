@@ -86,11 +86,11 @@ Optional future request fields:
 
 ### Phase 4: Game support
 
-- [ ] Add Kuhn as the first minimal game target
-- [ ] Add Leduc as the next target
-- [ ] Add placeholder plumbing for future Kuhn / other variants if needed
-- [ ] Normalize game-specific tree construction behind one factory API
-- [ ] Make state generation work for exact and random input modes
+- [x] Add Kuhn as the first minimal game target
+- [x] Add Leduc as the next target
+- [x] Add placeholder plumbing for future Kuhn / other variants if needed
+- [x] Normalize game-specific tree construction behind one factory API
+- [x] Make state generation work for exact and random input modes
 
 ### Phase 5: Profiling and timing
 
