@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from concurrent.futures import Executor
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
+from contextlib import nullcontext
 from dataclasses import dataclass
+from pathlib import Path
+import cProfile
+import pstats
+import time
+from types import TracebackType
 
 import numpy as np
 
@@ -31,6 +38,7 @@ from .infosets import build_dense_infoset_table
 from .spec import CfrVariant
 from .spec import SolverStageRequest
 from .spec import SolverStageResult
+from .spec import ProfilingKind
 from .state import DenseCfrState
 
 
@@ -49,71 +57,105 @@ class SolverStageService:
         executor: Executor | None = None,
     ) -> SolverStageResult:
         assert tree.node_count > 0, "public tree cannot be empty"
+        profiler_output = None
+        profiler_cm = _build_profiler_context(request)
+        with profiler_cm as profiler:
+            timings: dict[str, float] = {}
+            total_start = time.perf_counter()
 
-        table = build_dense_infoset_table(tree)
-        forward = propagate_forward(
-            tree,
-            infoset_strategies=infoset_strategies,
-        )
-        aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
-        cpu_workers_stage3 = request.effective_cpu_workers_stage3
-        cpu_workers_stage4 = request.effective_cpu_workers_stage4
-        cpu_workers_stage6 = request.effective_cpu_workers_stage6
-        cpu_workers_stage7 = request.effective_cpu_workers_stage7
+            stage_start = time.perf_counter()
+            table = build_dense_infoset_table(tree)
+            timings["stage0_table"] = time.perf_counter() - stage_start
 
-        branch_executor = executor
-        close_executor = False
-        if branch_executor is None:
-            branch_executor = ThreadPoolExecutor(max_workers=2)
-            close_executor = True
-
-        try:
-            cpu_future = branch_executor.submit(
-                _run_cpu_branch,
+            stage_start = time.perf_counter()
+            forward = propagate_forward(
                 tree,
-                aggregate,
-                board,
-                cpu_workers_stage3,
-                cpu_workers_stage4,
+                infoset_strategies=infoset_strategies,
             )
-            gpu_future = branch_executor.submit(
-                _run_gpu_branch,
-                tree,
-                forward,
-                board,
-                backend,
-                max_workers,
+            timings["stage1_forward"] = time.perf_counter() - stage_start
+
+            stage_start = time.perf_counter()
+            aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
+            timings["stage2_aggregate"] = time.perf_counter() - stage_start
+
+            cpu_workers_stage3 = request.effective_cpu_workers_stage3
+            cpu_workers_stage4 = request.effective_cpu_workers_stage4
+            cpu_workers_stage6 = request.effective_cpu_workers_stage6
+            cpu_workers_stage7 = request.effective_cpu_workers_stage7
+
+            branch_executor = executor
+            close_executor = False
+            if branch_executor is None:
+                branch_executor = ThreadPoolExecutor(max_workers=2)
+                close_executor = True
+
+            branch_start = time.perf_counter()
+            try:
+                cpu_future = branch_executor.submit(
+                    _run_cpu_branch,
+                    tree,
+                    aggregate,
+                    board,
+                    cpu_workers_stage3,
+                    cpu_workers_stage4,
+                )
+                gpu_future = branch_executor.submit(
+                    _run_gpu_branch,
+                    tree,
+                    forward,
+                    board,
+                    backend,
+                    max_workers,
+                )
+
+                cpu_branch_start = time.perf_counter()
+                showdown, opponent_reach = cpu_future.result()
+                timings["branch_cpu"] = time.perf_counter() - cpu_branch_start
+                gpu_branch_start = time.perf_counter()
+                leaf_values = gpu_future.result()
+                timings["branch_gpu"] = time.perf_counter() - gpu_branch_start
+            finally:
+                if close_executor:
+                    branch_executor.shutdown(wait=True)
+            timings["branch_total"] = time.perf_counter() - branch_start
+            timings["branch_overlap"] = (
+                timings["branch_cpu"] + timings["branch_gpu"] - timings["branch_total"]
             )
 
-            showdown, opponent_reach = cpu_future.result()
-            leaf_values = gpu_future.result()
-        finally:
-            if close_executor:
-                branch_executor.shutdown(wait=True)
+            stage_start = time.perf_counter()
+            backward = _run_backward(
+                tree=tree,
+                forward=forward,
+                aggregate=aggregate,
+                showdown=showdown,
+                opponent_reach=opponent_reach,
+                leaf_values=leaf_values,
+                max_workers=cpu_workers_stage6,
+                executor=executor,
+            )
+            timings["stage6_backward"] = time.perf_counter() - stage_start
 
-        backward = _run_backward(
-            tree=tree,
-            forward=forward,
-            aggregate=aggregate,
-            showdown=showdown,
-            opponent_reach=opponent_reach,
-            leaf_values=leaf_values,
-            max_workers=cpu_workers_stage6,
-            executor=executor,
-        )
-        final_state = _apply_variant_update(
-            request=request,
-            tree=tree,
-            dense_state=dense_state,
-            backward=backward,
-            table=table,
-            max_workers=cpu_workers_stage7,
-            executor=executor,
-        )
+            stage_start = time.perf_counter()
+            final_state = _apply_variant_update(
+                request=request,
+                tree=tree,
+                dense_state=dense_state,
+                backward=backward,
+                table=table,
+                max_workers=cpu_workers_stage7,
+                executor=executor,
+            )
+            timings["stage7_update"] = time.perf_counter() - stage_start
+            timings["total"] = time.perf_counter() - total_start
+
+            if profiler is not None:
+                profiler_output = _finalize_profiler_output(request, profiler)
 
         return SolverStageResult(
             request=request,
             final_state=final_state,
+            timing_seconds=timings if request.measure_timing else None,
+            profiler_output=profiler_output,
             diagnostics={
                 "game": request.game.value,
                 "cfr_variant": request.cfr_variant.value,
@@ -240,3 +282,46 @@ def _apply_variant_update(
         max_workers=max_workers,
         executor=executor,
     )
+
+
+def _build_profiler_context(request: SolverStageRequest) -> AbstractContextManager[cProfile.Profile | None]:
+    profiler = request.profiler
+    if profiler is None:
+        return nullcontext(None)
+    if profiler.kind is ProfilingKind.CPROFILE:
+        profile = cProfile.Profile()
+        return _ProfileContext(profile)
+    if profiler.kind in {ProfilingKind.TORCH, ProfilingKind.BOTH}:
+        return _build_torch_profiler_context()
+    return nullcontext(None)
+
+
+@dataclass(slots=True)
+class _ProfileContext:
+    profile: cProfile.Profile
+
+    def __enter__(self) -> cProfile.Profile:
+        self.profile.enable()
+        return self.profile
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.profile.disable()
+
+
+def _finalize_profiler_output(request: SolverStageRequest, profiler: cProfile.Profile) -> str | None:
+    output_path = request.profiler.output_path if request.profiler is not None else None
+    if output_path is None:
+        return None
+    path = Path(output_path)
+    stats = pstats.Stats(profiler).sort_stats("cumulative")
+    stats.dump_stats(str(path))
+    return str(path)
+
+
+def _build_torch_profiler_context() -> AbstractContextManager[cProfile.Profile | None]:
+    return nullcontext(None)

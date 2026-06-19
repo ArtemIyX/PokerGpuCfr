@@ -94,12 +94,12 @@ Optional future request fields:
 
 ### Phase 5: Profiling and timing
 
-- [ ] Add optional cProfile support
-- [ ] Add optional PyTorch profiler support for GPU work
-- [ ] Measure total iteration time
-- [ ] Measure per-stage time
-- [ ] Measure branch overlap time
-- [ ] Return timing data in the solve result
+- [x] Add optional cProfile support
+- [x] Add optional PyTorch profiler support for GPU work
+- [x] Measure total iteration time
+- [x] Measure per-stage time
+- [x] Measure branch overlap time
+- [x] Return timing data in the solve result
 
 ### Phase 6: Tests
 
