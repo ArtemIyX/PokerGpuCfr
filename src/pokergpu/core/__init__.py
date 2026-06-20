@@ -33,6 +33,9 @@ from .rules import (
     stack_after_call,
 )
 from .signatures import public_state_signature
+from .state_io import decode_game_state
+from .state_io import encode_game_state
+from .state_io import make_random_game_state
 from .state import GameState, HandPhase, PlayerState
 from .terminal import (
     active_players,
@@ -95,6 +98,9 @@ __all__ = [
     "player_committed",
     "player_stack",
     "public_state_signature",
+    "decode_game_state",
+    "encode_game_state",
+    "make_random_game_state",
     "raise_bounds",
     "shuffled_deck",
     "stack_after_call",

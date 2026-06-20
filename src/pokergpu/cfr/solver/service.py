@@ -256,11 +256,10 @@ def _run_gpu_branch(
     backend: GpuLeafBackend | None,
     max_workers: int | None,
 ) -> tuple[float, ...]:
-    _ = board
     leaf_result = evaluate_leaf_node_values(
         tree,
         forward,
-        board=None,
+        board=board,
         backend=backend,
         max_workers=max_workers,
     )

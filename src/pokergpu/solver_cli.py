@@ -40,6 +40,9 @@ from pokergpu.core.board import Board
 from pokergpu.core.cards import shuffled_deck
 from pokergpu.core.cards import Card
 from pokergpu.core.betting import chips
+from pokergpu.core.state_io import decode_game_state
+from pokergpu.core.state_io import encode_game_state
+from pokergpu.core.state_io import make_random_game_state
 from pokergpu.core.signatures import public_state_signature
 from pokergpu.core.state import PlayerState
 from pokergpu.tree.public_tree import PublicTree
@@ -134,16 +137,19 @@ def main(argv: list[str] | None = None) -> int:
     result = None
     try:
         for iteration_index, _ in enumerate(iterator):
+            infoset_strategies = _dense_state_to_infoset_strategies(current, tree)
             result = run_solver_stage(
                 request,
                 tree=tree,
                 dense_state=current,
                 board=board,
+                infoset_strategies=infoset_strategies,
                 debug_sink=debug_session.sink,
                 debug_step=iteration_index,
             )
             if isinstance(result.final_state, SolverDenseCfrState):
                 current = result.final_state
+            debug_session.sink.flush()
     finally:
         with suppress(Exception):
             debug_session.close()
@@ -175,8 +181,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _build_state_spec(args: argparse.Namespace) -> GameStateSpec | None:
     if args.state_mode == GameStateMode.EXACT.value:
-        encoded = args.encoded_state.encode() if args.encoded_state is not None else b""
-        return GameStateSpec(mode=GameStateMode.EXACT, encoded_state=encoded, seed=args.seed)
+        if args.encoded_state is not None:
+            return GameStateSpec(mode=GameStateMode.EXACT, encoded_state=args.encoded_state.encode(), seed=args.seed)
+        rng = Random(args.seed)
+        state = make_random_game_state(rng=rng)
+        return GameStateSpec(mode=GameStateMode.EXACT, encoded_state=encode_game_state(state), seed=args.seed)
     if args.state_mode == GameStateMode.RANDOM.value:
         return GameStateSpec(mode=GameStateMode.RANDOM, seed=args.seed)
     return resolve_game_state_spec(None)
@@ -314,62 +323,9 @@ def _format_board_cards(board: Board) -> str:
 def _decode_debug_game_state(result: SolverStageResult) -> GameState | None:
     state_spec = result.request.state
     if state_spec is None or state_spec.encoded_state is None:
-        return None
-    try:
-        payload = json.loads(state_spec.encoded_state.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    try:
-        board = Board.from_str(str(payload.get("board", "")))
-        players = tuple(
-            PlayerState(
-                player=PlayerIndex(int(player_payload["player"])),
-                hole_cards=_parse_hole_cards(player_payload.get("hole_cards")),
-                folded=bool(player_payload.get("folded", False)),
-                all_in=bool(player_payload.get("all_in", False)),
-            )
-            for player_payload in payload.get("players", [])
-        )
-        stacks = tuple(
-            PlayerStack(
-                player=PlayerIndex(int(stack_payload["player"])),
-                stack=chips(int(stack_payload["stack"])),
-            )
-            for stack_payload in payload.get("stacks", [])
-        )
-        bets = tuple(
-            PlayerBet(
-                player=PlayerIndex(int(bet_payload["player"])),
-                committed=chips(int(bet_payload.get("committed", 0))),
-                folded=bool(bet_payload.get("folded", False)),
-                all_in=bool(bet_payload.get("all_in", False)),
-            )
-            for bet_payload in payload.get("bets", [])
-        )
-        blinds_payload = payload.get("blinds", {})
-        blinds = BlindStructure(
-            small_blind=chips(int(blinds_payload.get("small_blind", 1))),
-            big_blind=chips(int(blinds_payload.get("big_blind", 2))),
-            ante=chips(int(blinds_payload.get("ante", 0))),
-        )
-        betting_round = BettingRoundState(
-            pot=Pot(amount=chips(int(payload.get("pot", 0)))),
-            stacks=stacks,
-            bets=bets,
-            blinds=blinds,
-            to_act=PlayerIndex(int(payload.get("to_act", 0))),
-        )
-        return GameState(
-            board=board,
-            players=players,
-            betting_round=betting_round,
-            phase=HandPhase(str(payload.get("phase", HandPhase.IN_PROGRESS.value))),
-            dealer=PlayerIndex(int(payload.get("dealer", 0))),
-        )
-    except (KeyError, TypeError, ValueError):
-        return None
+        return make_random_game_state(rng=Random(result.request.effective_seed))
+    decoded = decode_game_state(state_spec.encoded_state)
+    return decoded if decoded is not None else make_random_game_state(rng=Random(result.request.effective_seed))
 
 
 def _parse_hole_cards(value: object) -> tuple[Card, Card] | None:
@@ -414,6 +370,24 @@ def _format_root_strategy(dense_state: DenseCfrState | None, tree: PublicTree) -
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
     return "(" + ", ".join(f"{value:.3f}" for value in strategy) + ")"
+
+
+def _dense_state_to_infoset_strategies(
+    dense_state: DenseCfrState | None,
+    tree: PublicTree,
+) -> dict[int, tuple[float, ...]] | None:
+    if dense_state is None:
+        return None
+    table = build_dense_infoset_table(tree)
+    strategies: dict[int, tuple[float, ...]] = {}
+    for infoset_id in table.infoset_order:
+        regrets = dense_state.regret_sums[infoset_id]
+        total = sum(max(0.0, value) for value in regrets)
+        if total <= 0.0:
+            strategies[infoset_id] = tuple(1.0 / len(regrets) for _ in regrets)
+        else:
+            strategies[infoset_id] = tuple(max(0.0, value) / total for value in regrets)
+    return strategies
 
 
 if __name__ == "__main__":
