@@ -21,6 +21,35 @@ from pokergpu.cfr.solver import SolverStageRequest
 from pokergpu.cfr.solver import TimingSpec
 
 
+class _FakeDebugSink:
+    def add_scalar(self, tag: str, value: float, step: int) -> None:
+        _ = tag, value, step
+
+    def add_histogram(self, tag: str, values: Any, step: int) -> None:
+        _ = tag, values, step
+
+    def add_text(self, tag: str, text: str, step: int) -> None:
+        _ = tag, text, step
+
+    def add_sample(self, tag: str, values: Any, step: int, limit: int) -> None:
+        _ = tag, values, step, limit
+
+    def flush(self) -> None:
+        return None
+
+
+class _FakeDebugSession:
+    def __init__(self) -> None:
+        self.sink = _FakeDebugSink()
+
+    def close(self) -> None:
+        return None
+
+
+def _install_fake_debug_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(solver_cli, "create_debug_session", lambda spec, run_name: _FakeDebugSession())
+
+
 def test_build_parser_exposes_solver_arguments() -> None:
     parser = solver_cli.build_parser()
     args = parser.parse_args(
@@ -77,6 +106,7 @@ def test_main_runs_and_prints_summary(monkeypatch: pytest.MonkeyPatch, capsys: p
 
     monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
     monkeypatch.setattr(solver_cli, "tqdm_module", SimpleNamespace(tqdm=fake_tqdm))
+    _install_fake_debug_session(monkeypatch)
 
     exit_code = solver_cli.main(
         [
@@ -133,6 +163,7 @@ def test_main_debug_prints_seed_and_state_metadata(
         )
 
     monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+    _install_fake_debug_session(monkeypatch)
 
     exit_code = solver_cli.main(
         [
@@ -184,6 +215,7 @@ def test_main_root_strategy_comes_from_final_state(
         )
 
     monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+    _install_fake_debug_session(monkeypatch)
 
     exit_code = solver_cli.main(
         [
@@ -219,6 +251,7 @@ def test_main_debug_exact_state_should_show_decoded_cards_and_chips(
         )
 
     monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+    _install_fake_debug_session(monkeypatch)
 
     exit_code = solver_cli.main(
         [
@@ -283,6 +316,7 @@ def test_main_debug_exact_state_falls_back_for_non_json_payload(
         )
 
     monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+    _install_fake_debug_session(monkeypatch)
 
     exit_code = solver_cli.main(
         [
@@ -333,6 +367,7 @@ def test_root_strategy_should_change_when_state_changes(
         )
 
     monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+    _install_fake_debug_session(monkeypatch)
 
     exit_code = solver_cli.main(
         [
@@ -485,6 +520,39 @@ def test_main_accepts_profiler_flags(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert exit_code == 0
     assert seen == [ProfilerSpec(kind=ProfilingKind.CPROFILE, output_path="solver.prof")]
+
+
+def test_main_debug_enables_debug_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+
+    def fake_run_solver_stage(*args: object, **kwargs: object) -> SimpleNamespace:
+        request = cast(SolverStageRequest, args[0])
+        seen.append(request.debug)
+        return SimpleNamespace(
+            request=request,
+            final_state=kwargs.get("dense_state"),
+            timing_seconds=None,
+            profiler_output=None,
+            diagnostics={},
+        )
+
+    _install_fake_debug_session(monkeypatch)
+    monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+
+    exit_code = solver_cli.main(
+        [
+            "--game",
+            "kuhn",
+            "--variant",
+            "cfr",
+            "--depth",
+            "2",
+            "--debug",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen and getattr(seen[0], "enabled", False) is True
 
 
 def test_main_reports_seed_in_summary_output(

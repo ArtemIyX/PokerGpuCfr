@@ -4,11 +4,13 @@ import argparse
 import json
 from pathlib import Path
 from random import Random
+from contextlib import suppress
 from types import ModuleType
 from typing import Iterable
 from typing import cast
 
 from pokergpu.cfr.solver import CfrVariant
+from pokergpu.cfr.solver import DebugSpec
 from pokergpu.cfr.solver import DenseCfrState
 from pokergpu.cfr.solver import GameStateMode
 from pokergpu.cfr.solver import GameStateSpec
@@ -19,6 +21,7 @@ from pokergpu.cfr.solver import SolverStageRequest
 from pokergpu.cfr.solver import SolverStageResult
 from pokergpu.cfr.solver import TimingSpec
 from pokergpu.cfr.solver import build_dense_infoset_table
+from pokergpu.cfr.solver.debug import create_debug_session
 from pokergpu.cfr.solver import make_game_public_tree
 from pokergpu.cfr.solver import run_solver_stage
 from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
@@ -84,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-output", type=Path)
     parser.add_argument("--summary-output", type=Path)
     parser.add_argument("--board", type=str)
+    parser.add_argument("--debug-log-dir", type=Path)
+    parser.add_argument("--debug-port", type=int)
     parser.add_argument("--debug", action="store_true", help="print detailed solver debug information")
     parser.add_argument("--progress", action="store_true", help="show a tqdm progress bar")
     return parser
@@ -107,6 +112,12 @@ def main(argv: list[str] | None = None) -> int:
         cpu_workers_stage7=args.cpu_workers_stage7,
         profiler=_build_profiler_spec(args),
         timing=TimingSpec(measure=args.measure_time),
+        debug=DebugSpec(
+            enabled=args.debug,
+            log_dir=args.debug_log_dir,
+            start_tensorboard=args.debug,
+            tensorboard_port=args.debug_port,
+        ),
         measure_time=args.measure_time,
     )
 
@@ -119,11 +130,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.progress and request.iterations > 1:
         iterator = _progress_bar(iterator, total=request.iterations, desc="solver")
 
+    debug_session = create_debug_session(request.debug, run_name=f"{request.game.value}-{request.cfr_variant.value}")
     result = None
-    for _ in iterator:
-        result = run_solver_stage(request, tree=tree, dense_state=current, board=board)
-        if isinstance(result.final_state, SolverDenseCfrState):
-            current = result.final_state
+    try:
+        for iteration_index, _ in enumerate(iterator):
+            result = run_solver_stage(
+                request,
+                tree=tree,
+                dense_state=current,
+                board=board,
+                debug_sink=debug_session.sink,
+                debug_step=iteration_index,
+            )
+            if isinstance(result.final_state, SolverDenseCfrState):
+                current = result.final_state
+    finally:
+        with suppress(Exception):
+            debug_session.close()
 
     assert result is not None
     _print_summary(
@@ -133,6 +156,10 @@ def main(argv: list[str] | None = None) -> int:
         board,
         debug=args.debug,
     )
+    if args.debug and debug_session.log_dir is not None:
+        print(f"tensorboard_log_dir={debug_session.log_dir}")
+    if args.debug and debug_session.tensorboard_url is not None:
+        print(f"tensorboard_url={debug_session.tensorboard_url}")
     if args.summary_output is not None:
         _write_summary(
             args.summary_output,
@@ -140,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
             current if isinstance(current, SolverDenseCfrState) else None,
             tree,
             board,
+            debug_log_dir=debug_session.log_dir if args.debug else None,
+            debug_url=debug_session.tensorboard_url if args.debug else None,
         )
     return 0
 
@@ -216,6 +245,9 @@ def _write_summary(
     dense_state: DenseCfrState | None,
     tree: PublicTree,
     board: Board,
+    *,
+    debug_log_dir: Path | None = None,
+    debug_url: str | None = None,
 ) -> None:
     payload = {
         "game": result.request.game.value,
@@ -228,6 +260,10 @@ def _write_summary(
         "profiler_output": result.profiler_output,
         "root_strategy": _format_root_strategy(dense_state, tree),
     }
+    if debug_log_dir is not None:
+        payload["tensorboard_log_dir"] = str(debug_log_dir)
+    if debug_url is not None:
+        payload["tensorboard_url"] = debug_url
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -378,3 +414,7 @@ def _format_root_strategy(dense_state: DenseCfrState | None, tree: PublicTree) -
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
     return "(" + ", ".join(f"{value:.3f}" for value in strategy) + ")"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

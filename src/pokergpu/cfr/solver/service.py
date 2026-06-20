@@ -33,6 +33,10 @@ from pokergpu.tree.public_tree import InfosetId
 from pokergpu.tree.public_tree import PublicTree
 
 from .evaluation import evaluate_leaf_node_values
+from .debug import NoopDebugSink
+from .debug import SolverDebugSink
+from .debug import log_summary
+from .debug import log_text_map
 from .infosets import DenseInfosetTable
 from .infosets import build_dense_infoset_table
 from .spec import CfrVariant
@@ -55,8 +59,11 @@ class SolverStageService:
         infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
         max_workers: int | None = None,
         executor: Executor | None = None,
+        debug_sink: SolverDebugSink | None = None,
+        debug_step: int = 0,
     ) -> SolverStageResult:
         assert tree.node_count > 0, "public tree cannot be empty"
+        sink = debug_sink or NoopDebugSink()
         profiler_output = None
         profiler_cm = _build_profiler_context(request)
         with profiler_cm as profiler:
@@ -66,6 +73,8 @@ class SolverStageService:
             stage_start = time.perf_counter()
             table = build_dense_infoset_table(tree)
             timings["stage0_table"] = time.perf_counter() - stage_start
+            if request.debug.enabled:
+                _log_stage0_debug(sink, request, tree, table, board, debug_step)
 
             stage_start = time.perf_counter()
             forward = propagate_forward(
@@ -73,10 +82,14 @@ class SolverStageService:
                 infoset_strategies=infoset_strategies,
             )
             timings["stage1_forward"] = time.perf_counter() - stage_start
+            if request.debug.enabled:
+                _log_stage1_debug(sink, forward, debug_step)
 
             stage_start = time.perf_counter()
             aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
             timings["stage2_aggregate"] = time.perf_counter() - stage_start
+            if request.debug.enabled:
+                _log_stage2_debug(sink, aggregate, debug_step)
 
             cpu_workers_stage3 = request.effective_cpu_workers_stage3
             cpu_workers_stage4 = request.effective_cpu_workers_stage4
@@ -121,6 +134,8 @@ class SolverStageService:
             timings["branch_overlap"] = (
                 timings["branch_cpu"] + timings["branch_gpu"] - timings["branch_total"]
             )
+            if request.debug.enabled:
+                _log_stage3_stage4_debug(sink, showdown, opponent_reach, leaf_values, debug_step)
 
             stage_start = time.perf_counter()
             backward = _run_backward(
@@ -134,6 +149,8 @@ class SolverStageService:
                 executor=executor,
             )
             timings["stage6_backward"] = time.perf_counter() - stage_start
+            if request.debug.enabled:
+                _log_stage6_debug(sink, backward, leaf_values, debug_step)
 
             stage_start = time.perf_counter()
             dense_state = _apply_seed_bias(request, dense_state, table)
@@ -151,6 +168,14 @@ class SolverStageService:
             )
             timings["stage7_update"] = time.perf_counter() - stage_start
             timings["total"] = time.perf_counter() - total_start
+            if request.debug.enabled:
+                _log_stage7_debug(sink, final_state, dense_state, table, debug_step)
+                sink.add_text("debug/timings", "\n".join(f"{k}: {v:.6f}" for k, v in timings.items()), debug_step)
+                sink.add_text("debug/diagnostics", "\n".join(f"{k}: {v}" for k, v in {
+                    "game": request.game.value,
+                    "cfr_variant": request.cfr_variant.value,
+                    "tree_nodes": tree.node_count,
+                }.items()), debug_step)
 
             if profiler is not None:
                 profiler_output = _finalize_profiler_output(request, profiler)
@@ -178,6 +203,8 @@ def run_solver_stage(
     infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
     executor: Executor | None = None,
+    debug_sink: SolverDebugSink | None = None,
+    debug_step: int = 0,
 ) -> SolverStageResult:
     return SolverStageService().run_iteration(
         request,
@@ -188,6 +215,8 @@ def run_solver_stage(
         infoset_strategies=infoset_strategies,
         max_workers=max_workers,
         executor=executor,
+        debug_sink=debug_sink,
+        debug_step=debug_step,
     )
 
 
@@ -354,3 +383,135 @@ def _finalize_profiler_output(request: SolverStageRequest, profiler: cProfile.Pr
 
 def _build_torch_profiler_context() -> AbstractContextManager[cProfile.Profile | None]:
     return nullcontext(None)
+
+
+def _log_stage0_debug(
+    sink: SolverDebugSink,
+    request: SolverStageRequest,
+    tree: PublicTree,
+    table: DenseInfosetTable,
+    board: Board | None,
+    step: int,
+) -> None:
+    sink.add_scalar("stage0/tree_nodes", float(tree.node_count), step)
+    sink.add_scalar("stage0/infosets", float(table.infoset_count), step)
+    sink.add_scalar("stage0/leaf_nodes", float(tree.node_count - len(table.node_to_infoset)), step)
+    sink.add_scalar("stage0/depth_limit", float(request.depth_limit), step)
+    sink.add_text("stage0/board", str(board) if board is not None else "none", step)
+    sink.add_scalar("stage0/node_to_infoset_nonempty", float(sum(1 for value in table.node_to_infoset if value >= 0)), step)
+    sink.add_scalar("stage0/root_child_count", float(tree.child_count[0] if tree.child_count else 0), step)
+    log_text_map(
+        sink,
+        "stage0/table",
+        {
+            "infoset_order": table.infoset_order[:32],
+            "node_to_infoset": table.node_to_infoset[:64],
+            "action_counts": table.action_counts[:64],
+        },
+        step,
+        limit=8,
+    )
+
+
+def _log_stage1_debug(sink: SolverDebugSink, forward: ForwardProfileResult, step: int) -> None:
+    log_summary(sink, "stage1/node_reach", forward.node_reach, step)
+    log_summary(sink, "stage1/infoset_reach", forward.infoset_reach, step)
+    log_text_map(
+        sink,
+        "stage1/strategy",
+        {
+            "action_reach": forward.action_reach[:32],
+        },
+        step,
+        limit=8,
+    )
+
+
+def _log_stage2_debug(sink: SolverDebugSink, aggregate: AggregateProbSumResult, step: int) -> None:
+    log_summary(sink, "stage2/node_reach", aggregate.node_aggregate.reach, step)
+    log_summary(sink, "stage2/card_reach", aggregate.node_aggregate.card_reach.ravel(), step)
+    log_summary(sink, "stage2/hand_reach", aggregate.node_aggregate.hand_reach.ravel(), step)
+    log_summary(sink, "stage2/leaf_reach_sum", aggregate.leaf_reach_sum, step)
+    log_summary(sink, "stage2/leaf_batch_features", aggregate.leaf_batch.features.ravel(), step)
+    sink.add_text("stage2/leaf_node_ids", str(aggregate.leaf_node_ids[:64]), step)
+
+
+def _log_stage3_stage4_debug(
+    sink: SolverDebugSink,
+    showdown: ShowdownEquityResult,
+    opponent_reach: OpponentReachResult,
+    leaf_values: tuple[float, ...],
+    step: int,
+) -> None:
+    log_summary(sink, "stage3/opponent_reach", opponent_reach.node_opponent_reach, step)
+    log_summary(sink, "stage3/opponent_share", opponent_reach.node_opponent_share, step)
+    log_summary(sink, "stage3/hand_opponent_reach", opponent_reach.node_hand_opponent_reach.ravel(), step)
+    log_summary(sink, "stage4/showdown", showdown.node_showdown_equity, step)
+    log_summary(sink, "stage4/showdown_bb", showdown.node_showdown_equity_bb, step)
+    sink.add_histogram("stage5/leaf_values", np.asarray(leaf_values, dtype=np.float64), step)
+    sink.add_sample("stage5/leaf_values_sample", leaf_values, step, limit=32)
+
+
+def _log_stage6_debug(
+    sink: SolverDebugSink,
+    backward: BackwardCFVResult,
+    leaf_values: tuple[float, ...],
+    step: int,
+) -> None:
+    log_summary(sink, "stage6/node_cfv", backward.node_values, step)
+    log_summary(sink, "stage6/infoset_cfv", backward.infoset_values, step)
+    log_summary(sink, "stage6/action_values", [value for row in backward.action_values for value in row], step)
+    sink.add_histogram("stage6/leaf_values", np.asarray(leaf_values, dtype=np.float64), step)
+
+
+def _log_stage7_debug(
+    sink: SolverDebugSink,
+    final_state: DenseCfrState | None,
+    dense_state: DenseCfrState | None,
+    table: DenseInfosetTable,
+    step: int,
+) -> None:
+    if final_state is None:
+        return
+    root_infoset = table.infoset_order[0] if table.infoset_order else None
+    log_text_map(
+        sink,
+        "stage7/state",
+        {
+            "regret_rows": len(final_state.regret_sums),
+            "strategy_rows": len(final_state.strategy_sums),
+            "infosets": table.infoset_count,
+            "root_infoset": root_infoset if root_infoset is not None else "none",
+        },
+        step,
+        limit=8,
+    )
+    flat_regrets = [value for row in final_state.regret_sums for value in row]
+    flat_strategy = [value for row in final_state.strategy_sums for value in row]
+    log_summary(sink, "stage7/regret_sums", flat_regrets, step)
+    log_summary(sink, "stage7/strategy_sums", flat_strategy, step)
+    if root_infoset is not None:
+        log_summary(sink, "stage7/root_regrets", final_state.regret_sums[root_infoset], step)
+        log_summary(sink, "stage7/root_strategy_sums", final_state.strategy_sums[root_infoset], step)
+    if dense_state is not None:
+        delta_regrets = [
+            new - old
+            for new_row, old_row in zip(final_state.regret_sums, dense_state.regret_sums, strict=True)
+            for new, old in zip(new_row, old_row, strict=True)
+        ]
+        delta_strategy = [
+            new - old
+            for new_row, old_row in zip(final_state.strategy_sums, dense_state.strategy_sums, strict=True)
+            for new, old in zip(new_row, old_row, strict=True)
+        ]
+        log_summary(sink, "stage7/regret_delta", delta_regrets, step)
+        log_summary(sink, "stage7/strategy_delta", delta_strategy, step)
+        if root_infoset is not None:
+            log_summary(sink, "stage7/root_regret_delta", [
+                new - old
+                for new, old in zip(final_state.regret_sums[root_infoset], dense_state.regret_sums[root_infoset], strict=True)
+            ], step)
+            log_summary(sink, "stage7/root_strategy_delta", [
+                new - old
+                for new, old in zip(final_state.strategy_sums[root_infoset], dense_state.strategy_sums[root_infoset], strict=True)
+            ], step)

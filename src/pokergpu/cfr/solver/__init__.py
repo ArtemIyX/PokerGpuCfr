@@ -24,6 +24,7 @@ from .opponent_reach import propagate_opponent_reach
 from .service import SolverStageService, run_solver_stage
 from .spec import (
     CfrVariant,
+    DebugSpec,
     GameStateMode,
     GameStateSpec,
     GameVariant,
@@ -43,6 +44,7 @@ __all__ = [
     "DenseCfrState",
     "GameVariant",
     "CfrVariant",
+    "DebugSpec",
     "GameStateMode",
     "GameStateSpec",
     "ProfilingKind",
