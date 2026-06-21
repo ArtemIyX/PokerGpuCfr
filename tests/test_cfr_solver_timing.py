@@ -79,6 +79,33 @@ def test_run_solver_stage_writes_cprofile_output(
     assert output_path.exists()
 
 
+def test_run_solver_stage_creates_default_cprofile_output_when_path_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pokergpu.cfr.solver.service as service
+
+    request = SolverStageRequest(
+        game=GameVariant.KUHN,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=2,
+        profiler=ProfilerSpec(kind=ProfilingKind.CPROFILE),
+    )
+    tree = make_kuhn_public_tree()
+    state = DenseCfrState(
+        regret_sums=tuple((0.0, 0.0) for _ in range(6)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(6)),
+    )
+    board = Board(cards=())
+    counter = itertools.count()
+    monkeypatch.setattr(_service_time(service), "perf_counter", lambda: float(next(counter)))
+    _patch_service_stages(monkeypatch, service, tree.node_count, state)
+
+    result = run_solver_stage(request, tree=tree, dense_state=state, board=board)
+
+    assert result.profiler_output is not None
+    assert result.profiler_output.endswith(".prof")
+
+
 def test_run_solver_stage_accepts_torch_profiler_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     import pokergpu.cfr.solver.service as service
 

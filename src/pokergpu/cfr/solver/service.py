@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 import cProfile
+import os
 import pstats
 import time
 from types import TracebackType
@@ -378,8 +379,15 @@ class _ProfileContext:
 def _finalize_profiler_output(request: SolverStageRequest, profiler: cProfile.Profile) -> str | None:
     output_path = request.profiler.output_path if request.profiler is not None else None
     if output_path is None:
-        return None
-    path = Path(output_path)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        pid = os.getpid()
+        path = Path("artifacts") / "profiles" / (
+            f"{request.game.value}-{request.cfr_variant.value}-d{request.depth_limit}-"
+            f"seed{request.effective_seed}-{stamp}-pid{pid}.prof"
+        )
+    else:
+        path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     stats = pstats.Stats(profiler).sort_stats("cumulative")
     stats.dump_stats(str(path))
     return str(path)

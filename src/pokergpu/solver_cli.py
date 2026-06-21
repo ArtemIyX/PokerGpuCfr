@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pstats
 from pathlib import Path
 from random import Random
 from contextlib import suppress
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", choices=[kind.value for kind in ProfilingKind])
     parser.add_argument("--profile-output", type=Path)
     parser.add_argument("--summary-output", type=Path)
+    parser.add_argument("--print-profile", action="store_true", help="print cProfile top functions to the console")
     parser.add_argument("--board", type=str)
     parser.add_argument("--debug-log-dir", type=Path)
     parser.add_argument("--debug-port", type=int)
@@ -168,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         tree,
         board,
         debug=args.debug,
+        print_profile=args.print_profile,
     )
     log_dir = getattr(debug_session, "log_dir", None)
     tensorboard_url = getattr(debug_session, "tensorboard_url", None)
@@ -239,6 +242,7 @@ def _print_summary(
     board: Board,
     *,
     debug: bool = False,
+    print_profile: bool = False,
 ) -> None:
     print(f"game={result.request.game.value}")
     print(f"variant={result.request.cfr_variant.value}")
@@ -251,10 +255,11 @@ def _print_summary(
         if root_strategy is not None:
             print(f"root_strategy={root_strategy}")
     if result.timing_seconds is not None:
-        total = result.timing_seconds.get("total", 0.0)
-        print(f"total_seconds={total:.6f}")
+        _print_timing_seconds(result.timing_seconds)
     if result.profiler_output is not None:
         print(f"profile_output={result.profiler_output}")
+        if print_profile:
+            _print_profile_summary(Path(result.profiler_output))
 
 
 def _write_summary(
@@ -283,6 +288,24 @@ def _write_summary(
     if debug_url is not None:
         payload["tensorboard_url"] = debug_url
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _print_timing_seconds(timing_seconds: dict[str, float]) -> None:
+    total = timing_seconds.get("total", 0.0)
+    print(f"total_seconds={total:.6f}")
+    for key in sorted(timing_seconds):
+        if key == "total":
+            continue
+        print(f"timing.{key}={timing_seconds[key]:.6f}")
+
+
+def _print_profile_summary(path: Path) -> None:
+    print(f"profile_summary={path}")
+    stats = pstats.Stats(str(path))
+    print("profile.cumulative.top10")
+    stats.sort_stats("cumulative").print_stats(10)
+    print("profile.internal.top10")
+    stats.sort_stats("tottime").print_stats(10)
 
 
 def _print_debug_details(

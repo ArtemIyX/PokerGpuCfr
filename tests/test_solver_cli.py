@@ -85,6 +85,23 @@ def test_build_parser_exposes_solver_arguments() -> None:
     assert args.progress is True
 
 
+def test_build_parser_exposes_profile_print_flag() -> None:
+    parser = solver_cli.build_parser()
+    args = parser.parse_args(
+        [
+            "--game",
+            "kuhn",
+            "--variant",
+            "cfr",
+            "--depth",
+            "2",
+            "--print-profile",
+        ]
+    )
+
+    assert args.print_profile is True
+
+
 def test_main_runs_and_prints_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     calls: list[SolverStageRequest] = []
     progress_inputs: list[list[int]] = []
@@ -526,6 +543,52 @@ def test_main_accepts_profiler_flags(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert exit_code == 0
     assert seen == [ProfilerSpec(kind=ProfilingKind.CPROFILE, output_path="solver.prof")]
+
+
+def test_main_prints_profile_summary_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_run_solver_stage(*args: object, **kwargs: Any) -> SimpleNamespace:
+        request = cast(SolverStageRequest, args[0])
+        return SimpleNamespace(
+            request=request,
+            final_state=kwargs.get("dense_state"),
+            timing_seconds=None,
+            profiler_output="solver.prof",
+            diagnostics={},
+        )
+
+    profile_calls: list[Path] = []
+
+    def fake_print_profile_summary(path: Path) -> None:
+        profile_calls.append(path)
+        print(f"profile_summary={path}")
+
+    monkeypatch.setattr(solver_cli, "run_solver_stage", fake_run_solver_stage)
+    monkeypatch.setattr(solver_cli, "_print_profile_summary", fake_print_profile_summary)
+
+    exit_code = solver_cli.main(
+        [
+            "--game",
+            "kuhn",
+            "--variant",
+            "cfr",
+            "--depth",
+            "2",
+            "--profile",
+            "cprofile",
+            "--profile-output",
+            "solver.prof",
+            "--print-profile",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert profile_calls == [Path("solver.prof")]
+    assert "profile_summary=solver.prof" in captured
 
 
 def test_main_debug_enables_debug_spec(monkeypatch: pytest.MonkeyPatch) -> None:
