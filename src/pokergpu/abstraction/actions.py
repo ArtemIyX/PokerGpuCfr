@@ -36,20 +36,20 @@ def make_default_profile() -> AbstractionProfile:
         name="default",
         street_templates={
             Street.PREFLOP: StreetActionTemplate(
-                bet_sizes=(1.0, 2.5),
-                raise_to_multipliers=(1.0, 1.5, 2.0),
-            ),
-            Street.FLOP: StreetActionTemplate(
                 bet_sizes=(0.5, 1.0),
                 raise_to_multipliers=(1.0, 1.5),
             ),
+            Street.FLOP: StreetActionTemplate(
+                bet_sizes=(0.25, 0.5, 0.75, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
             Street.TURN: StreetActionTemplate(
-                bet_sizes=(0.75, 1.25),
-                raise_to_multipliers=(1.0, 1.5),
+                bet_sizes=(0.25, 0.5, 0.75, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
             ),
             Street.RIVER: StreetActionTemplate(
-                bet_sizes=(0.75, 1.5),
-                raise_to_multipliers=(1.0, 1.5),
+                bet_sizes=(0.25, 0.5, 0.75, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
             ),
         },
     )
@@ -91,13 +91,16 @@ class BaselineActionAbstraction:
                 if stack.player == betting_state.to_act
             )
             for size in template.bet_sizes:
-                amount = Chips(int(round(betting_state.blinds.big_blind * size)))
+                amount = Chips(int(round(betting_state.pot.amount * size)))
                 clamped = Chips(
                     min(max_bet, max(betting_state.blinds.big_blind, amount))
                 )
                 candidate = Action(ActionType.BET, amount=clamped)
                 if candidate not in actions:
                     actions.append(candidate)
+            all_in_bet = Action(ActionType.BET, amount=max_bet)
+            if all_in_bet not in actions:
+                actions.append(all_in_bet)
 
         if can_raise(betting_state):
             minimum = min_raise_to(betting_state, betting_state.to_act)
@@ -109,5 +112,8 @@ class BaselineActionAbstraction:
                 candidate = Action(ActionType.RAISE, amount=clamped)
                 if candidate not in actions:
                     actions.append(candidate)
+            all_in_raise = Action(ActionType.RAISE, amount=maximum)
+            if all_in_raise not in actions:
+                actions.append(all_in_raise)
 
         return tuple(actions)

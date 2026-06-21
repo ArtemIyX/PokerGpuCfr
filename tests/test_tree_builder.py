@@ -45,9 +45,9 @@ def test_build_shallow_public_tree_creates_root_and_children() -> None:
         abstraction=BaselineActionAbstraction(profile=make_compact_profile()),
     )
 
-    assert built.tree.node_count == 3
-    assert built.tree.child_count[0] == 2
-    assert len(built.actions_by_node[0]) == 2
+    assert built.tree.node_count == 4
+    assert built.tree.child_count[0] == 3
+    assert len(built.actions_by_node[0]) == 3
     assert built.node_states[1].phase is HandPhase.IN_PROGRESS
 
 
