@@ -6,7 +6,7 @@ from typing import Protocol
 import numpy as np
 
 
-LEAF_EVAL_FEATURE_WIDTH = 161
+LEAF_EVAL_FEATURE_WIDTH = 162
 LEAF_EVAL_OUTPUT_WIDTH = 1
 
 

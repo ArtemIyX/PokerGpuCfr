@@ -289,6 +289,7 @@ def _build_leaf_feature_rows(
     street_column = np.full((leaf_count, 1), np.float32(street), dtype=np.float32)
     board_size_column = np.full((leaf_count, 1), np.float32(board_size), dtype=np.float32)
     board_signature_column = np.full((leaf_count, 1), np.float32(board_signature), dtype=np.float32)
+    leaf_index_column = np.asarray(leaf_indices, dtype=np.float32)[:, None] / np.float32(max(1, leaf_indices.size - 1))
     board_mask = np.where(board_card_mask, np.float32(1.0), np.float32(0.0))
     board_vector = np.asarray(board_card_vector, dtype=np.float32)
     leaf_vector = np.asarray(leaf_card_reach_vector, dtype=np.float32)
@@ -309,6 +310,7 @@ def _build_leaf_feature_rows(
             street_column,
             board_size_column,
             board_signature_column,
+            leaf_index_column,
             repeated_board_mask,
             repeated_board_vector,
             repeated_leaf_vector,

@@ -22,6 +22,8 @@ from pokergpu.cfr.solver import SolverStageResult
 from pokergpu.cfr.solver import TimingSpec
 from pokergpu.cfr.solver import build_dense_infoset_table
 from pokergpu.cfr.solver.debug import create_debug_session
+from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
+from pokergpu.cfr.leaf_backend_factory import create_leaf_backend
 from pokergpu.cfr.solver import make_game_public_tree
 from pokergpu.cfr.solver import run_solver_stage
 from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
@@ -92,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--board", type=str)
     parser.add_argument("--debug-log-dir", type=Path)
     parser.add_argument("--debug-port", type=int)
+    parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="heuristic")
     parser.add_argument("--debug", action="store_true", help="print detailed solver debug information")
     parser.add_argument("--progress", action="store_true", help="show a tqdm progress bar")
     return parser
@@ -127,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     tree = make_game_public_tree(request.game)
     board = _resolve_board(args, request)
     dense_state = _make_dense_state(tree)
+    leaf_backend = _build_leaf_backend(args.leaf_evaluator)
 
     current = dense_state
     iterator: Iterable[int] = range(request.iterations)
@@ -143,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
                 tree=tree,
                 dense_state=current,
                 board=board,
+                backend=leaf_backend,
                 infoset_strategies=infoset_strategies,
                 debug_sink=debug_session.sink,
                 debug_step=iteration_index,
@@ -388,6 +393,14 @@ def _dense_state_to_infoset_strategies(
         else:
             strategies[infoset_id] = tuple(max(0.0, value) / total for value in regrets)
     return strategies
+
+
+def _build_leaf_backend(kind: str):
+    if kind == "heuristic":
+        return create_heuristic_leaf_backend()
+    if kind == "triton":
+        return create_leaf_backend(prefer_triton=True)
+    return create_leaf_backend()
 
 
 if __name__ == "__main__":

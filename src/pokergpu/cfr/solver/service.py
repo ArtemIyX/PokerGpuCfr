@@ -14,6 +14,7 @@ from types import TracebackType
 import numpy as np
 
 from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
+from pokergpu.cfr.leaf_eval import LeafEvalBackend
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage1 import propagate_forward
 from pokergpu.cfr.stage2 import AggregateProbSumResult
@@ -55,7 +56,7 @@ class SolverStageService:
         tree: PublicTree,
         dense_state: DenseCfrState | None = None,
         board: Board | None = None,
-        backend: GpuLeafBackend | None = None,
+        backend: LeafEvalBackend | None = None,
         infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
         max_workers: int | None = None,
         executor: Executor | None = None,
@@ -199,7 +200,7 @@ def run_solver_stage(
     tree: PublicTree,
     dense_state: DenseCfrState | None = None,
     board: Board | None = None,
-    backend: GpuLeafBackend | None = None,
+    backend: LeafEvalBackend | None = None,
     infoset_strategies: dict[InfosetId, tuple[float, ...]] | None = None,
     max_workers: int | None = None,
     executor: Executor | None = None,

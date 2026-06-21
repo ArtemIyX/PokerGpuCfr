@@ -121,13 +121,14 @@ def _find_free_port() -> int:
 
 
 def _launch_tensorboard(log_dir: Path, port: int) -> subprocess.Popen[str]:
+    tensorboard_root = log_dir.parent
     return subprocess.Popen(
         [
             sys.executable,
             "-m",
             "tensorboard.main",
             "--logdir",
-            str(log_dir),
+            str(tensorboard_root),
             "--port",
             str(port),
             "--reload_interval",
