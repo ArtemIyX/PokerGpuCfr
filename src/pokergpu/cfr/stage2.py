@@ -149,17 +149,16 @@ def aggregate_prob_sum_prepacked(
             prepared.board_card_mask,
             prepared.live_hand_mask,
         )
-        _fill_leaf_features_numba(
-            prepared.leaf_batch_features,
-            prepared.node_reach,
-            prepared.leaf_shares,
-            prepared.board_card_mask,
-            prepared.board_card_vector,
-            prepared.leaf_card_reach_vector,
-            np.float32(board_street),
-            np.float32(prepared.board_size),
-            np.float32(prepared.board_signature),
-            prepared.leaf_indices,
+        prepared.leaf_batch_features[:] = _build_leaf_feature_rows(
+            leaf_indices=prepared.leaf_indices,
+            node_reach=prepared.node_reach,
+            leaf_shares=prepared.leaf_shares,
+            street=board_street,
+            board_size=prepared.board_size,
+            board_signature=prepared.board_signature,
+            board_card_mask=prepared.board_card_mask,
+            board_card_vector=prepared.board_card_vector,
+            leaf_card_reach_vector=prepared.leaf_card_reach_vector,
         )
         leaf_batch = LeafBatchInput(
             node_ids=prepared.leaf_node_ids,

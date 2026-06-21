@@ -77,7 +77,7 @@ def test_aggregate_prob_sum_uses_board_street() -> None:
     assert result.leaf_batch.features[0, 0] == pytest.approx(1.0)
     assert result.leaf_batch.features[0, 1] == pytest.approx(1.0)
     assert sum(
-        1 for value in result.leaf_batch.features[0, 109:161] if value > 0.0
+        1 for value in result.leaf_batch.features[0, 110:162] if value > 0.0
     ) == 49
     assert sum(result.node_aggregate.card_reach[0]) == pytest.approx(1.0)
     assert sum(result.node_aggregate.hand_reach[0]) == pytest.approx(1.0)

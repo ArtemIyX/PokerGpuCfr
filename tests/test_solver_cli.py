@@ -19,6 +19,8 @@ from pokergpu.cfr.solver import ProfilerSpec
 from pokergpu.cfr.solver import ProfilingKind
 from pokergpu.cfr.solver import SolverStageRequest
 from pokergpu.cfr.solver import TimingSpec
+from pokergpu.cfr.solver.infosets import build_dense_infoset_table
+from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
 
 
 class _FakeDebugSink:
@@ -193,22 +195,24 @@ def test_main_root_strategy_comes_from_final_state(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    table = build_dense_infoset_table(make_kuhn_public_tree())
     states = [
         DenseCfrState(
-            regret_sums=((0.0, 0.0), (0.0, 0.0)),
-            strategy_sums=((1.0, 3.0), (0.0, 0.0)),
+            regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+            strategy_sums=tuple((1.0, 3.0) if index == table.infoset_order[0] else (0.0, 0.0) for index in range(table.infoset_count)),
         ),
         DenseCfrState(
-            regret_sums=((0.0, 0.0), (0.0, 0.0)),
-            strategy_sums=((4.0, 0.0), (0.0, 0.0)),
+            regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+            strategy_sums=tuple((4.0, 0.0) if index == table.infoset_order[0] else (0.0, 0.0) for index in range(table.infoset_count)),
         ),
     ]
 
     def fake_run_solver_stage(*args: object, **kwargs: object) -> SimpleNamespace:
         request = args[0]
+        final_state = states[0] if len(states) == 1 else states.pop(0)
         return SimpleNamespace(
             request=request,
-            final_state=states.pop(0),
+            final_state=final_state,
             timing_seconds=None,
             profiler_output=None,
             diagnostics={},
@@ -345,14 +349,15 @@ def test_root_strategy_should_change_when_state_changes(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    table = build_dense_infoset_table(make_kuhn_public_tree())
     states = [
         DenseCfrState(
-            regret_sums=((0.0, 0.0), (0.0, 0.0)),
-            strategy_sums=((1.0, 1.0), (0.0, 0.0)),
+            regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+            strategy_sums=tuple((1.0, 1.0) if index == table.infoset_order[0] else (0.0, 0.0) for index in range(table.infoset_count)),
         ),
         DenseCfrState(
-            regret_sums=((0.0, 0.0), (0.0, 0.0)),
-            strategy_sums=((9.0, 1.0), (0.0, 0.0)),
+            regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+            strategy_sums=tuple((9.0, 1.0) if index == table.infoset_order[0] else (0.0, 0.0) for index in range(table.infoset_count)),
         ),
     ]
 
@@ -395,14 +400,15 @@ def test_root_strategy_should_not_be_identical_across_different_exact_states(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    table = build_dense_infoset_table(make_kuhn_public_tree())
     states = [
         DenseCfrState(
-            regret_sums=((0.0, 0.0), (0.0, 0.0)),
-            strategy_sums=((1.0, 3.0), (0.0, 0.0)),
+            regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+            strategy_sums=tuple((1.0, 3.0) if index == table.infoset_order[0] else (0.0, 0.0) for index in range(table.infoset_count)),
         ),
         DenseCfrState(
-            regret_sums=((0.0, 0.0), (0.0, 0.0)),
-            strategy_sums=((3.0, 1.0), (0.0, 0.0)),
+            regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+            strategy_sums=tuple((3.0, 1.0) if index == table.infoset_order[0] else (0.0, 0.0) for index in range(table.infoset_count)),
         ),
     ]
 

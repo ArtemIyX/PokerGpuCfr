@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Executor
 import numpy as np
 
+from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
 from pokergpu.cfr.leaf_eval import LeafEvalBackend
 from pokergpu.cfr.leaf_eval import LeafEvalResult
 from pokergpu.cfr.leaf_backend_factory import create_leaf_backend

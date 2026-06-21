@@ -21,9 +21,11 @@ from pokergpu.cfr.solver import SolverStageRequest
 from pokergpu.cfr.solver import SolverStageResult
 from pokergpu.cfr.solver import TimingSpec
 from pokergpu.cfr.solver import build_dense_infoset_table
+from pokergpu.tree.public_tree import InfosetId
 from pokergpu.cfr.solver.debug import create_debug_session
 from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
 from pokergpu.cfr.leaf_backend_factory import create_leaf_backend
+from pokergpu.cfr.leaf_eval import LeafEvalBackend
 from pokergpu.cfr.solver import make_game_public_tree
 from pokergpu.cfr.solver import run_solver_stage
 from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
@@ -167,10 +169,12 @@ def main(argv: list[str] | None = None) -> int:
         board,
         debug=args.debug,
     )
-    if args.debug and debug_session.log_dir is not None:
-        print(f"tensorboard_log_dir={debug_session.log_dir}")
-    if args.debug and debug_session.tensorboard_url is not None:
-        print(f"tensorboard_url={debug_session.tensorboard_url}")
+    log_dir = getattr(debug_session, "log_dir", None)
+    tensorboard_url = getattr(debug_session, "tensorboard_url", None)
+    if args.debug and log_dir is not None:
+        print(f"tensorboard_log_dir={log_dir}")
+    if args.debug and tensorboard_url is not None:
+        print(f"tensorboard_url={tensorboard_url}")
     if args.summary_output is not None:
         _write_summary(
             args.summary_output,
@@ -178,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
             current if isinstance(current, SolverDenseCfrState) else None,
             tree,
             board,
-            debug_log_dir=debug_session.log_dir if args.debug else None,
-            debug_url=debug_session.tensorboard_url if args.debug else None,
+            debug_log_dir=log_dir if args.debug else None,
+            debug_url=tensorboard_url if args.debug else None,
         )
     return 0
 
@@ -328,9 +332,9 @@ def _format_board_cards(board: Board) -> str:
 def _decode_debug_game_state(result: SolverStageResult) -> GameState | None:
     state_spec = result.request.state
     if state_spec is None or state_spec.encoded_state is None:
-        return make_random_game_state(rng=Random(result.request.effective_seed))
+        return None
     decoded = decode_game_state(state_spec.encoded_state)
-    return decoded if decoded is not None else make_random_game_state(rng=Random(result.request.effective_seed))
+    return decoded
 
 
 def _parse_hole_cards(value: object) -> tuple[Card, Card] | None:
@@ -380,22 +384,22 @@ def _format_root_strategy(dense_state: DenseCfrState | None, tree: PublicTree) -
 def _dense_state_to_infoset_strategies(
     dense_state: DenseCfrState | None,
     tree: PublicTree,
-) -> dict[int, tuple[float, ...]] | None:
+) -> dict[InfosetId, tuple[float, ...]] | None:
     if dense_state is None:
         return None
     table = build_dense_infoset_table(tree)
-    strategies: dict[int, tuple[float, ...]] = {}
+    strategies: dict[InfosetId, tuple[float, ...]] = {}
     for infoset_id in table.infoset_order:
         regrets = dense_state.regret_sums[infoset_id]
         total = sum(max(0.0, value) for value in regrets)
         if total <= 0.0:
-            strategies[infoset_id] = tuple(1.0 / len(regrets) for _ in regrets)
+            strategies[InfosetId(infoset_id)] = tuple(1.0 / len(regrets) for _ in regrets)
         else:
-            strategies[infoset_id] = tuple(max(0.0, value) / total for value in regrets)
+            strategies[InfosetId(infoset_id)] = tuple(max(0.0, value) / total for value in regrets)
     return strategies
 
 
-def _build_leaf_backend(kind: str):
+def _build_leaf_backend(kind: str) -> LeafEvalBackend:
     if kind == "heuristic":
         return create_heuristic_leaf_backend()
     if kind == "triton":

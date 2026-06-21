@@ -13,7 +13,6 @@ from types import TracebackType
 
 import numpy as np
 
-from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
 from pokergpu.cfr.leaf_eval import LeafEvalBackend
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage1 import propagate_forward
@@ -254,7 +253,7 @@ def _run_gpu_branch(
     tree: PublicTree,
     forward: ForwardProfileResult,
     board: Board | None,
-    backend: GpuLeafBackend | None,
+    backend: LeafEvalBackend | None,
     max_workers: int | None,
 ) -> tuple[float, ...]:
     leaf_result = evaluate_leaf_node_values(
@@ -325,19 +324,24 @@ def _apply_seed_bias(
     if dense_state is None or request.seed is None or not table.infoset_order:
         return dense_state
     root_infoset = table.infoset_order[0]
+    regret_sums = list(dense_state.regret_sums[root_infoset])
     strategy_sums = list(dense_state.strategy_sums[root_infoset])
-    if not strategy_sums:
+    if not regret_sums or not strategy_sums:
         return dense_state
     state_mode_bias = 0
     if request.state is not None:
         state_mode_bias = 1 if request.state.mode.value == "exact" else 2
     seed_value = abs(request.seed) + sum(ord(char) for char in request.game.value) + state_mode_bias
-    biased = [float(index + 1 + (seed_value % 5)) for index in range(len(strategy_sums))]
-    strategy_sums = [value + bias * 1e-3 for value, bias in zip(strategy_sums, biased, strict=True)]
+    scale = 0.05 * float((seed_value % 5) + 1)
+    centered = [float(index - (len(regret_sums) - 1) / 2.0) for index in range(len(regret_sums))]
+    regret_sums = [value + scale * bias for value, bias in zip(regret_sums, centered, strict=True)]
+    strategy_sums = [value + max(scale, 1e-3) for value in strategy_sums]
     updated_strategy_sums = list(dense_state.strategy_sums)
+    updated_regret_sums = list(dense_state.regret_sums)
+    updated_regret_sums[root_infoset] = tuple(regret_sums)
     updated_strategy_sums[root_infoset] = tuple(strategy_sums)
     return DenseCfrState(
-        regret_sums=dense_state.regret_sums,
+        regret_sums=tuple(updated_regret_sums),
         strategy_sums=tuple(updated_strategy_sums),
     )
 

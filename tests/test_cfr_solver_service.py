@@ -162,6 +162,30 @@ def test_run_solver_stage_routes_cfr_variants_through_stage7(
     assert routed == [variant]
 
 
+def test_seed_bias_perturbs_root_regrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pokergpu.cfr.solver.service as service
+    from pokergpu.cfr.solver.infosets import build_dense_infoset_table
+
+    tree = make_kuhn_public_tree()
+    table = build_dense_infoset_table(tree)
+    dense_state = DenseCfrState(
+        regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+    )
+    request = SolverStageRequest(
+        game=GameVariant.KUHN,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=2,
+        seed=17,
+    )
+
+    biased = service._apply_seed_bias(request, dense_state, table)
+
+    assert biased is not None
+    assert biased.regret_sums[table.infoset_order[0]] != (0.0, 0.0)
+    assert biased.strategy_sums[table.infoset_order[0]] != (0.0, 0.0)
+
+
 def _record_call(calls: list[str], stage: str) -> SimpleNamespace:
     calls.append(stage)
     return SimpleNamespace()
