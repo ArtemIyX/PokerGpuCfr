@@ -150,7 +150,7 @@ Goal:
 
 - [x] confirm heads-up only, exactly two players;
 - [x] confirm the root starts from preflop after blinds are posted;
-- [ ] confirm dealer/button encoding and who acts first preflop;
+- [x] confirm dealer/button encoding and who acts first preflop;
 - [x] confirm whether the first implementation uses a fixed cutoff depth, a street cutoff, or both;
 - [x] confirm whether exact showdowns are handled immediately or deferred to leaf evaluation;
 - [x] confirm whether the builder accepts a full `GameState` or a reduced Hold'em-specific public state object;
