@@ -21,7 +21,7 @@ def test_make_game_public_tree_selects_kuhn_and_leduc() -> None:
 
 
 def test_make_game_public_tree_rejects_placeholder_variants() -> None:
-    with pytest.raises(NotImplementedError, match="public tree factory not implemented"):
+    with pytest.raises(NotImplementedError, match="unsupported game variant 'holdem_6max'"):
         make_game_public_tree(GameVariant.HOLDEM_6MAX)
 
 

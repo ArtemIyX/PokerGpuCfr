@@ -186,8 +186,8 @@ Goal:
 - [x] keep node ordering deterministic;
 - [x] include both `TERMINAL` and `LEAF` nodes in the first scaffold;
 - [x] keep child counts and `first_child` offsets consistent with the array representation;
-- [ ] keep `HOLDEM_6MAX` unsupported for now;
-- [ ] make unsupported variants fail with a clear error message.
+- [x] keep `HOLDEM_6MAX` unsupported for now;
+- [x] make unsupported variants fail with a clear error message.
 
 ### Minimal target behavior
 

@@ -54,7 +54,14 @@ def make_game_public_tree(game: GameVariant) -> PublicTree:
         return make_leduc_public_tree()
     if game is GameVariant.HOLDEM_HU:
         return make_holdem_hu_public_tree()
-    raise NotImplementedError(f"public tree factory not implemented for {game}")
+    supported = ", ".join(
+        (
+            GameVariant.KUHN.value,
+            GameVariant.LEDUC.value,
+            GameVariant.HOLDEM_HU.value,
+        )
+    )
+    raise NotImplementedError(f"unsupported game variant {game.value!r}; supported variants: {supported}")
 
 
 def make_holdem_hu_public_tree() -> PublicTree:
