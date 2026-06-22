@@ -260,7 +260,8 @@ def test_holdem_hu_root_strategy_accumulates_over_iterations() -> None:
         )
         assert result.final_state is not None
         current = result.final_state if isinstance(result.final_state, DenseCfrState) else None
-        root_row = current_state.strategy_sums[0]
+        assert current is not None
+        root_row = current.strategy_sums[0]
         total = sum(root_row)
         normalized = tuple(value / total for value in root_row) if total > 0.0 else tuple(0.0 for _ in root_row)
         if first is None:

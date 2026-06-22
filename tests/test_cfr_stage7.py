@@ -133,3 +133,53 @@ def test_apply_dense_backward_cfv_update_threaded_matches_serial() -> None:
     threaded = apply_dense_backward_cfv_update(state, backward, infoset_table=table, max_workers=4)
 
     assert threaded == serial
+
+
+def test_apply_dense_backward_cfv_update_accumulates_over_iterations() -> None:
+    tree = PublicTree(
+        node_types=(
+            NodeType.PLAYER0,
+            NodeType.TERMINAL,
+            NodeType.TERMINAL,
+        ),
+        first_child=(0, 2, 2),
+        child_count=(2, 0, 0),
+        children=(
+            ChildLink(child=NodeId(1)),
+            ChildLink(child=NodeId(2)),
+        ),
+        infoset_ids=(InfosetId(0), None, None),
+        terminal_payoffs=(None, Chips(1), Chips(3)),
+    )
+    forward = ForwardProfileResult(
+        node_reach=(1.0, 0.5, 0.5),
+        infoset_reach=(1.0,),
+        action_reach=((0.5, 0.5), (), ()),
+    )
+    aggregate = aggregate_prob_sum(tree, forward)
+    opponent = compute_opponent_reach(tree, aggregate)
+    backward = backward_cfv(
+        BackwardCFVInput(
+            tree=tree,
+            forward=forward,
+            aggregate=aggregate,
+            opponent_reach=opponent,
+            showdown=ShowdownEquityResult(
+                node_showdown_equity=(0.0, 1.0, 3.0),
+                node_showdown_equity_bb=(0.0, 1.0, 3.0),
+                input_rows=ShowdownEquityBatchInput(rows=()),
+                output_rows=(),
+            ),
+            leaf_values=np.asarray((), dtype=np.float64),
+        )
+    )
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(regret_sums=((0.0, 0.0),), strategy_sums=((0.0, 0.0),))
+
+    first = apply_dense_backward_cfv_update(state, backward, infoset_table=table)
+    second = apply_dense_backward_cfv_update(first, backward, infoset_table=table)
+
+    assert first.regret_sums[0] == (-1.0, 1.0)
+    assert second.regret_sums[0] == (-2.0, 2.0)
+    assert first.strategy_sums[0] == (0.5, 0.5)
+    assert second.strategy_sums[0] == (0.5, 1.5)

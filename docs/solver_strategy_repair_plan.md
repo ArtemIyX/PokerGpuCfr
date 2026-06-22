@@ -184,6 +184,8 @@ Status: complete. The Hold'em leaf path is now board-sensitive and is covered by
 
 - A simple asymmetric toy state produces a visibly asymmetric policy after updates.
 
+Status: next up. The current focus is to verify that repeated iterations keep moving root strategy and regrets in the expected direction on the repaired Hold'em spot.
+
 ## Phase 6: Add End-To-End Solver Regression Coverage
 
 ### Objectives
