@@ -335,23 +335,23 @@ Goal:
 
 ### Checklist
 
-- [ ] tree construction regression tests;
-- [ ] legal-action regression tests;
-- [ ] bucket regression tests;
-- [ ] depth-limit regression tests;
-- [ ] solver smoke test for a minimal HU Hold'em state;
-- [ ] invalid-state regression tests;
-- [ ] determinism regression tests;
-- [ ] no-duplicate-action regression tests;
-- [ ] no invalid card overlap regression tests.
+- [x] tree construction regression tests;
+- [x] legal-action regression tests;
+- [x] bucket regression tests;
+- [x] depth-limit regression tests;
+- [x] solver smoke test for a minimal HU Hold'em state;
+- [x] invalid-state regression tests;
+- [x] determinism regression tests;
+- [x] no-duplicate-action regression tests;
+- [x] no invalid card overlap regression tests.
 
 ### Tests to write after Phase 5
 
-- all new Hold'em tests pass;
-- existing toy-game tests remain green;
-- the Hold'em tree is deterministic under repeated construction;
-- the Hold'em solver smoke test completes successfully;
-- invalid states fail fast and clearly.
+- [x] all new Hold'em tests pass;
+- [x] existing toy-game tests remain green;
+- [x] the Hold'em tree is deterministic under repeated construction;
+- [x] the Hold'em solver smoke test completes successfully;
+- [x] invalid states fail fast and clearly.
 
 ## Phase 6 - Integrate GPU leaf evaluation for Hold'em
 

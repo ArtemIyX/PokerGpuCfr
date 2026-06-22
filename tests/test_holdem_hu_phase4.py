@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
 from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.cfr.stage1 import propagate_forward
@@ -48,7 +50,7 @@ def test_holdem_hu_solver_smoke_test_runs_end_to_end() -> None:
     assert result.final_state is not None
     assert len(result.final_state.regret_sums) == table.infoset_count
     assert len(result.final_state.strategy_sums) == table.infoset_count
-    root_strategy = result.final_state.strategy_sums[0]
+    root_strategy = cast(tuple[float, ...], result.final_state.strategy_sums[0])
     total = sum(root_strategy)
     assert total > 0.0
     normalized = tuple(value / total for value in root_strategy)
