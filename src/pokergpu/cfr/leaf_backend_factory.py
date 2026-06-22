@@ -37,7 +37,7 @@ class HeuristicLeafBackend(LeafEvalBackend):
             + (0.35 * share)
             + (0.02 * board_size)
             + (0.01 * street)
-            + (0.00001 * board_signature)
+            + (0.0000001 * board_signature)
             + (0.05 * leaf_index)
             + (0.002 * live_board_cards)
             - (0.001 * blocked_cards)

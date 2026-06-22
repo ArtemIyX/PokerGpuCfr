@@ -234,7 +234,9 @@ def _resolve_board(args: argparse.Namespace, request: SolverStageRequest) -> Boa
     if args.board:
         return Board.from_str(args.board)
     if request.state is not None and request.state.seed is not None:
-        return Board(cards=())
+        rng = Random(request.state.seed)
+        board, _ = _make_random_board_and_used_cards(shuffled_deck(rng), rng)
+        return board
     return Board(cards=())
 
 

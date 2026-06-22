@@ -31,6 +31,7 @@ from pokergpu.cfr.stage6 import backward_cfv
 from pokergpu.cfr.stage7 import apply_dense_backward_cfv_update
 from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import InfosetId
+from pokergpu.tree.public_tree import NodeType
 from pokergpu.tree.public_tree import PublicTree
 
 from .evaluation import evaluate_leaf_node_values
@@ -172,11 +173,7 @@ class SolverStageService:
             if request.debug.enabled:
                 _log_stage7_debug(sink, final_state, dense_state, table, debug_step)
                 sink.add_text("debug/timings", "\n".join(f"{k}: {v:.6f}" for k, v in timings.items()), debug_step)
-                sink.add_text("debug/diagnostics", "\n".join(f"{k}: {v}" for k, v in {
-                    "game": request.game.value,
-                    "cfr_variant": request.cfr_variant.value,
-                    "tree_nodes": tree.node_count,
-                }.items()), debug_step)
+                sink.add_text("debug/diagnostics", "\n".join(f"{k}: {v}" for k, v in _tree_debug_fields(tree, table).items()), debug_step)
 
             if profiler is not None:
                 profiler_output = _finalize_profiler_output(request, profiler)
@@ -189,7 +186,7 @@ class SolverStageService:
             diagnostics={
                 "game": request.game.value,
                 "cfr_variant": request.cfr_variant.value,
-                "tree_nodes": tree.node_count,
+                **_tree_debug_fields(tree, table),
                 "root_infoset": table.infoset_order[0] if table.infoset_order else None,
                 "root_regrets": final_state.regret_sums[table.infoset_order[0]] if final_state is not None and table.infoset_order else None,
                 "root_strategy_sums": final_state.strategy_sums[table.infoset_order[0]] if final_state is not None and table.infoset_order else None,
@@ -532,3 +529,30 @@ def _log_stage7_debug(
                 new - old
                 for new, old in zip(final_state.strategy_sums[root_infoset], dense_state.strategy_sums[root_infoset], strict=True)
             ], step)
+
+
+def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, object]:
+    leaf_count = sum(1 for node_type in tree.node_types if node_type is NodeType.LEAF)
+    depth_limit_hit_count = sum(
+        1
+        for node_type, payoff in zip(tree.node_types, tree.terminal_payoffs, strict=True)
+        if node_type is NodeType.LEAF and payoff is None
+    )
+    terminal_count = sum(1 for node_type in tree.node_types if node_type is NodeType.TERMINAL)
+    chance_count = sum(1 for node_type in tree.node_types if node_type is NodeType.CHANCE)
+    player_count = sum(1 for node_type in tree.node_types if node_type in {NodeType.PLAYER0, NodeType.PLAYER1})
+    branch_counts = [count for count in tree.child_count if count > 0]
+    max_branching = max(branch_counts) if branch_counts else 0
+    avg_branching = (sum(branch_counts) / len(branch_counts)) if branch_counts else 0.0
+    return {
+        "tree_nodes": tree.node_count,
+        "tree_player_nodes": player_count,
+        "tree_chance_nodes": chance_count,
+        "tree_terminal_nodes": terminal_count,
+        "tree_leaf_nodes": leaf_count,
+        "tree_depth_limit_hits": depth_limit_hit_count,
+        "tree_infosets": table.infoset_count,
+        "tree_max_branching": max_branching,
+        "tree_avg_branching": avg_branching,
+        "tree_root_child_count": tree.child_count[0] if tree.child_count else 0,
+    }

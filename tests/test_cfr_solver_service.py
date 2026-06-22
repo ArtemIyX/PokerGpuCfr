@@ -168,6 +168,15 @@ def test_run_solver_stage_reports_root_diagnostics(monkeypatch: pytest.MonkeyPat
     assert result.diagnostics["root_strategy_sums"] == (2.0, 1.0)
     assert result.diagnostics["root_action_values"] == (1.0, -1.0)
     assert result.diagnostics["root_node_value"] == 1.25
+    assert result.diagnostics["tree_nodes"] == tree.node_count
+    assert result.diagnostics["tree_leaf_nodes"] == 0
+    assert result.diagnostics["tree_terminal_nodes"] == 12
+    assert result.diagnostics["tree_player_nodes"] == 6
+    assert result.diagnostics["tree_chance_nodes"] == 1
+    assert result.diagnostics["tree_infosets"] == 6
+    assert result.diagnostics["tree_depth_limit_hits"] == 0
+    assert result.diagnostics["tree_max_branching"] == 6
+    assert result.diagnostics["tree_root_child_count"] == 6
 
 
 @pytest.mark.parametrize(

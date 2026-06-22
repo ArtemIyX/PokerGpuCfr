@@ -344,6 +344,73 @@ def test_holdem_hu_cli_debug_prints_root_diagnostics(
     assert "debug.root_strategy=" in captured
 
 
+def test_holdem_hu_random_state_mode_uses_seeded_board(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_run_solver_stage(*args: object, **kwargs: object) -> SimpleNamespace:
+        request = args[0]
+        return SimpleNamespace(
+            request=request,
+            final_state=kwargs.get("dense_state"),
+            timing_seconds=None,
+            profiler_output=None,
+            diagnostics={},
+        )
+
+    class _FakeDebugSink:
+        def add_scalar(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def add_histogram(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def add_text(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def add_sample(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class _FakeDebugSession:
+        def __init__(self) -> None:
+            self.sink = _FakeDebugSink()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(solver_holdem_hu_cli, "run_solver_stage", fake_run_solver_stage)
+    monkeypatch.setattr(solver_holdem_hu_cli, "create_debug_session", lambda spec, run_name: _FakeDebugSession())
+
+    captured_runs: list[str] = []
+    for seed in (17, 18, 19, 20):
+        exit_code = solver_holdem_hu_cli.main(
+            [
+                "--variant",
+                "cfr",
+                "--depth",
+                "1",
+                "--state-mode",
+                "random",
+                "--seed",
+                str(seed),
+                "--debug",
+            ]
+        )
+        captured = capsys.readouterr().out
+        assert exit_code == 0
+        assert "state_mode=random" in captured
+        assert f"state_seed={seed}" in captured
+        assert "board=" in captured
+        assert "board_cards=" in captured
+        captured_runs.append(captured)
+
+    assert any("board_cards=[]" not in run for run in captured_runs)
+    assert any("board_cards=[]" in run for run in captured_runs)
+
+
 def test_holdem_hu_leaf_features_include_board_context() -> None:
     build_dense_infoset_table.cache_clear()
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
@@ -373,6 +440,35 @@ def test_holdem_hu_heuristic_leaf_backend_is_board_sensitive() -> None:
     assert isinstance(empty_values, type(flop_values))
     assert empty_values.values.shape == flop_values.values.shape
     assert tuple(empty_values.values[:, 0]) != tuple(flop_values.values[:, 0])
+
+
+def test_holdem_hu_heuristic_leaf_backend_stays_in_sane_range() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=Board.from_str("AhKdTc"),
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert result.diagnostics is not None
+    root_values = cast(tuple[float, ...], result.diagnostics["root_action_values"])
+    assert max(abs(value) for value in root_values) < 25.0
+    assert max(root_values) - min(root_values) < 25.0
 
 
 def test_holdem_hu_leaf_batch_works_with_gpu_backend() -> None:
