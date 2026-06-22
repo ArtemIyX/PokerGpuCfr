@@ -38,10 +38,11 @@ def action_labels_for_street(
     include_check: bool = True,
 ) -> tuple[str, ...]:
     template = profile.template_for_street(street)
+    prefix = "" if street is Street.PREFLOP else f"{street.value}_"
     labels: list[str] = []
     if include_check:
-        labels.append("check")
-    labels.extend(f"bet:{int(round(size * 100))}pct" for size in template.bet_sizes)
+        labels.append(f"{prefix}check")
+    labels.extend(f"{prefix}bet:{int(round(size * 100))}pct" for size in template.bet_sizes)
     return tuple(labels)
 
 
@@ -78,15 +79,15 @@ def make_holdem_hu_profile() -> AbstractionProfile:
                 raise_to_multipliers=(1.0, 1.5),
             ),
             Street.FLOP: StreetActionTemplate(
-                bet_sizes=(0.25, 0.5, 0.75, 1.0),
+                bet_sizes=(0.25, 0.5, 0.75, 1.0, 1.5),
                 raise_to_multipliers=(1.0, 1.5, 2.0),
             ),
             Street.TURN: StreetActionTemplate(
-                bet_sizes=(0.25, 0.5, 1.0),
+                bet_sizes=(0.25, 0.5, 0.75, 1.0),
                 raise_to_multipliers=(1.0, 1.5, 2.0),
             ),
             Street.RIVER: StreetActionTemplate(
-                bet_sizes=(0.33, 0.66, 1.0, 1.5),
+                bet_sizes=(0.33, 0.66, 1.0, 1.5, 2.0),
                 raise_to_multipliers=(1.0, 1.5),
             ),
         },

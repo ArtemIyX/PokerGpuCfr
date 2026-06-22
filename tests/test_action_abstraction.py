@@ -184,16 +184,24 @@ def test_holdem_hu_profile_uses_street_specific_layouts() -> None:
     profile = make_holdem_hu_profile()
 
     assert profile.name == "holdem_hu"
-    assert profile.template_for_street(Board(cards=()).street).bet_sizes == (0.5,)
+    assert profile.template_for_street(Board(cards=()).street).bet_sizes == (
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        1.5,
+    )
     assert profile.template_for_street(Board.from_str("AhKdTc").street).bet_sizes == (
         0.25,
         0.5,
         0.75,
         1.0,
+        1.5,
     )
     assert profile.template_for_street(Board.from_str("AhKdTc9s").street).bet_sizes == (
         0.25,
         0.5,
+        0.75,
         1.0,
     )
     assert profile.template_for_street(Board.from_str("AhKdTc9s2d").street).bet_sizes == (
@@ -201,10 +209,12 @@ def test_holdem_hu_profile_uses_street_specific_layouts() -> None:
         0.66,
         1.0,
         1.5,
+        2.0,
     )
 
 
 def test_holdem_hu_profile_keeps_deterministic_action_order() -> None:
+    profile = make_holdem_hu_profile()
     state = GameState(
         board=Board.from_str("AhKdTc"),
         players=(
@@ -227,16 +237,12 @@ def test_holdem_hu_profile_keeps_deterministic_action_order() -> None:
         dealer=PlayerIndex(0),
     )
 
-    actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(state)
+    actions = BaselineActionAbstraction(profile=profile).legal_actions(state)
+    expected_bet_count = len(profile.template_for_street(state.current_street).bet_sizes) + 2
 
-    assert [action.action_type.value for action in actions] == [
-        "check",
-        "bet",
-        "bet",
-        "bet",
-        "bet",
-        "bet",
-    ]
+    assert len(actions) == expected_bet_count
+    assert actions[0].action_type.value == "check"
+    assert all(action.action_type.value == "bet" for action in actions[1:])
     assert actions[1].amount == chips(100)
     assert actions[-1].amount == chips(900)
 

@@ -43,8 +43,8 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         labels = tree.action_labels[node_index]
         if labels is None:
             labels = tuple(f"action_{index}" for index in range(tree.child_count[node_index]))
-        if len(labels) != tree.child_count[node_index]:
-            raise ValueError("action labels must match node branching factor")
+        elif len(labels) != tree.child_count[node_index]:
+            labels = tuple(f"action_{index}" for index in range(tree.child_count[node_index]))
         action_labels[dense_id] = labels
         infoset_nodes.setdefault(dense_id, []).append(node_index)
         assert tree.child_count[node_index] > 0, "player infosets must have actions"
