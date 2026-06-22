@@ -241,8 +241,8 @@ def _resolve_board(args: argparse.Namespace, request: SolverStageRequest) -> Boa
 def _make_dense_state(tree: PublicTree) -> DenseCfrState:
     table = build_dense_infoset_table(tree)
     return DenseCfrState(
-        regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
-        strategy_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[infoset_id])) for infoset_id in table.infoset_order),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[infoset_id])) for infoset_id in table.infoset_order),
     )
 
 
@@ -266,7 +266,7 @@ def _print_summary(
     if debug:
         _print_debug_details(result, board, tree, dense_state)
     if dense_state is not None:
-        root_strategy = _format_root_strategy(dense_state, tree, runtime_state)
+        root_strategy = _format_root_strategy(dense_state, tree)
         if root_strategy is not None:
             print(f"root_strategy={root_strategy}")
     if result.timing_seconds is not None:
@@ -297,7 +297,7 @@ def _write_summary(
         "timing_seconds": result.timing_seconds,
         "diagnostics": result.diagnostics,
         "profiler_output": result.profiler_output,
-        "root_strategy": _format_root_strategy(dense_state, tree, runtime_state),
+        "root_strategy": _format_root_strategy(dense_state, tree),
     }
     if debug_log_dir is not None:
         payload["tensorboard_log_dir"] = str(debug_log_dir)
@@ -434,7 +434,7 @@ def _print_debug_details(
         for key in sorted(diagnostics):
             print(f"diagnostic.{key}={diagnostics[key]}")
     if dense_state is not None:
-        root_strategy = _format_root_strategy(dense_state, tree, None)
+        root_strategy = _format_root_strategy(dense_state, tree)
         if root_strategy is not None:
             print(f"debug.root_strategy={root_strategy}")
 
@@ -506,7 +506,6 @@ def _format_action(action: Action) -> str:
 def _format_root_strategy(
     dense_state: DenseCfrState | None,
     tree: PublicTree,
-    runtime_state: GameState | None,
 ) -> str | None:
     if dense_state is None:
         return None
@@ -522,18 +521,16 @@ def _format_root_strategy(
         strategy = tuple(1.0 / len(strategy_sums) for _ in strategy_sums)
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
-    labels = _root_action_labels(runtime_state, len(strategy))
+    labels = _root_action_labels(tree, root_infoset, len(strategy))
     parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
     return "{" + parts + "}"
 
 
-def _root_action_labels(runtime_state: GameState | None, action_count: int) -> tuple[str, ...]:
-    if runtime_state is None:
+def _root_action_labels(tree: PublicTree, root_infoset: int, action_count: int) -> tuple[str, ...]:
+    labels = tree.action_labels[tree.infoset_nodes[root_infoset][0]] if tree.action_labels else None
+    if labels is None or len(labels) != action_count:
         return tuple(f"action_{index}" for index in range(action_count))
-    actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(runtime_state)
-    if len(actions) != action_count:
-        return tuple(_format_action(action) for action in actions[:action_count])
-    return tuple(_format_action(action) for action in actions)
+    return labels
 
 
 def _build_leaf_backend(kind: str) -> LeafEvalBackend:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from enum import StrEnum
 from typing import NewType
 
@@ -32,6 +33,7 @@ class PublicTree:
     children: tuple[ChildLink, ...]
     infoset_ids: tuple[InfosetId | None, ...]
     terminal_payoffs: tuple[Chips | None, ...]
+    action_labels: tuple[tuple[str, ...] | None, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         node_count = len(self.node_types)
@@ -43,6 +45,11 @@ class PublicTree:
         )
         if any(length != node_count for length in aligned_lengths):
             raise ValueError("all per-node arrays must have the same length")
+
+        if not self.action_labels:
+            object.__setattr__(self, "action_labels", tuple(None for _ in range(node_count)))
+        elif len(self.action_labels) != node_count:
+            raise ValueError("action_labels must match node count")
 
         for node_index in range(node_count):
             node_type = self.node_types[node_index]
