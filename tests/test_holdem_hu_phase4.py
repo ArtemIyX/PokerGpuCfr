@@ -228,6 +228,51 @@ def test_holdem_hu_leaf_branch_changes_with_board_context() -> None:
     assert no_board.diagnostics["root_action_values"] != flop_board.diagnostics["root_action_values"]
 
 
+def test_holdem_hu_root_strategy_accumulates_over_iterations() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        iterations=5,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+
+    current: DenseCfrState | None = dense_state
+    first = None
+    last = None
+    board = Board.from_str("AhKdTc")
+    for _ in range(request.iterations):
+        assert current is not None
+        current_state = current
+        result = run_solver_stage(
+            request,
+            tree=tree,
+            dense_state=current_state,
+            board=board,
+            backend=create_heuristic_leaf_backend(),
+        )
+        assert result.final_state is not None
+        current = result.final_state if isinstance(result.final_state, DenseCfrState) else None
+        root_row = current_state.strategy_sums[0]
+        total = sum(root_row)
+        normalized = tuple(value / total for value in root_row) if total > 0.0 else tuple(0.0 for _ in root_row)
+        if first is None:
+            first = normalized
+        last = normalized
+
+    assert first is not None
+    assert last is not None
+    assert first != last
+    assert last[-1] == max(last)
+
+
 def test_holdem_hu_cli_debug_prints_root_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

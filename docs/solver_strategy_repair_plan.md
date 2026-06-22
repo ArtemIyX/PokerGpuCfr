@@ -125,18 +125,18 @@ Status: partially complete. The specific root-collapse bug is fixed, and the roo
 
 ### Checklist
 
-- [ ] Audit `src/pokergpu/cfr/solver/evaluation.py`.
-- [ ] Verify the `board is None` path does not accidentally zero out the useful part of evaluation.
-- [ ] Verify heuristic leaf backend output changes across materially different states.
-- [ ] Verify showdown equity is board-aware and not constant across all actions.
-- [ ] Confirm leaf batches carry enough features to distinguish different states.
+- [x] Audit `src/pokergpu/cfr/solver/evaluation.py`.
+- [x] Verify the `board is None` path does not accidentally zero out the useful part of evaluation.
+- [x] Verify heuristic leaf backend output changes across materially different states.
+- [x] Verify showdown equity is board-aware and not constant across all actions.
+- [x] Confirm leaf batches carry enough features to distinguish different states.
 
 ### Required Tests
 
-- [ ] `tests/test_cfr_stage4.py`: showdown equity should differ between clearly stronger and weaker hands.
-- [ ] `tests/test_cfr_stage2.py`: leaf feature rows should change when the board changes.
-- [ ] `tests/test_leaf_backend.py`: heuristic/model/triton backends should not all return identical outputs for distinct inputs.
-- [ ] `tests/test_cfr_stage6.py`: backward CFV should propagate different leaf values into different action values.
+- [x] `tests/test_cfr_stage4.py`: showdown equity should differ between clearly stronger and weaker hands.
+- [x] `tests/test_cfr_stage2.py`: leaf feature rows should change when the board changes.
+- [x] `tests/test_leaf_backend.py`: heuristic/model/triton backends should not all return identical outputs for distinct inputs.
+- [x] `tests/test_cfr_stage6.py`: backward CFV should propagate different leaf values into different action values.
 
 ### Bug Coverage
 
@@ -147,6 +147,8 @@ Status: partially complete. The specific root-collapse bug is fixed, and the roo
 ### Exit Criteria
 
 - At least one realistic spot produces visibly different leaf values for different actions or lines.
+
+Status: complete. The Hold'em leaf path is now board-sensitive and is covered by direct and end-to-end tests.
 
 ## Phase 5: Fix Regret And Strategy Update Behavior
 
