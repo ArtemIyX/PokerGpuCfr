@@ -78,7 +78,7 @@ def make_holdem_hu_public_tree() -> PublicTree:
             ChildLink(child=NodeId(1)),
             ChildLink(child=NodeId(2)),
             ChildLink(child=NodeId(2)),
-            ChildLink(child=NodeId(3)),
+            ChildLink(child=NodeId(2)),
         ),
         infoset_ids=(
             InfosetId(0),
