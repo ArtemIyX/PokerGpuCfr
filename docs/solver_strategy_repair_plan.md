@@ -113,7 +113,7 @@ Status: complete. The root diagnostics were added and used to identify the failu
 
 - The tree contains enough structure for CFR to differentiate betting lines, folds, calls, and raises.
 
-Status: complete for the root-collapse bug. The previous 4-node street skeleton was replaced with a small but non-collapsed root tree so CFR can now see distinct root action values.
+Status: partially complete. The specific root-collapse bug is fixed, and the root now has distinct action values. The broader goal of expanding the Hold'em HU tree into a more realistic street-by-street betting tree is still pending.
 
 ## Phase 4: Make Leaf Evaluation Informative
 
@@ -247,8 +247,8 @@ Status: complete for the root-collapse bug. The previous 4-node street skeleton 
 ## Recommended Implementation Order
 
 1. Phase 1, to identify the dominant failure mode.
-2. Phase 2, to ensure the solver is working on a real spot.
-3. Phase 3, to give CFR enough structure to express strategy.
+2. Phase 3 root-tree repair, to ensure the root has distinct action values.
+3. Phase 2, to ensure the solver is working on a real spot.
 4. Phase 4, to ensure leaf values can actually drive regrets.
 5. Phase 5, to validate regret accumulation and policy extraction.
 6. Phase 6, to lock the behavior with integration tests.

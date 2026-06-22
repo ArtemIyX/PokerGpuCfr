@@ -28,17 +28,12 @@ def test_make_game_public_tree_rejects_placeholder_variants() -> None:
 def test_make_game_public_tree_builds_holdem_street_scaffold() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    assert tree.node_count == 10
+    assert tree.node_count == 7
     assert tree.node_types[0].value == "player0"
-    assert tree.node_types[1].value == "player1"
-    assert tree.node_types[2].value == "player0"
-    assert tree.node_types[3].value == "player1"
-    assert all(node_type.value == "terminal" for node_type in tree.node_types[4:])
+    assert all(node_type.value == "terminal" for node_type in tree.node_types[1:6])
+    assert tree.node_types[6].value == "leaf"
     assert tree.child_count[0] == 6
-    assert tree.child_count[1] == 6
-    assert tree.child_count[2] == 5
-    assert tree.child_count[3] == 6
-    assert any(node_type.value == "terminal" for node_type in tree.node_types)
+    assert all(tree.child_count[index] == 0 for index in range(1, tree.node_count))
     assert tree.action_labels[0] == ("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct")
 
 

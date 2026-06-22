@@ -203,7 +203,15 @@ def _leaf_values(node_count: int) -> object:
 
 
 def _backward() -> object:
-    return type("Backward", (), {})()
+    return type(
+        "Backward",
+        (),
+        {
+            "node_values": (0.0,) * 19,
+            "infoset_values": (0.0,) * 6,
+            "action_values": ((),) * 19,
+        },
+    )()
 
 
 def _make_forward_stub(node_count: int) -> Any:

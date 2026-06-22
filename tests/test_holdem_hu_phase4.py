@@ -45,6 +45,7 @@ def test_holdem_hu_tree_shape_is_deterministic() -> None:
     assert first == second
     assert first.node_count == 7
     assert first.node_types[0] is first.node_types[0]
+    assert first.node_types[-1].value == "leaf"
 
 
 def test_holdem_hu_tree_root_and_street_node_labels() -> None:
@@ -65,9 +66,10 @@ def test_holdem_hu_tree_transitions_flow_street_to_street() -> None:
 def test_holdem_hu_tree_terminal_nodes_have_no_actions() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    for node_index in range(1, tree.node_count):
+    for node_index in range(1, tree.node_count - 1):
         assert tree.child_count[node_index] == 0
         assert tree.child_links(NodeId(node_index)) == ()
+    assert tree.child_count[tree.node_count - 1] == 0
 
 
 def test_holdem_hu_tree_action_label_width_matches_child_count() -> None:
@@ -189,6 +191,41 @@ def test_holdem_hu_root_action_values_are_not_all_zero() -> None:
 
     assert result.diagnostics is not None
     assert result.diagnostics["root_action_values"] != (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_holdem_hu_leaf_branch_changes_with_board_context() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+
+    no_board = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=Board(cards=()),
+        backend=create_heuristic_leaf_backend(),
+    )
+    flop_board = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=Board.from_str("AhKdTc"),
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert no_board.diagnostics is not None
+    assert flop_board.diagnostics is not None
+    assert no_board.diagnostics["root_action_values"] != flop_board.diagnostics["root_action_values"]
 
 
 def test_holdem_hu_cli_debug_prints_root_diagnostics(

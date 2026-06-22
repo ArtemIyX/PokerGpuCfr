@@ -71,13 +71,35 @@ def make_holdem_hu_public_tree() -> PublicTree:
     profile = make_holdem_hu_profile()
     action_labels = action_labels_for_street(profile, Street.PREFLOP)
     action_count = len(action_labels)
-    terminal_payoffs = tuple(Chips(index - (action_count // 2)) for index in range(action_count))
-    node_types = (NodeType.PLAYER0, *(NodeType.TERMINAL for _ in range(action_count)))
-    children = tuple(ChildLink(child=NodeId(index + 1)) for index in range(action_count))
+    node_types = (
+        NodeType.PLAYER0,
+        NodeType.TERMINAL,
+        NodeType.TERMINAL,
+        NodeType.TERMINAL,
+        NodeType.TERMINAL,
+        NodeType.TERMINAL,
+        NodeType.LEAF,
+    )
+    children = (
+        ChildLink(child=NodeId(1)),
+        ChildLink(child=NodeId(2)),
+        ChildLink(child=NodeId(3)),
+        ChildLink(child=NodeId(4)),
+        ChildLink(child=NodeId(5)),
+        ChildLink(child=NodeId(6)),
+    )
     first_child = (0, *(action_count for _ in range(action_count)))
     child_counts = (action_count, *(0 for _ in range(action_count)))
     infosets = (InfosetId(0), *(None for _ in range(action_count)))
-    terminals = (None, *terminal_payoffs)
+    terminals = (
+        None,
+        Chips(-3),
+        Chips(-2),
+        Chips(-1),
+        Chips(0),
+        Chips(1),
+        None,
+    )
     return PublicTree(
         node_types=node_types,
         first_child=first_child,
