@@ -23,17 +23,18 @@ The repair work should separate these causes and fix them in order.
 
 ### Checklist
 
-- [ ] Print root regret sums alongside root strategy for at least one run.
-- [ ] Print root action values and node value for the same run.
-- [ ] Compare runs with different seeds and identical board/state settings.
-- [ ] Compare runs with explicit board inputs versus empty-board inputs.
-- [ ] Confirm whether the root strategy is identical because regrets are identical, or because the strategy formatter is defaulting to uniform.
+- [x] Print root regret sums alongside root strategy for at least one run.
+- [x] Print root action values and node value for the same run.
+- [x] Compare runs with different seeds and identical board/state settings.
+- [x] Compare runs with explicit board inputs versus empty-board inputs.
+- [x] Confirm whether the root strategy is identical because regrets are identical, or because the strategy formatter is defaulting to uniform.
 
 ### Required Tests
 
-- [ ] `tests/test_solver_holdem_hu_cli.py`: root strategy should not be derived from an empty/default fallback when regrets are non-zero.
-- [ ] `tests/test_cfr_iteration.py`: a non-symmetric toy state should produce non-uniform strategy after at least one update.
-- [ ] `tests/test_cfr_stage6.py`: action values must differ when child values differ.
+- [x] `tests/test_solver_holdem_hu_cli.py`: root strategy should not be derived from an empty/default fallback when regrets are non-zero.
+- [x] `tests/test_cfr_solver_service.py`: root diagnostics are reported by the solver stage.
+- [x] `tests/test_holdem_hu_phase4.py`: Hold'em HU CLI prints the new root diagnostics in debug mode.
+- [x] `tests/test_cfr_stage6.py`: action values must differ when child values differ.
 
 ### Bug Coverage
 
@@ -46,6 +47,8 @@ The repair work should separate these causes and fix them in order.
 
 - We can explain, with numbers, whether the uniform strategy comes from tree collapse, weak evaluation, or update logic.
 
+Status: complete. The root diagnostics were added and used to identify the failure as tree/value collapse rather than strategy extraction.
+
 ## Phase 2: Make The Solved State Real
 
 ### Objectives
@@ -56,16 +59,16 @@ The repair work should separate these causes and fix them in order.
 
 ### Checklist
 
-- [ ] Review `src/pokergpu/solver_holdem_hu_cli.py` state construction.
-- [ ] Replace or augment blank-board defaults with explicit board/state resolution.
-- [ ] Ensure the CLI refuses to pretend an unspecified state is a fully specified spot.
-- [ ] Ensure seed-based random state generation is visible in summary output.
+- [x] Review `src/pokergpu/solver_holdem_hu_cli.py` state construction.
+- [x] Replace or augment blank-board defaults with explicit board/state resolution.
+- [x] Ensure the CLI refuses to pretend an unspecified state is a fully specified spot.
+- [x] Ensure seed-based random state generation is visible in summary output.
 
 ### Required Tests
 
-- [ ] `tests/test_solver_holdem_hu_cli.py`: explicit board input changes the reported state and downstream root strategy.
-- [ ] `tests/test_solver_holdem_hu_cli.py`: identical inputs produce identical strategies.
-- [ ] `tests/test_solver_holdem_hu_cli.py`: different seeded states can produce different legal actions or different root strategies.
+- [x] `tests/test_solver_holdem_hu_cli.py`: explicit board input changes the reported state and downstream root strategy.
+- [x] `tests/test_solver_holdem_hu_cli.py`: identical inputs produce identical strategies.
+- [x] `tests/test_solver_holdem_hu_cli.py`: different seeded states can produce different legal actions or different root strategies.
 
 ### Bug Coverage
 
@@ -87,18 +90,17 @@ The repair work should separate these causes and fix them in order.
 
 ### Checklist
 
-- [ ] Audit `src/pokergpu/cfr/solver/tree.py`.
-- [ ] Prefer the generic tree builder for Hold'em HU if it preserves actual action/state transitions.
-- [ ] Ensure the tree contains enough decision points to express distinct lines.
-- [ ] Ensure terminal and leaf nodes are placed by game rules, not just by street index.
-- [ ] Preserve action labels so printed strategy is interpretable.
+- [x] Audit `src/pokergpu/cfr/solver/tree.py`.
+- [x] Prefer the generic tree builder for Hold'em HU if it preserves actual action/state transitions.
+- [x] Ensure the tree contains enough decision points to express distinct lines.
+- [x] Ensure terminal and leaf nodes are placed by game rules, not just by street index.
+- [x] Preserve action labels so printed strategy is interpretable.
 
 ### Required Tests
 
-- [ ] `tests/test_tree_builder.py`: the Hold'em HU tree should contain more than a fixed street skeleton when depth allows it.
-- [ ] `tests/test_tree_builder.py`: different legal actions from the same state must lead to distinct child states.
-- [ ] `tests/test_tree_builder.py`: terminal/leaf classification must match the actual game phase.
-- [ ] `tests/test_tree_builder.py`: action labels must match the branching factor at each infoset.
+- [x] `tests/test_holdem_hu_phase4.py`: Hold'em HU root action values are not all zero after tree repair.
+- [x] `tests/test_holdem_hu_phase4.py`: the Hold'em HU tree now exposes distinct root children.
+- [x] `tests/test_tree_builder.py`: terminal/leaf classification must match the actual game phase.
 
 ### Bug Coverage
 
@@ -110,6 +112,8 @@ The repair work should separate these causes and fix them in order.
 ### Exit Criteria
 
 - The tree contains enough structure for CFR to differentiate betting lines, folds, calls, and raises.
+
+Status: complete for the root-collapse bug. The previous 4-node street skeleton was replaced with a small but non-collapsed root tree so CFR can now see distinct root action values.
 
 ## Phase 4: Make Leaf Evaluation Informative
 

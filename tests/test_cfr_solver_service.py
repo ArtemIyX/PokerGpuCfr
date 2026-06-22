@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from pokergpu.cfr.solver import CfrVariant
@@ -91,6 +92,79 @@ def test_run_solver_stage_runs_forward_prefix_branch_split_and_join(monkeypatch:
     assert "cpu3:2" in calls
     assert "cpu6:5" in calls
     assert "cpu7:6" in calls
+
+
+def test_run_solver_stage_reports_root_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pokergpu.cfr.solver.service as service
+
+    tree = make_kuhn_public_tree()
+    request = SolverStageRequest(
+        game=GameVariant.KUHN,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=2,
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple((0.0, 0.0) for _ in range(6)),
+        strategy_sums=tuple((0.0, 0.0) for _ in range(6)),
+    )
+    board = Board(cards=())
+
+    monkeypatch.setattr(
+        service,
+        "propagate_forward",
+        lambda *args, **kwargs: _record_forward([], tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "aggregate_prob_sum",
+        lambda *args, **kwargs: _record_aggregate([], tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "compute_opponent_reach",
+        lambda *args, **kwargs: _record_opponent_reach([], tree.node_count, kwargs.get("max_workers")),
+    )
+    monkeypatch.setattr(
+        service,
+        "compute_showdown_equity",
+        lambda *args, **kwargs: _record_showdown([], tree.node_count, kwargs.get("max_workers")),
+    )
+    monkeypatch.setattr(
+        service,
+        "evaluate_leaf_node_values",
+        lambda *args, **kwargs: _record_leaf_values([], tree.node_count),
+    )
+    monkeypatch.setattr(
+        service,
+        "backward_cfv",
+        lambda *args, **kwargs: SimpleNamespace(
+            node_values=tuple(0.0 for _ in range(tree.node_count)),
+            infoset_values=np.asarray([1.25] + [0.0] * 5, dtype=np.float64),
+            action_values=((1.0, -1.0),) + tuple(() for _ in range(tree.node_count - 1)),
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "apply_dense_backward_cfv_update",
+        lambda *args, **kwargs: DenseCfrState(
+            regret_sums=((0.5, -0.5),) + tuple((0.0, 0.0) for _ in range(5)),
+            strategy_sums=((2.0, 1.0),) + tuple((0.0, 0.0) for _ in range(5)),
+        ),
+    )
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+    )
+
+    assert result.diagnostics is not None
+    assert result.diagnostics["root_infoset"] == 0
+    assert result.diagnostics["root_regrets"] == (0.5, -0.5)
+    assert result.diagnostics["root_strategy_sums"] == (2.0, 1.0)
+    assert result.diagnostics["root_action_values"] == (1.0, -1.0)
+    assert result.diagnostics["root_node_value"] == 1.25
 
 
 @pytest.mark.parametrize(

@@ -190,6 +190,11 @@ class SolverStageService:
                 "game": request.game.value,
                 "cfr_variant": request.cfr_variant.value,
                 "tree_nodes": tree.node_count,
+                "root_infoset": table.infoset_order[0] if table.infoset_order else None,
+                "root_regrets": final_state.regret_sums[table.infoset_order[0]] if final_state is not None and table.infoset_order else None,
+                "root_strategy_sums": final_state.strategy_sums[table.infoset_order[0]] if final_state is not None and table.infoset_order else None,
+                "root_action_values": backward.action_values[table.infoset_to_node[table.infoset_order[0]]] if table.infoset_order else None,
+                "root_node_value": float(backward.infoset_values[table.infoset_order[0]]) if table.infoset_order else None,
             },
         )
 
