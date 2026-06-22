@@ -264,20 +264,20 @@ Goal:
 
 ### Checklist
 
-- [ ] keep the current postflop strength bucketer;
-- [ ] add a preflop bucketer;
-- [ ] define a fixed bucket count for preflop;
-- [ ] decide whether preflop buckets are class-based, equity-based, or hybrid;
-- [ ] define how dead cards are masked preflop and postflop;
-- [ ] ensure bucket outputs are dense and fixed-width;
-- [ ] keep bucket assignment deterministic;
-- [ ] keep bucketed range outputs normalized where expected;
-- [ ] make blocked hands map to a sentinel or zeroed bucket contribution.
+- [x] keep the current postflop strength bucketer;
+- [x] add a preflop bucketer;
+- [x] define a fixed bucket count for preflop;
+- [x] decide whether preflop buckets are class-based, equity-based, or hybrid;
+- [x] define how dead cards are masked preflop and postflop;
+- [x] ensure bucket outputs are dense and fixed-width;
+- [x] keep bucket assignment deterministic;
+- [x] keep bucketed range outputs normalized where expected;
+- [x] make blocked hands map to a sentinel or zeroed bucket contribution.
 
 ### Recommended abstraction split
 
 - preflop:
-  - hand-class or equity-based buckets;
+  - equity-based buckets;
   - fixed width;
   - no board dependency;
 - postflop:
@@ -287,14 +287,14 @@ Goal:
 
 ### Tests to write after Phase 3
 
-- preflop bucketer is deterministic;
-- preflop bucketer covers all valid hands;
-- preflop bucketer rejects invalid or blocked combos as designed;
-- postflop bucketer still rejects preflop boards;
-- postflop bucket assignment still matches evaluator rank classes;
-- bucket masking marks blocked hands correctly;
-- bucketed ranges sum to the expected total weight;
-- blocked hands do not leak into active buckets.
+- [x] preflop bucketer is deterministic;
+- [x] preflop bucketer covers all valid hands;
+- [x] preflop bucketer rejects invalid or blocked combos as designed;
+- [x] postflop bucketer still rejects preflop boards;
+- [x] postflop bucket assignment still matches evaluator rank classes;
+- [x] bucket masking marks blocked hands correctly;
+- [x] bucketed ranges sum to the expected total weight;
+- [x] blocked hands do not leak into active buckets.
 
 ## Phase 4 - Connect Hold'em to the CFR pipeline
 

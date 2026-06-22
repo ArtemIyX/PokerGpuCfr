@@ -4,6 +4,7 @@ import pytest
 
 from pokergpu.abstraction import (
     PrivateHand,
+    PreflopClassBucketer,
     RangeVector,
     StrengthTierBucketer,
     private_hand_index,
@@ -73,3 +74,39 @@ def test_bucketed_range_accumulates_live_combo_weights() -> None:
         rel_tol=0.0,
         abs_tol=1e-6,
     )
+
+
+def test_preflop_class_bucketer_is_deterministic_and_fixed_width() -> None:
+    bucketer = PreflopClassBucketer()
+
+    pocket_aces = PrivateHand.from_cards(card_from_str("Ah"), card_from_str("Ad"))
+    ace_king_suited = PrivateHand.from_cards(card_from_str("Ah"), card_from_str("Kh"))
+    seven_two_offsuit = PrivateHand.from_cards(card_from_str("7c"), card_from_str("2d"))
+
+    assert bucketer.bucket_count == 8
+    assert int(bucketer.bucket_for_hand(pocket_aces)) > int(bucketer.bucket_for_hand(ace_king_suited))
+    assert int(bucketer.bucket_for_hand(ace_king_suited)) > int(bucketer.bucket_for_hand(seven_two_offsuit))
+
+
+def test_preflop_class_bucketer_bucketed_range_is_dense() -> None:
+    bucketer = PreflopClassBucketer()
+    values = [0.0] * 1326
+    strong_index = int(private_hand_index(card_from_str("Ah"), card_from_str("Ad")))
+    weak_index = int(private_hand_index(card_from_str("7c"), card_from_str("2d")))
+    values[strong_index] = 0.4
+    values[weak_index] = 0.6
+
+    bucketed = bucketer.bucketed_range(RangeVector.from_values(values))
+
+    assert bucketed.shape == (8,)
+    assert math.isclose(float(bucketed.sum()), 1.0, rel_tol=0.0, abs_tol=1e-6)
+    assert bucketed[int(bucketer.bucket_for_hand(PrivateHand.from_cards(card_from_str("Ah"), card_from_str("Ad"))))] > 0.0
+
+
+def test_preflop_class_bucketer_marks_blocked_hands() -> None:
+    bucketer = PreflopClassBucketer()
+    blocked = bucketer.bucket_mask([card_from_str("Ah")])
+
+    assert blocked.shape == (1326,)
+    assert blocked[int(private_hand_index(card_from_str("Ah"), card_from_str("Kd")))] == -1
+    assert blocked[int(private_hand_index(card_from_str("Qc"), card_from_str("Js")))] >= 0
