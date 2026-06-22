@@ -7,6 +7,7 @@ from pokergpu.core.betting import Chips
 from pokergpu.cfr.solver import (
     DenseCfrState,
     evaluate_backward_cfv,
+    evaluate_frontier_leaf_values,
     evaluate_leaf_node_values,
     SolverState,
     aggregate_root_action_values,
@@ -21,6 +22,7 @@ from pokergpu.cfr.solver import (
     evaluate_showdown_node_values,
 )
 from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
+from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
 from pokergpu.cfr.leaf_eval import LEAF_EVAL_OUTPUT_WIDTH
 from pokergpu.cfr.leaf_eval import LeafEvalBatchInput, LeafEvalBatchOutput
 from pokergpu.cfr.stage1 import ForwardProfileResult
@@ -183,6 +185,27 @@ def test_evaluate_leaf_node_values_uses_leaf_batch_contract() -> None:
 
     assert result.node_ids == (0,)
     assert result.node_values == (0.25,)
+
+
+def test_evaluate_frontier_leaf_values_defaults_to_heuristic_backend() -> None:
+    tree = PublicTree(
+        node_types=(NodeType.LEAF,),
+        first_child=(0,),
+        child_count=(0,),
+        children=(),
+        infoset_ids=(None,),
+        terminal_payoffs=(None,),
+    )
+    forward = ForwardProfileResult(node_reach=(1.0,), infoset_reach=(), action_reach=((),))
+
+    default_result = evaluate_frontier_leaf_values(tree, forward)
+    heuristic_result = evaluate_frontier_leaf_values(
+        tree,
+        forward,
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert default_result == heuristic_result
 
 
 def test_evaluate_backward_cfv_runs_on_toy_pipeline_tree() -> None:

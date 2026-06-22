@@ -6,6 +6,7 @@ import numpy as np
 from pokergpu.cfr.gpu_leaf_backend import GpuLeafBackend
 from pokergpu.cfr.leaf_eval import LeafEvalBackend
 from pokergpu.cfr.leaf_eval import LeafEvalResult
+from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
 from pokergpu.cfr.leaf_backend_factory import create_leaf_backend
 from pokergpu.cfr.stage1 import ForwardProfileResult
 from pokergpu.cfr.stage2 import aggregate_prob_sum
@@ -54,6 +55,19 @@ def evaluate_leaf_node_values(
     aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
     batch = build_leaf_eval_batch(aggregate.leaf_batch)
     return evaluate_leaf_batch(batch, backend or create_leaf_backend())
+
+
+def evaluate_frontier_leaf_values(
+    tree: PublicTree,
+    forward: ForwardProfileResult,
+    *,
+    board: Board | None = None,
+    max_workers: int | None = None,
+    backend: LeafEvalBackend | None = None,
+) -> LeafEvalResult:
+    aggregate = aggregate_prob_sum(tree, forward, board, max_workers=max_workers)
+    batch = build_leaf_eval_batch(aggregate.leaf_batch)
+    return evaluate_leaf_batch(batch, backend or create_heuristic_leaf_backend())
 
 
 def evaluate_backward_cfv(

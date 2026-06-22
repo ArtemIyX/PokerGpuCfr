@@ -2,6 +2,7 @@ from .state import DenseCfrState, SolverIterationResult, SolverState
 from .aggregation import aggregate_action_values, aggregate_root_action_values
 from .evaluation import (
     evaluate_backward_cfv,
+    evaluate_frontier_leaf_values,
     evaluate_leaf_node_values,
     evaluate_root_action_values,
     evaluate_showdown_node_values,
@@ -55,6 +56,7 @@ __all__ = [
     "DenseInfosetTable",
     "evaluate_root_action_values",
     "evaluate_leaf_node_values",
+    "evaluate_frontier_leaf_values",
     "evaluate_showdown_node_values",
     "evaluate_backward_cfv",
     "ReachResult",
