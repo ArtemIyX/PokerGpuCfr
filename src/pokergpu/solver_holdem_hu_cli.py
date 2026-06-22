@@ -109,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    runtime_state = _build_runtime_state(args)
 
     request = SolverStageRequest(
         game=GameVariant.HOLDEM_HU,
@@ -171,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         current if isinstance(current, SolverDenseCfrState) else None,
         tree,
         board,
+        runtime_state=runtime_state,
         debug=args.debug,
         print_profile=args.print_profile,
     )
@@ -205,6 +207,18 @@ def _build_state_spec(args: argparse.Namespace) -> GameStateSpec | None:
     return resolve_game_state_spec(None)
 
 
+def _build_runtime_state(args: argparse.Namespace) -> GameState | None:
+    if args.state_mode == GameStateMode.EXACT.value and args.encoded_state is not None:
+        return decode_game_state(args.encoded_state.encode())
+    if args.state_mode == GameStateMode.EXACT.value:
+        rng = Random(args.seed)
+        return _make_random_holdem_state(rng=rng)
+    if args.state_mode == GameStateMode.RANDOM.value:
+        rng = Random(args.seed)
+        return _make_random_holdem_state(rng=rng)
+    return None
+
+
 def _build_profiler_spec(args: argparse.Namespace) -> ProfilerSpec | None:
     if args.profile is None:
         return None
@@ -236,6 +250,7 @@ def _print_summary(
     tree: PublicTree,
     board: Board,
     *,
+    runtime_state: GameState | None = None,
     debug: bool = False,
     print_profile: bool = False,
 ) -> None:
@@ -244,8 +259,8 @@ def _print_summary(
     print(f"depth={result.request.depth_limit}")
     print(f"seed={result.request.seed if result.request.seed is not None else 'none'}")
     print(f"batch_size={getattr(result.request, 'batch_size', 'n/a')}")
-    print(f"state={_format_game_state(result)}")
-    print(f"legal_actions={_format_legal_actions(result.request.state)}")
+    print(f"state={_format_game_state(runtime_state, result)}")
+    print(f"legal_actions={_format_legal_actions(runtime_state)}")
     if debug:
         _print_debug_details(result, board, tree, dense_state)
     if dense_state is not None:
@@ -434,8 +449,8 @@ def _decode_debug_game_state(result: SolverStageResult) -> GameState | None:
     return decode_game_state(state_spec.encoded_state)
 
 
-def _format_game_state(result: SolverStageResult) -> str:
-    decoded = _decode_debug_game_state(result)
+def _format_game_state(runtime_state: GameState | None, result: SolverStageResult) -> str:
+    decoded = runtime_state or _decode_debug_game_state(result)
     if decoded is None:
         return "unavailable"
     players = []
@@ -453,10 +468,8 @@ def _format_game_state(result: SolverStageResult) -> str:
     )
 
 
-def _format_legal_actions(state_spec: GameStateSpec | None) -> str:
-    decoded = None
-    if state_spec is not None and state_spec.encoded_state is not None:
-        decoded = decode_game_state(state_spec.encoded_state)
+def _format_legal_actions(runtime_state: GameState | None) -> str:
+    decoded = runtime_state
     if decoded is None:
         return "unavailable"
     abstraction = BaselineActionAbstraction(profile=make_holdem_hu_profile())
