@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pokergpu.core.betting import Chips
+from pokergpu.abstraction.actions import action_labels_for_street
+from pokergpu.abstraction.actions import make_holdem_hu_profile
+from pokergpu.core.board import Street
 from pokergpu.cfr.solver.spec import GameStateMode
 from pokergpu.cfr.solver.spec import GameStateSpec
 from pokergpu.cfr.solver.spec import GameVariant
@@ -65,20 +68,30 @@ def make_game_public_tree(game: GameVariant) -> PublicTree:
 
 
 def make_holdem_hu_public_tree() -> PublicTree:
-    action_labels = ("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct")
-    child_count = len(action_labels)
-    children = tuple(ChildLink(child=NodeId(index + 1)) for index in range(child_count))
+    profile = make_holdem_hu_profile()
+    streets = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
+    action_labels_by_street = tuple(action_labels_for_street(profile, street) for street in streets)
+    child_count = len(action_labels_by_street[0])
+    node_count = len(streets)
+    terminal_offset = node_count
+    children = tuple(
+        ChildLink(child=NodeId(terminal_offset + node_index * child_count + action_index))
+        for node_index in range(node_count)
+        for action_index in range(child_count)
+    )
+    node_types = tuple(NodeType.PLAYER0 if index % 2 == 0 else NodeType.PLAYER1 for index in range(node_count))
+    first_child = tuple(index * child_count for index in range(node_count))
+    child_counts = tuple(child_count for _ in range(node_count))
+    infosets = tuple(InfosetId(index) for index in range(node_count))
+    terminals = tuple(NodeType.TERMINAL for _ in range(node_count * child_count))
     return PublicTree(
-        node_types=(
-            NodeType.PLAYER0,
-            *(NodeType.TERMINAL for _ in range(child_count)),
-        ),
-        first_child=(0, *([child_count] * child_count)),
-        child_count=(child_count, *([0] * child_count)),
+        node_types=(*node_types, *terminals),
+        first_child=(*first_child, *([len(children)] * len(terminals))),
+        child_count=(*child_counts, *([0] * len(terminals))),
         children=children,
-        infoset_ids=(InfosetId(0), *([None] * child_count)),
-        terminal_payoffs=(None, *(Chips(0) for _ in range(child_count))),
-        action_labels=(action_labels, *([None] * child_count)),
+        infoset_ids=(*infosets, *([None] * len(terminals))),
+        terminal_payoffs=(*(None for _ in node_types), *(Chips(0) for _ in terminals)),
+        action_labels=(*action_labels_by_street, *([None] * len(terminals))),
     )
 
 

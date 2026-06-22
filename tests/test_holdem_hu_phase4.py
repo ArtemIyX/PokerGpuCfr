@@ -18,6 +18,9 @@ from pokergpu.cfr.solver import build_dense_infoset_table
 from pokergpu.cfr.solver import make_game_public_tree
 from pokergpu.cfr.solver import run_solver_stage
 from pokergpu.core.board import Board
+from pokergpu.core.board import Street
+from pokergpu.abstraction.actions import action_labels_for_street
+from pokergpu.abstraction.actions import make_holdem_hu_profile
 from pokergpu.solver_holdem_hu_cli import _format_root_strategy
 
 
@@ -25,18 +28,21 @@ def test_holdem_hu_tree_builds_dense_infosets() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
     table = build_dense_infoset_table(tree)
 
-    assert table.infoset_count == 1
-    assert table.infoset_order == (0,)
-    assert table.action_counts == (6,)
-    assert table.action_labels == (("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct"),)
+    assert table.infoset_count == 4
+    assert table.infoset_order == (0, 1, 2, 3)
+    assert table.action_counts == (6, 6, 6, 6)
+    assert table.action_labels[0][0] == "check"
+    assert table.action_labels[1] != table.action_labels[0]
+    assert table.action_labels[2] != table.action_labels[1]
+    assert table.action_labels[3] != table.action_labels[2]
 
 
 def test_holdem_hu_root_strategy_labels_match_actions() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
     table = build_dense_infoset_table(tree)
     state = DenseCfrState(
-        regret_sums=((0.0,) * 6,),
-        strategy_sums=((1.0, 2.0, 3.0, 4.0, 5.0, 6.0),),
+        regret_sums=tuple((0.0,) * 6 for _ in range(table.infoset_count)),
+        strategy_sums=tuple((1.0, 2.0, 3.0, 4.0, 5.0, 6.0) if index == 0 else (0.0,) * 6 for index in range(table.infoset_count)),
     )
 
     root_strategy = _format_root_strategy(state, tree)
@@ -46,6 +52,23 @@ def test_holdem_hu_root_strategy_labels_match_actions() -> None:
     assert "bet:25pct:" in root_strategy
     assert "bet:150pct:" in root_strategy
     assert len(table.action_labels[0]) == 6
+
+
+def test_holdem_hu_action_labels_vary_by_street() -> None:
+    profile = make_holdem_hu_profile()
+
+    preflop = action_labels_for_street(profile, Street.PREFLOP)
+    flop = action_labels_for_street(profile, Street.FLOP)
+    turn = action_labels_for_street(profile, Street.TURN)
+    river = action_labels_for_street(profile, Street.RIVER)
+
+    assert preflop != flop
+    assert flop != turn
+    assert turn != river
+    assert preflop[0] == "check"
+    assert flop[0] == "check"
+    assert "bet:" in flop[1]
+    assert preflop != river
 
 
 def test_holdem_hu_solver_smoke_test_runs_end_to_end() -> None:
