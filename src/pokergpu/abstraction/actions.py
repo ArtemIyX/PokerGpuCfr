@@ -36,19 +36,12 @@ def action_labels_for_street(
     street: Street,
     *,
     include_check: bool = True,
-    include_call: bool = False,
-    include_fold: bool = False,
 ) -> tuple[str, ...]:
     template = profile.template_for_street(street)
     labels: list[str] = []
-    if include_fold:
-        labels.append("fold")
     if include_check:
         labels.append("check")
-    if include_call:
-        labels.append("call")
     labels.extend(f"bet:{int(round(size * 100))}pct" for size in template.bet_sizes)
-    labels.extend(f"raise:{int(round(multiplier * 100))}pct" for multiplier in template.raise_to_multipliers)
     return tuple(labels)
 
 
