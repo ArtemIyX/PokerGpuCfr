@@ -181,7 +181,7 @@ Goal:
 ### Checklist
 
 - [x] add `make_holdem_hu_public_tree`;
-- [x] wire `GameVariant.HOLDEM_HU` into the tree factory in [src/pokergpu/cfr/solver/tree.py](/C:/Users/xeuse/RiderProjects/PokerGPU/src/pokergpu/cfr/solver/tree.py);
+- [x] wire `GameVariant.HOLDEM_HU` into the tree factory in src/pokergpu/cfr/solver/tree.py
 - [x] preserve the flat `PublicTree` representation;
 - [x] keep node ordering deterministic;
 - [x] include both `TERMINAL` and `LEAF` nodes in the first scaffold;
