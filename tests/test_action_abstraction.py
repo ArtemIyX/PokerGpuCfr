@@ -296,5 +296,11 @@ def test_holdem_hu_profile_respects_raise_bounds() -> None:
 
     actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(state)
 
-    assert [action.action_type.value for action in actions] == ["fold", "call", "raise"]
-    assert actions[-1].amount == chips(800)
+    assert [action.action_type.value for action in actions] == [
+        "fold",
+        "call",
+        "raise",
+        "raise",
+        "raise",
+    ]
+    assert actions[-1].amount == chips(900)

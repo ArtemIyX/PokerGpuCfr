@@ -225,7 +225,7 @@ Goal:
 - [x] eliminate duplicate actions after rounding/clamping;
 - [x] keep the ordering of emitted actions deterministic;
 - [x] keep `check/call/fold` handling legality-driven;
-- [ ] preserve support for the current toy-game tests.
+- [x] preserve support for the current toy-game tests.
 
 ### Recommended street layout
 
