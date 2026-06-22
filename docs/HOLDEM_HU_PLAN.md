@@ -365,7 +365,7 @@ Goal:
 - [x] validate CPU and GPU leaf backends on shared fixtures;
 - [ ] measure batch size behavior for frontier leaves;
 - [x] keep CPU-GPU transfer limited to the leaf frontier;
-- [ ] avoid dynamic shapes in hot GPU paths where possible;
+- [x] avoid dynamic shapes in hot GPU paths where possible;
 - [x] confirm fallback CPU backend still works when GPU is unavailable;
 - [x] preserve deterministic node ordering in batched leaf outputs.
 

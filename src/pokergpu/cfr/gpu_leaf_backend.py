@@ -47,16 +47,19 @@ class TorchLeafKernel:
             in_width = hidden_width
         layers.append(_torch.nn.Linear(in_width, spec.output_width))
         self.network = _torch.nn.Sequential(*layers)
+        self._cuda_network: "nn.Module" | None = None
 
     def __call__(self, batch: LeafEvalBatchInput) -> LeafEvalBatchOutput:
         if _torch is None:
             raise ModuleNotFoundError("torch is required for TorchLeafKernel") from _TORCH_IMPORT_ERROR
-        inputs = _torch.from_numpy(batch.features)
         if not _torch.cuda.is_available():
             raise RuntimeError("torch GPU backend requires CUDA")
         device = _torch.device("cuda")
-        inputs = inputs.to(device=device, dtype=_torch.float32, non_blocking=True)
-        outputs = self.network.to(device=device, dtype=_torch.float32)(inputs)
+        if self._cuda_network is None:
+            self._cuda_network = self.network.to(device=device, dtype=_torch.float32)
+            self._cuda_network.eval()
+        inputs = _torch.from_numpy(batch.features).to(device=device, dtype=_torch.float32, non_blocking=True)
+        outputs = self._cuda_network(inputs)
         values = cast(
             np.ndarray,
             outputs.detach().to(device="cpu", dtype=_torch.float32).numpy(),
