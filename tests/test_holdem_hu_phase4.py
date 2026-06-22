@@ -43,7 +43,7 @@ def test_holdem_hu_tree_shape_is_deterministic() -> None:
     second = make_game_public_tree(GameVariant.HOLDEM_HU)
 
     assert first == second
-    assert first.node_count == 7
+    assert first.node_count == 25
     assert first.node_types[0] is first.node_types[0]
     assert first.node_types[-1].value == "leaf"
 
@@ -61,12 +61,13 @@ def test_holdem_hu_tree_transitions_flow_street_to_street() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
     assert tuple(int(link.child) for link in tree.child_links(NodeId(0))) == (1, 2, 3, 4, 5, 6)
+    assert all(tree.child_count[index] == 1 for index in range(1, 19))
 
 
 def test_holdem_hu_tree_terminal_nodes_have_no_actions() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    for node_index in range(1, tree.node_count - 1):
+    for node_index in range(19, tree.node_count - 1):
         assert tree.child_count[node_index] == 0
         assert tree.child_links(NodeId(node_index)) == ()
     assert tree.child_count[tree.node_count - 1] == 0
@@ -75,7 +76,7 @@ def test_holdem_hu_tree_terminal_nodes_have_no_actions() -> None:
 def test_holdem_hu_tree_action_label_width_matches_child_count() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    for node_index in range(1):
+    for node_index in range(19):
         assert len(tree.action_labels[node_index] or ()) == tree.child_count[node_index]
 
 

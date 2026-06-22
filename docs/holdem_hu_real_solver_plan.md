@@ -108,11 +108,11 @@ Status: decided. We are targeting a compact but real four-street HU tree with ab
 
 ### Checklist
 
-- [ ] Extend `src/pokergpu/cfr/solver/tree.py` to build more than one decision node.
-- [ ] Reuse the generic tree builder when it produces a better state transition graph.
-- [ ] Ensure each street advance is represented by distinct nodes.
-- [ ] Ensure different actions do not collapse to the same child state.
-- [ ] Keep action labels stable and informative.
+- [x] Extend `src/pokergpu/cfr/solver/tree.py` to build more than one decision node.
+- [x] Reuse the generic tree builder when it produces a better state transition graph.
+- [x] Ensure each street advance is represented by distinct nodes.
+- [x] Ensure different actions do not collapse to the same child state.
+- [x] Keep action labels stable and informative.
 
 ### Implementation Notes
 
@@ -138,6 +138,8 @@ Status: decided. We are targeting a compact but real four-street HU tree with ab
 ### Exit Criteria
 
 - Hold'em HU tree construction produces a multi-node, multi-street tree with meaningful action branching.
+
+Status: implemented as a first-pass compact multi-street chain. The tree is no longer a single root toy spot, but it still needs refinement toward a richer poker subgame.
 
 ## Phase C: Make Leaf Evaluation Fit The Tree
 

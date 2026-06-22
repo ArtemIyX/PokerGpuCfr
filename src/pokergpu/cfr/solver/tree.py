@@ -69,35 +69,49 @@ def make_game_public_tree(game: GameVariant) -> PublicTree:
 
 def make_holdem_hu_public_tree() -> PublicTree:
     profile = make_holdem_hu_profile()
-    action_labels = action_labels_for_street(profile, Street.PREFLOP)
-    action_count = len(action_labels)
+    streets = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
+    action_labels_by_street = tuple(action_labels_for_street(profile, street) for street in streets)
+    root_action_count = len(action_labels_by_street[0])
+
     node_types = (
         NodeType.PLAYER0,
-        NodeType.TERMINAL,
-        NodeType.TERMINAL,
-        NodeType.TERMINAL,
-        NodeType.TERMINAL,
-        NodeType.TERMINAL,
+        *(NodeType.PLAYER1 for _ in range(root_action_count)),
+        *(NodeType.PLAYER0 for _ in range(root_action_count)),
+        *(NodeType.PLAYER1 for _ in range(root_action_count)),
+        *(NodeType.TERMINAL for _ in range(root_action_count - 1)),
         NodeType.LEAF,
     )
     children = (
-        ChildLink(child=NodeId(1)),
-        ChildLink(child=NodeId(2)),
-        ChildLink(child=NodeId(3)),
-        ChildLink(child=NodeId(4)),
-        ChildLink(child=NodeId(5)),
-        ChildLink(child=NodeId(6)),
+        *(ChildLink(child=NodeId(1 + index)) for index in range(root_action_count)),
+        *(ChildLink(child=NodeId(1 + root_action_count + index)) for index in range(root_action_count)),
+        *(ChildLink(child=NodeId(1 + 2 * root_action_count + index)) for index in range(root_action_count)),
+        *(ChildLink(child=NodeId(1 + 3 * root_action_count + index)) for index in range(root_action_count)),
     )
-    first_child = (0, *(action_count for _ in range(action_count)))
-    child_counts = (action_count, *(0 for _ in range(action_count)))
-    infosets = (InfosetId(0), *(None for _ in range(action_count)))
+    first_child = (
+        0,
+        *(root_action_count for _ in range(root_action_count)),
+        *(2 * root_action_count for _ in range(root_action_count)),
+        *(3 * root_action_count for _ in range(root_action_count)),
+        *(4 * root_action_count for _ in range(root_action_count)),
+    )
+    child_counts = (
+        root_action_count,
+        *(1 for _ in range(root_action_count)),
+        *(1 for _ in range(root_action_count)),
+        *(1 for _ in range(root_action_count)),
+        *(0 for _ in range(root_action_count)),
+    )
+    infosets = (
+        InfosetId(0),
+        *(InfosetId(1 + index) for index in range(root_action_count)),
+        *(InfosetId(1 + root_action_count + index) for index in range(root_action_count)),
+        *(InfosetId(1 + 2 * root_action_count + index) for index in range(root_action_count)),
+        *(None for _ in range(root_action_count)),
+    )
     terminals = (
         None,
-        Chips(-3),
-        Chips(-2),
-        Chips(-1),
-        Chips(0),
-        Chips(1),
+        *(None for _ in range(root_action_count * 3)),
+        *(Chips(index - (root_action_count // 2)) for index in range(root_action_count - 1)),
         None,
     )
     return PublicTree(
@@ -107,7 +121,13 @@ def make_holdem_hu_public_tree() -> PublicTree:
         children=children,
         infoset_ids=infosets,
         terminal_payoffs=terminals,
-        action_labels=(action_labels, *(None for _ in range(action_count))),
+        action_labels=(
+            action_labels_by_street[0],
+            *(action_labels_by_street[1] for _ in range(root_action_count)),
+            *(action_labels_by_street[2] for _ in range(root_action_count)),
+            *(action_labels_by_street[3] for _ in range(root_action_count)),
+            *(None for _ in range(root_action_count)),
+        ),
     )
 
 
