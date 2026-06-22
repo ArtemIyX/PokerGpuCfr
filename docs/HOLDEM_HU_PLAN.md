@@ -304,13 +304,13 @@ Goal:
 
 ### Checklist
 
-- [ ] map Hold'em tree nodes to infosets using the same dense layout as toy games;
-- [ ] verify depth cutoff nodes are treated as `LEAF`;
-- [ ] ensure leaf features include board context;
-- [ ] keep forward reach propagation compatible with the Hold'em tree shape;
-- [ ] keep backward CFV and regret update contracts intact;
-- [ ] confirm the solver still works with Kuhn and Leduc after Hold'em wiring;
-- [ ] make sure root strategy output remains a valid probability distribution.
+- [x] map Hold'em tree nodes to infosets using the same dense layout as toy games;
+- [x] verify depth cutoff nodes are treated as `LEAF`;
+- [x] ensure leaf features include board context;
+- [x] keep forward reach propagation compatible with the Hold'em tree shape;
+- [x] keep backward CFV and regret update contracts intact;
+- [x] confirm the solver still works with Kuhn and Leduc after Hold'em wiring;
+- [x] make sure root strategy output remains a valid probability distribution.
 
 ### Important implementation rule
 
@@ -319,13 +319,13 @@ Goal:
 
 ### Tests to write after Phase 4
 
-- depth-limited Hold'em solve reaches the expected frontier;
-- leaf evaluator receives the expected input width;
-- leaf features include board/street metadata;
-- stage-by-stage solver smoke tests still pass on Kuhn and Leduc;
-- root strategy output remains normalized;
-- stage 2 finds Hold'em leaf nodes correctly;
-- stage 6 can backpropagate through Hold'em leaves.
+- [x] depth-limited Hold'em solve reaches the expected frontier;
+- [x] leaf evaluator receives the expected input width;
+- [x] leaf features include board/street metadata;
+- [x] stage-by-stage solver smoke tests still pass on Kuhn and Leduc;
+- [x] root strategy output remains normalized;
+- [x] stage 2 finds Hold'em leaf nodes correctly;
+- [x] stage 6 can backpropagate through Hold'em leaves.
 
 ## Phase 5 - Add Hold'em regression tests
 
