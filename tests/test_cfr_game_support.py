@@ -35,6 +35,15 @@ def test_make_game_public_tree_builds_minimal_holdem_tree() -> None:
     assert tree.node_types[3].value == "leaf"
     assert tree.child_count[0] == 2
     assert tree.child_count[1] == 2
+    assert any(node_type.value == "terminal" for node_type in tree.node_types)
+    assert any(node_type.value == "leaf" for node_type in tree.node_types)
+
+
+def test_make_game_public_tree_is_deterministic_for_holdem() -> None:
+    first = make_game_public_tree(GameVariant.HOLDEM_HU)
+    second = make_game_public_tree(GameVariant.HOLDEM_HU)
+
+    assert first == second
 
 
 def test_resolve_game_state_spec_preserves_exact_and_random_modes() -> None:

@@ -200,13 +200,13 @@ Goal:
 
 ### Tests to write after Phase 1
 
-- tree factory returns a non-empty Hold'em HU tree;
-- root node type and child count are correct;
-- `LEAF` nodes exist in the tree;
-- `TERMINAL` nodes exist in the tree;
-- tree construction is deterministic across repeated calls;
-- Kuhn and Leduc trees remain unchanged;
-- `HOLDEM_6MAX` still fails explicitly if it remains unsupported.
+- [x] tree factory returns a non-empty Hold'em HU tree;
+- [x] root node type and child count are correct;
+- [x] `LEAF` nodes exist in the tree;
+- [x] `TERMINAL` nodes exist in the tree;
+- [x] tree construction is deterministic across repeated calls;
+- [x] Kuhn and Leduc trees remain unchanged;
+- [x] `HOLDEM_6MAX` still fails explicitly if it remains unsupported.
 
 ## Phase 2 - Implement street-aware Hold'em action abstraction
 
