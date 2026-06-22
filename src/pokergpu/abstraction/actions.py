@@ -116,15 +116,9 @@ class BaselineActionAbstraction:
             )
             for size in template.bet_sizes:
                 amount = Chips(int(round(betting_state.pot.amount * size)))
-                clamped = Chips(
-                    min(max_bet, max(betting_state.blinds.big_blind, amount))
-                )
-                candidate = Action(ActionType.BET, amount=clamped)
-                if candidate not in actions:
-                    actions.append(candidate)
-            all_in_bet = Action(ActionType.BET, amount=max_bet)
-            if all_in_bet not in actions:
-                actions.append(all_in_bet)
+                clamped = Chips(min(max_bet, max(betting_state.blinds.big_blind, amount)))
+                _append_unique_action(actions, Action(ActionType.BET, amount=clamped))
+            _append_unique_action(actions, Action(ActionType.BET, amount=max_bet))
 
         if can_raise(betting_state):
             minimum = min_raise_to(betting_state, betting_state.to_act)
@@ -133,11 +127,12 @@ class BaselineActionAbstraction:
             for multiplier in template.raise_to_multipliers:
                 amount = Chips(int(round(minimum + span * max(0.0, multiplier - 1.0))))
                 clamped = Chips(min(maximum, max(minimum, amount)))
-                candidate = Action(ActionType.RAISE, amount=clamped)
-                if candidate not in actions:
-                    actions.append(candidate)
-            all_in_raise = Action(ActionType.RAISE, amount=maximum)
-            if all_in_raise not in actions:
-                actions.append(all_in_raise)
+                _append_unique_action(actions, Action(ActionType.RAISE, amount=clamped))
+            _append_unique_action(actions, Action(ActionType.RAISE, amount=maximum))
 
         return tuple(actions)
+
+
+def _append_unique_action(actions: list[Action], action: Action) -> None:
+    if action not in actions:
+        actions.append(action)

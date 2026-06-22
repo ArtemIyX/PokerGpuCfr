@@ -239,3 +239,62 @@ def test_holdem_hu_profile_keeps_deterministic_action_order() -> None:
     ]
     assert actions[1].amount == chips(100)
     assert actions[-1].amount == chips(900)
+
+
+def test_holdem_hu_profile_clamps_bets_and_eliminates_duplicates() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(1)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(6)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(0)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(0)),
+            ),
+            blinds=BlindStructure(small_blind=chips(1), big_blind=chips(2)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(state)
+
+    assert [action.action_type.value for action in actions] == ["check", "bet", "bet"]
+    assert actions[1].amount == chips(2)
+    assert actions[2].amount == chips(6)
+
+
+def test_holdem_hu_profile_respects_raise_bounds() -> None:
+    state = GameState(
+        board=Board.from_str("AhKdTc"),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(300)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(900)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(800)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(300)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(100)),
+            ),
+            blinds=BlindStructure(small_blind=chips(50), big_blind=chips(100)),
+            to_act=PlayerIndex(1),
+        ),
+        dealer=PlayerIndex(0),
+    )
+
+    actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(state)
+
+    assert [action.action_type.value for action in actions] == ["fold", "call", "raise"]
+    assert actions[-1].amount == chips(800)

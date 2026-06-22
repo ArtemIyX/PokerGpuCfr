@@ -220,11 +220,11 @@ Goal:
 - [x] keep the action vocabulary fixed across the tree;
 - [x] split preflop and postflop sizing rules;
 - [x] make river sizing different from flop and turn if needed;
-- [ ] clamp bet sizes to stack size and minimum legal bet;
-- [ ] clamp raise sizes to min/max legal raise-to bounds;
-- [ ] eliminate duplicate actions after rounding/clamping;
-- [ ] keep the ordering of emitted actions deterministic;
-- [ ] keep `check/call/fold` handling legality-driven;
+- [x] clamp bet sizes to stack size and minimum legal bet;
+- [x] clamp raise sizes to min/max legal raise-to bounds;
+- [x] eliminate duplicate actions after rounding/clamping;
+- [x] keep the ordering of emitted actions deterministic;
+- [x] keep `check/call/fold` handling legality-driven;
 - [ ] preserve support for the current toy-game tests.
 
 ### Recommended street layout
@@ -246,15 +246,15 @@ Use one global vocabulary, but different street templates:
 
 ### Tests to write after Phase 2
 
-- preflop action enumeration includes the intended legal subset;
-- flop action enumeration includes the intended percentage sizes;
-- turn action enumeration differs from preflop if the profile says it should;
-- river action enumeration differs from flop if the profile says it should;
-- facing-bet states return fold/call/raise only when legal;
-- unopened-pot states return check/bet only when legal;
-- stack clamping works for small stacks;
-- minimum sizing works when pot-relative rounding underflows;
-- duplicate actions are not emitted.
+- [x] preflop action enumeration includes the intended legal subset;
+- [x] flop action enumeration includes the intended percentage sizes;
+- [x] turn action enumeration differs from preflop if the profile says it should;
+- [x] river action enumeration differs from flop if the profile says it should;
+- [x] facing-bet states return fold/call/raise only when legal;
+- [x] unopened-pot states return check/bet only when legal;
+- [x] stack clamping works for small stacks;
+- [x] minimum sizing works when pot-relative rounding underflows;
+- [x] duplicate actions are not emitted.
 
 ## Phase 3 - Add preflop and postflop card abstraction
 
