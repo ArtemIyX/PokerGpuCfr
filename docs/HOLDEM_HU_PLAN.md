@@ -361,22 +361,22 @@ Goal:
 
 ### Checklist
 
-- [ ] confirm leaf feature packing works for Hold'em boards;
-- [ ] validate CPU and GPU leaf backends on shared fixtures;
+- [x] confirm leaf feature packing works for Hold'em boards;
+- [x] validate CPU and GPU leaf backends on shared fixtures;
 - [ ] measure batch size behavior for frontier leaves;
-- [ ] keep CPU-GPU transfer limited to the leaf frontier;
+- [x] keep CPU-GPU transfer limited to the leaf frontier;
 - [ ] avoid dynamic shapes in hot GPU paths where possible;
-- [ ] confirm fallback CPU backend still works when GPU is unavailable;
-- [ ] preserve deterministic node ordering in batched leaf outputs.
+- [x] confirm fallback CPU backend still works when GPU is unavailable;
+- [x] preserve deterministic node ordering in batched leaf outputs.
 
 ### Tests to write after Phase 6
 
-- CPU and GPU leaf parity tests for Hold'em fixtures;
-- batched frontier assembly tests;
-- solver smoke test with GPU backend enabled;
-- solver smoke test with heuristic backend enabled;
-- leaf ordering preservation test;
-- correctness regression test comparing CPU and GPU output shapes.
+- [x] CPU and GPU leaf parity tests for Hold'em fixtures;
+- [x] batched frontier assembly tests;
+- [x] solver smoke test with GPU backend enabled;
+- [x] solver smoke test with heuristic backend enabled;
+- [x] leaf ordering preservation test;
+- [x] correctness regression test comparing CPU and GPU output shapes.
 
 ## Phase 7 - Optimize and refine the abstraction
 

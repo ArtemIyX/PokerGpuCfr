@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import cast
 
+import pytest
+
 from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
+from pokergpu.cfr.leaf_backend_factory import create_leaf_backend
+from pokergpu.cfr.stage2 import build_leaf_eval_batch
 from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.cfr.stage1 import propagate_forward
 from pokergpu.cfr.solver import CfrVariant
@@ -68,3 +72,23 @@ def test_holdem_hu_leaf_features_include_board_context() -> None:
     assert all(value == 3.0 for value in aggregate.leaf_batch.features[:, 3])
     assert all(value != 0.0 for value in aggregate.leaf_batch.features[:, 4])
     assert all(value >= 0.0 for value in aggregate.leaf_batch.features[:, 6:58].ravel())
+
+
+def test_holdem_hu_leaf_batch_works_with_gpu_backend() -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for Hold'em GPU leaf parity")
+
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    forward = propagate_forward(tree)
+    aggregate = aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc"))
+    leaf_eval_batch = build_leaf_eval_batch(aggregate.leaf_batch)
+    heuristic_backend = create_heuristic_leaf_backend()
+    gpu_backend = create_leaf_backend()
+
+    heuristic_result = heuristic_backend.evaluate(leaf_eval_batch)
+    gpu_result = gpu_backend.evaluate(leaf_eval_batch)
+
+    assert heuristic_result.node_ids == gpu_result.node_ids
+    assert heuristic_result.values.shape == gpu_result.values.shape
+    assert gpu_result.values.shape[1] == 1
