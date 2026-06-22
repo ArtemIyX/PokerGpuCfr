@@ -527,8 +527,9 @@ def _format_root_strategy(
 
 
 def _root_action_labels(tree: PublicTree, root_infoset: int, action_count: int) -> tuple[str, ...]:
-    labels = tree.action_labels[tree.infoset_nodes[root_infoset][0]] if tree.action_labels else None
-    if labels is None or len(labels) != action_count:
+    table = build_dense_infoset_table(tree)
+    labels = table.action_labels[root_infoset]
+    if len(labels) != action_count:
         return tuple(f"action_{index}" for index in range(action_count))
     return labels
 

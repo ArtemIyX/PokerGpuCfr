@@ -24,9 +24,10 @@ def test_holdem_hu_tree_builds_dense_infosets() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
     table = build_dense_infoset_table(tree)
 
-    assert table.infoset_count == 2
-    assert table.infoset_order == (0, 1)
-    assert table.action_counts == (2, 2)
+    assert table.infoset_count == 1
+    assert table.infoset_order == (0,)
+    assert table.action_counts == (6,)
+    assert table.action_labels == (("check", "bet:37", "bet:74", "bet:112", "bet:149", "bet:459"),)
 
 
 def test_holdem_hu_solver_smoke_test_runs_end_to_end() -> None:
@@ -57,6 +58,7 @@ def test_holdem_hu_solver_smoke_test_runs_end_to_end() -> None:
     root_strategy = cast(tuple[float, ...], result.final_state.strategy_sums[0])
     total = sum(root_strategy)
     assert total > 0.0
+    assert len(root_strategy) == 6
     normalized = tuple(value / total for value in root_strategy)
     assert abs(sum(normalized) - 1.0) < 1e-6
 
