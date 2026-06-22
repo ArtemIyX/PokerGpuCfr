@@ -65,37 +65,20 @@ def make_game_public_tree(game: GameVariant) -> PublicTree:
 
 
 def make_holdem_hu_public_tree() -> PublicTree:
+    action_labels = ("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct")
+    child_count = len(action_labels)
+    children = tuple(ChildLink(child=NodeId(index + 1)) for index in range(child_count))
     return PublicTree(
         node_types=(
             NodeType.PLAYER0,
-            NodeType.TERMINAL,
-            NodeType.TERMINAL,
-            NodeType.TERMINAL,
-            NodeType.TERMINAL,
-            NodeType.TERMINAL,
-            NodeType.TERMINAL,
+            *(NodeType.TERMINAL for _ in range(child_count)),
         ),
-        first_child=(0, 6, 6, 6, 6, 6, 6),
-        child_count=(6, 0, 0, 0, 0, 0, 0),
-        children=(
-            ChildLink(child=NodeId(1)),
-            ChildLink(child=NodeId(2)),
-            ChildLink(child=NodeId(3)),
-            ChildLink(child=NodeId(4)),
-            ChildLink(child=NodeId(5)),
-            ChildLink(child=NodeId(6)),
-        ),
-        infoset_ids=(InfosetId(0), None, None, None, None, None, None),
-        terminal_payoffs=(None, Chips(0), Chips(0), Chips(0), Chips(0), Chips(0), Chips(0)),
-        action_labels=(
-            ("check", "bet:37", "bet:74", "bet:112", "bet:149", "bet:459"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
+        first_child=(0, *([child_count] * child_count)),
+        child_count=(child_count, *([0] * child_count)),
+        children=children,
+        infoset_ids=(InfosetId(0), *([None] * child_count)),
+        terminal_payoffs=(None, *(Chips(0) for _ in range(child_count))),
+        action_labels=(action_labels, *([None] * child_count)),
     )
 
 

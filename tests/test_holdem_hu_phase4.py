@@ -18,6 +18,7 @@ from pokergpu.cfr.solver import build_dense_infoset_table
 from pokergpu.cfr.solver import make_game_public_tree
 from pokergpu.cfr.solver import run_solver_stage
 from pokergpu.core.board import Board
+from pokergpu.solver_holdem_hu_cli import _format_root_strategy
 
 
 def test_holdem_hu_tree_builds_dense_infosets() -> None:
@@ -27,7 +28,24 @@ def test_holdem_hu_tree_builds_dense_infosets() -> None:
     assert table.infoset_count == 1
     assert table.infoset_order == (0,)
     assert table.action_counts == (6,)
-    assert table.action_labels == (("check", "bet:37", "bet:74", "bet:112", "bet:149", "bet:459"),)
+    assert table.action_labels == (("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct"),)
+
+
+def test_holdem_hu_root_strategy_labels_match_actions() -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(
+        regret_sums=((0.0,) * 6,),
+        strategy_sums=((1.0, 2.0, 3.0, 4.0, 5.0, 6.0),),
+    )
+
+    root_strategy = _format_root_strategy(state, tree)
+
+    assert root_strategy is not None
+    assert "check:" in root_strategy
+    assert "bet:25pct:" in root_strategy
+    assert "bet:150pct:" in root_strategy
+    assert len(table.action_labels[0]) == 6
 
 
 def test_holdem_hu_solver_smoke_test_runs_end_to_end() -> None:
