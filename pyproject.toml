@@ -44,3 +44,4 @@ where = ["src"]
 
 [project.scripts]
 pokergpu-solver = "pokergpu.solver_cli:main"
+pokergpu-holdem-hu-solver = "pokergpu.solver_holdem_hu_cli:main"
