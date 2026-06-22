@@ -216,10 +216,10 @@ Goal:
 
 ### Checklist
 
-- [ ] define a Hold'em-specific `AbstractionProfile`;
-- [ ] keep the action vocabulary fixed across the tree;
-- [ ] split preflop and postflop sizing rules;
-- [ ] make river sizing different from flop and turn if needed;
+- [x] define a Hold'em-specific `AbstractionProfile`;
+- [x] keep the action vocabulary fixed across the tree;
+- [x] split preflop and postflop sizing rules;
+- [x] make river sizing different from flop and turn if needed;
 - [ ] clamp bet sizes to stack size and minimum legal bet;
 - [ ] clamp raise sizes to min/max legal raise-to bounds;
 - [ ] eliminate duplicate actions after rounding/clamping;

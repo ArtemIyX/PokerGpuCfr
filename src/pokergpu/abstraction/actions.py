@@ -55,6 +55,30 @@ def make_default_profile() -> AbstractionProfile:
     )
 
 
+def make_holdem_hu_profile() -> AbstractionProfile:
+    return AbstractionProfile(
+        name="holdem_hu",
+        street_templates={
+            Street.PREFLOP: StreetActionTemplate(
+                bet_sizes=(0.5,),
+                raise_to_multipliers=(1.0,),
+            ),
+            Street.FLOP: StreetActionTemplate(
+                bet_sizes=(0.25, 0.5, 0.75, 1.0),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
+            Street.TURN: StreetActionTemplate(
+                bet_sizes=(0.25, 0.5, 1.0),
+                raise_to_multipliers=(1.0, 1.5, 2.0),
+            ),
+            Street.RIVER: StreetActionTemplate(
+                bet_sizes=(0.33, 0.66, 1.0, 1.5),
+                raise_to_multipliers=(1.0, 1.5),
+            ),
+        },
+    )
+
+
 def make_compact_profile() -> AbstractionProfile:
     return AbstractionProfile(
         name="compact",
