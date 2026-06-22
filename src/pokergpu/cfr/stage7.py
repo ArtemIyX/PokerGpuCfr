@@ -187,7 +187,11 @@ def _update_single_infoset(
     strategy_sums = state.strategy_sums[infoset_id]
     values = backward.action_values[node_index]
     if len(values) != action_count:
-        raise ValueError("action values must match dense table action width")
+        raise AssertionError(
+            "stage7 width mismatch: "
+            f"infoset_id={infoset_id} node_index={node_index} "
+            f"action_count={action_count} action_values={len(values)}"
+        )
     if len(regrets) != action_count:
         raise ValueError("action values must match regret row width")
     if len(strategy_sums) != action_count:

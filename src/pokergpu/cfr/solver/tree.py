@@ -72,6 +72,11 @@ def make_holdem_hu_public_tree() -> PublicTree:
     streets = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
     action_labels_by_street = tuple(action_labels_for_street(profile, street) for street in streets)
     root_action_count = len(action_labels_by_street[0])
+    chain_action_labels = ("continue",)
+    stage1_start = root_action_count
+    stage2_start = stage1_start + root_action_count
+    stage3_start = stage2_start + root_action_count
+    stage4_start = stage3_start + root_action_count
 
     node_types = (
         NodeType.PLAYER0,
@@ -83,16 +88,16 @@ def make_holdem_hu_public_tree() -> PublicTree:
     )
     children = (
         *(ChildLink(child=NodeId(1 + index)) for index in range(root_action_count)),
-        *(ChildLink(child=NodeId(1 + root_action_count + index)) for index in range(root_action_count)),
-        *(ChildLink(child=NodeId(1 + 2 * root_action_count + index)) for index in range(root_action_count)),
-        *(ChildLink(child=NodeId(1 + 3 * root_action_count + index)) for index in range(root_action_count)),
+        *(ChildLink(child=NodeId(1 + stage1_start + index)) for index in range(root_action_count)),
+        *(ChildLink(child=NodeId(1 + stage2_start + index)) for index in range(root_action_count)),
+        *(ChildLink(child=NodeId(1 + stage3_start + index)) for index in range(root_action_count)),
     )
     first_child = (
         0,
-        *(root_action_count for _ in range(root_action_count)),
-        *(2 * root_action_count for _ in range(root_action_count)),
-        *(3 * root_action_count for _ in range(root_action_count)),
-        *(4 * root_action_count for _ in range(root_action_count)),
+        *(stage1_start + index for index in range(root_action_count)),
+        *(stage2_start + index for index in range(root_action_count)),
+        *(stage3_start + index for index in range(root_action_count)),
+        *(stage4_start for _ in range(root_action_count)),
     )
     child_counts = (
         root_action_count,
@@ -123,9 +128,7 @@ def make_holdem_hu_public_tree() -> PublicTree:
         terminal_payoffs=terminals,
         action_labels=(
             action_labels_by_street[0],
-            *(action_labels_by_street[1] for _ in range(root_action_count)),
-            *(action_labels_by_street[2] for _ in range(root_action_count)),
-            *(action_labels_by_street[3] for _ in range(root_action_count)),
+            *(chain_action_labels for _ in range(root_action_count * 3)),
             *(None for _ in range(root_action_count)),
         ),
     )
