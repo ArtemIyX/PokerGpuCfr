@@ -312,6 +312,23 @@ def test_holdem_hu_leaf_features_include_board_context() -> None:
     assert all(value >= 0.0 for value in aggregate.leaf_batch.features[:, 6:58].ravel())
 
 
+def test_holdem_hu_heuristic_leaf_backend_is_board_sensitive() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    forward = propagate_forward(tree)
+
+    empty_batch = build_leaf_eval_batch(aggregate_prob_sum(tree, forward, Board(cards=())).leaf_batch)
+    flop_batch = build_leaf_eval_batch(aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc")).leaf_batch)
+    backend = create_heuristic_leaf_backend()
+
+    empty_values = backend.evaluate(empty_batch)
+    flop_values = backend.evaluate(flop_batch)
+
+    assert isinstance(empty_values, type(flop_values))
+    assert empty_values.values.shape == flop_values.values.shape
+    assert tuple(empty_values.values[:, 0]) != tuple(flop_values.values[:, 0])
+
+
 def test_holdem_hu_leaf_batch_works_with_gpu_backend() -> None:
     build_dense_infoset_table.cache_clear()
     torch = pytest.importorskip("torch")
