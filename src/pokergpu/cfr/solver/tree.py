@@ -72,26 +72,32 @@ def make_holdem_hu_public_tree() -> PublicTree:
     streets = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
     action_labels_by_street = tuple(action_labels_for_street(profile, street) for street in streets)
     child_count = len(action_labels_by_street[0])
-    node_count = len(streets)
-    terminal_offset = node_count
-    children = tuple(
-        ChildLink(child=NodeId(terminal_offset + node_index * child_count + action_index))
-        for node_index in range(node_count)
-        for action_index in range(child_count)
+    node_types = (
+        NodeType.PLAYER0,
+        NodeType.PLAYER1,
+        NodeType.PLAYER0,
+        NodeType.PLAYER1,
+        *(NodeType.TERMINAL for _ in range(child_count)),
     )
-    node_types = tuple(NodeType.PLAYER0 if index % 2 == 0 else NodeType.PLAYER1 for index in range(node_count))
-    first_child = tuple(index * child_count for index in range(node_count))
-    child_counts = tuple(child_count for _ in range(node_count))
-    infosets = tuple(InfosetId(index) for index in range(node_count))
-    terminals = tuple(NodeType.TERMINAL for _ in range(node_count * child_count))
+    children = (
+        *(ChildLink(child=NodeId(1)) for _ in range(child_count)),
+        *(ChildLink(child=NodeId(2)) for _ in range(child_count)),
+        *(ChildLink(child=NodeId(3)) for _ in range(child_count)),
+        *(ChildLink(child=NodeId(4)) for _ in range(child_count)),
+        *(ChildLink(child=NodeId(4 + index)) for index in range(child_count)),
+    )
+    first_child = (0, child_count, child_count * 2, child_count * 3, child_count * 4, child_count * 4, child_count * 4, child_count * 4, child_count * 4, child_count * 4)
+    child_counts = (child_count, child_count, child_count, child_count, *(0 for _ in range(child_count)))
+    infosets = (InfosetId(0), InfosetId(1), InfosetId(2), InfosetId(3), *(None for _ in range(child_count)))
+    terminals = (None, None, None, None, *(Chips(0) for _ in range(child_count)))
     return PublicTree(
-        node_types=(*node_types, *terminals),
-        first_child=(*first_child, *([len(children)] * len(terminals))),
-        child_count=(*child_counts, *([0] * len(terminals))),
+        node_types=node_types,
+        first_child=first_child,
+        child_count=child_counts,
         children=children,
-        infoset_ids=(*infosets, *([None] * len(terminals))),
-        terminal_payoffs=(*(None for _ in node_types), *(Chips(0) for _ in terminals)),
-        action_labels=(*action_labels_by_street, *([None] * len(terminals))),
+        infoset_ids=infosets,
+        terminal_payoffs=terminals,
+        action_labels=action_labels_by_street + (None,) * child_count,
     )
 
 
