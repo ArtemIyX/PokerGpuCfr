@@ -12,18 +12,29 @@ from pokergpu.cfr.solver import resolve_game_state_spec
 def test_make_game_public_tree_selects_kuhn_and_leduc() -> None:
     kuhn = make_game_public_tree(GameVariant.KUHN)
     leduc = make_game_public_tree(GameVariant.LEDUC)
+    holdem = make_game_public_tree(GameVariant.HOLDEM_HU)
 
     assert kuhn.node_count > 0
     assert leduc.node_count > 0
+    assert holdem.node_count > 0
     assert kuhn != leduc
 
 
 def test_make_game_public_tree_rejects_placeholder_variants() -> None:
     with pytest.raises(NotImplementedError, match="public tree factory not implemented"):
-        make_game_public_tree(GameVariant.HOLDEM_HU)
-
-    with pytest.raises(NotImplementedError, match="public tree factory not implemented"):
         make_game_public_tree(GameVariant.HOLDEM_6MAX)
+
+
+def test_make_game_public_tree_builds_minimal_holdem_tree() -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+
+    assert tree.node_count == 4
+    assert tree.node_types[0].value == "player0"
+    assert tree.node_types[1].value == "player1"
+    assert tree.node_types[2].value == "terminal"
+    assert tree.node_types[3].value == "leaf"
+    assert tree.child_count[0] == 2
+    assert tree.child_count[1] == 2
 
 
 def test_resolve_game_state_spec_preserves_exact_and_random_modes() -> None:

@@ -148,13 +148,13 @@ Goal:
 
 ### Checklist
 
-- [ ] confirm heads-up only, exactly two players;
-- [ ] confirm the root starts from preflop after blinds are posted;
+- [x] confirm heads-up only, exactly two players;
+- [x] confirm the root starts from preflop after blinds are posted;
 - [ ] confirm dealer/button encoding and who acts first preflop;
-- [ ] confirm whether the first implementation uses a fixed cutoff depth, a street cutoff, or both;
-- [ ] confirm whether exact showdowns are handled immediately or deferred to leaf evaluation;
-- [ ] confirm whether the builder accepts a full `GameState` or a reduced Hold'em-specific public state object;
-- [ ] confirm which states are valid at the solver entry point and which must be rejected.
+- [x] confirm whether the first implementation uses a fixed cutoff depth, a street cutoff, or both;
+- [x] confirm whether exact showdowns are handled immediately or deferred to leaf evaluation;
+- [x] confirm whether the builder accepts a full `GameState` or a reduced Hold'em-specific public state object;
+- [x] confirm which states are valid at the solver entry point and which must be rejected.
 
 ### Implementation notes
 
@@ -180,12 +180,12 @@ Goal:
 
 ### Checklist
 
-- [ ] add `make_holdem_hu_public_tree`;
-- [ ] wire `GameVariant.HOLDEM_HU` into the tree factory in [src/pokergpu/cfr/solver/tree.py](/C:/Users/xeuse/RiderProjects/PokerGPU/src/pokergpu/cfr/solver/tree.py);
-- [ ] preserve the flat `PublicTree` representation;
-- [ ] keep node ordering deterministic;
-- [ ] include both `TERMINAL` and `LEAF` nodes in the first scaffold;
-- [ ] keep child counts and `first_child` offsets consistent with the array representation;
+- [x] add `make_holdem_hu_public_tree`;
+- [x] wire `GameVariant.HOLDEM_HU` into the tree factory in [src/pokergpu/cfr/solver/tree.py](/C:/Users/xeuse/RiderProjects/PokerGPU/src/pokergpu/cfr/solver/tree.py);
+- [x] preserve the flat `PublicTree` representation;
+- [x] keep node ordering deterministic;
+- [x] include both `TERMINAL` and `LEAF` nodes in the first scaffold;
+- [x] keep child counts and `first_child` offsets consistent with the array representation;
 - [ ] keep `HOLDEM_6MAX` unsupported for now;
 - [ ] make unsupported variants fail with a clear error message.
 
@@ -434,4 +434,3 @@ The first acceptable Hold'em HU milestone is:
 - the action abstraction is street-aware;
 - the solver can run a smoke test on the Hold'em tree;
 - Kuhn and Leduc still pass unchanged.
-
