@@ -516,7 +516,9 @@ def _format_root_strategy(dense_state: DenseCfrState | None, tree: PublicTree) -
         strategy = tuple(1.0 / len(strategy_sums) for _ in strategy_sums)
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
-    return "(" + ", ".join(f"{value:.3f}" for value in strategy) + ")"
+    labels = tuple(f"action_{index}" for index in range(len(strategy)))
+    parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
+    return "{" + parts + "}"
 
 
 def _build_leaf_backend(kind: str) -> LeafEvalBackend:
