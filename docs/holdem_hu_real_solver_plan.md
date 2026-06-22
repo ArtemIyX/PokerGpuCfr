@@ -52,21 +52,39 @@ The solver should support a realistic depth-limited Hold'em HU solve with:
 
 ### Checklist
 
-- [ ] Decide the minimum street coverage for the first real version.
-- [ ] Decide how many decision nodes per street are required.
-- [ ] Decide whether to model bet/call/fold/raise on each street or a reduced abstraction.
-- [ ] Decide the leaf placement rules for truncation.
-- [ ] Decide how much of the tree is exact versus abstracted.
-- [ ] Document the target node/infoset count range.
+- [x] Decide the minimum street coverage for the first real version.
+- [x] Decide how many decision nodes per street are required.
+- [x] Decide whether to model bet/call/fold/raise on each street or a reduced abstraction.
+- [x] Decide the leaf placement rules for truncation.
+- [x] Decide how much of the tree is exact versus abstracted.
+- [x] Document the target node/infoset count range.
 
 ### Recommended Target
 
-- Preflop root decision
-- Flop decision after one action path
-- Turn decision after one action path
-- River decision after one action path
-- Leaf nodes only when the configured depth limit is reached
-- Terminal nodes for fold/call/showdown endings
+- Minimum street coverage for version 1:
+  - preflop, flop, turn, river
+- Decision nodes per street:
+  - one player decision node per street on the main line
+  - optional opponent response nodes only where they add real strategic separation
+- Action abstraction:
+  - `check`
+  - `bet:25pct`
+  - `bet:50pct`
+  - `bet:75pct`
+  - `bet:100pct`
+  - `bet:150pct`
+  - plus `call`, `fold`, and `raise` only when the spot is structurally relevant
+- Leaf placement:
+  - create leaf nodes when `depth_limit` is reached before showdown
+  - create terminal nodes only for true fold / all-in / showdown endings
+- Exact vs abstracted:
+  - exact board and betting state transitions on the main line
+  - abstracted action set and depth-limited subtree expansion
+  - no attempt yet to enumerate the full no-limit action space
+- Target size:
+  - not a full solver tree yet
+  - roughly `20-80` nodes for the first real version
+  - at least `4` infosets, ideally `8+` once the branching is in place
 
 ### Required Tests
 
@@ -77,6 +95,8 @@ The solver should support a realistic depth-limited Hold'em HU solve with:
 ### Exit Criteria
 
 - The plan for the real tree shape is fixed and encoded in tests before implementation broadens the tree.
+
+Status: decided. We are targeting a compact but real four-street HU tree with abstracted actions and explicit depth-limited leaves.
 
 ## Phase B: Expand Hold'em Tree Construction
 
@@ -245,4 +265,3 @@ We will know the solver is heading toward a real Hold'em HU system when:
 - the solver can distinguish boards and streets meaningfully
 - repeated CFR updates still accumulate strategy and regret correctly
 - the diagnostics show a non-toy amount of work
-

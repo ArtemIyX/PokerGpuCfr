@@ -37,6 +37,19 @@ def test_make_game_public_tree_builds_holdem_street_scaffold() -> None:
     assert tree.action_labels[0] == ("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct")
 
 
+@pytest.mark.xfail(reason="Phase B will expand Hold'em HU beyond the toy root scaffold", strict=False)
+def test_make_game_public_tree_builds_multistreet_holdem_shape() -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+
+    assert tree.node_count >= 20
+    assert sum(1 for node_type in tree.node_types if node_type.value == "player0") + sum(
+        1 for node_type in tree.node_types if node_type.value == "player1"
+    ) >= 4
+    assert any(node_type.value == "leaf" for node_type in tree.node_types)
+    assert any(node_type.value == "terminal" for node_type in tree.node_types)
+    assert len({count for count in tree.child_count if count > 0}) >= 2
+
+
 def test_make_game_public_tree_is_deterministic_for_holdem() -> None:
     first = make_game_public_tree(GameVariant.HOLDEM_HU)
     second = make_game_public_tree(GameVariant.HOLDEM_HU)
