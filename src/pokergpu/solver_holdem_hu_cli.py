@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         cfr_variant=CfrVariant(args.variant),
         depth_limit=args.depth,
         iterations=args.iterations,
+        batch_size=args.batch_size,
         state=_build_state_spec(args),
         seed=args.seed,
         cpu_workers=args.cpu_workers,
@@ -258,7 +259,7 @@ def _print_summary(
     print(f"variant={result.request.cfr_variant.value}")
     print(f"depth={result.request.depth_limit}")
     print(f"seed={result.request.seed if result.request.seed is not None else 'none'}")
-    print(f"batch_size={getattr(result.request, 'batch_size', 'n/a')}")
+    print(f"batch_size={result.request.batch_size}")
     print(f"state={_format_game_state(runtime_state, result)}")
     print(f"legal_actions={_format_legal_actions(runtime_state)}")
     if debug:

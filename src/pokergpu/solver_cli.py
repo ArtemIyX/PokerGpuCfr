@@ -113,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         cfr_variant=CfrVariant(args.variant),
         depth_limit=args.depth,
         iterations=args.iterations,
+        batch_size=1,
         state=_build_state_spec(args),
         seed=args.seed,
         cpu_workers=args.cpu_workers,

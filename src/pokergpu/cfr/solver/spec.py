@@ -87,6 +87,7 @@ class SolverStageRequest:
     cfr_variant: CfrVariant
     depth_limit: int
     iterations: int = 1
+    batch_size: int = 1
     state: GameStateSpec | None = None
     seed: int | None = None
     cpu_workers: int = 2
@@ -105,6 +106,8 @@ class SolverStageRequest:
             raise ValueError("depth_limit must be non-negative")
         if self.iterations <= 0:
             raise ValueError("iterations must be positive")
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be positive")
         if self.cpu_workers <= 0:
             raise ValueError("cpu_workers must be positive")
         for value in (
