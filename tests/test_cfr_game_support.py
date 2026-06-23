@@ -75,6 +75,7 @@ def test_make_game_public_tree_can_build_compact_holdem_tree() -> None:
     assert compact_tree.node_count < full_tree.node_count
     assert compact_tree.child_count[0] < full_tree.child_count[0]
     assert compact_tree.node_types[-1].value == "leaf"
+    assert compact_tree.action_labels[0] != full_tree.action_labels[0]
 
 
 def test_make_game_public_tree_uses_depth_limit_for_holdem_shape() -> None:

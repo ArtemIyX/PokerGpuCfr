@@ -11,8 +11,11 @@ from pokergpu.core.betting import (
     chips,
 )
 from pokergpu.core.board import Board
+from pokergpu.core.cards import Card
 from pokergpu.core.state import GameState, HandPhase, PlayerState
 from pokergpu.core.transitions import (
+    advance_board_to_next_street,
+    advance_hand_to_next_street,
     apply_action,
     apply_action_with_record,
     undo_transition,
@@ -117,3 +120,27 @@ def test_legal_actions_produce_distinct_next_states() -> None:
     assert fold_state.player_state(PlayerIndex(1)).folded
     assert call_state.betting_round.bets[1].committed == chips(300)
     assert raise_state.betting_round.bets[1].committed == chips(500)
+
+
+def test_advance_board_to_next_street_updates_board_without_changing_round() -> None:
+    state = _make_two_player_state(to_act=0, committed0=0, committed1=0)
+
+    next_state = advance_board_to_next_street(state, next_board_cards=(Card.from_str("Ah"), Card.from_str("Kd"), Card.from_str("Tc")))
+
+    assert next_state.board.street.value == "flop"
+    assert next_state.betting_round == state.betting_round
+    assert next_state.players == state.players
+
+
+def test_advance_hand_to_next_street_resets_bets_and_passes_action() -> None:
+    state = _make_two_player_state(to_act=0, committed0=100, committed1=100)
+
+    next_state = advance_hand_to_next_street(
+        state,
+        next_board_cards=(Card.from_str("Ah"), Card.from_str("Kd"), Card.from_str("Tc")),
+    )
+
+    assert next_state.board.street.value == "flop"
+    assert next_state.betting_round.bets[0].committed == chips(0)
+    assert next_state.betting_round.bets[1].committed == chips(0)
+    assert next_state.betting_round.to_act == PlayerIndex(1)

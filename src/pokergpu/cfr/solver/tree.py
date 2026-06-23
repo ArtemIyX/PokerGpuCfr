@@ -12,6 +12,7 @@ from pokergpu.core.betting import PlayerStack
 from pokergpu.core.betting import Pot
 from pokergpu.core.betting import Chips
 from pokergpu.core.betting import chips
+from pokergpu.core.cards import Card
 from pokergpu.core.state import GameState
 from pokergpu.core.state import PlayerState
 from pokergpu.cfr.solver.spec import GameStateMode
@@ -20,7 +21,7 @@ from pokergpu.cfr.solver.spec import GameVariant
 from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
 from pokergpu.cfr.solver.leduc import make_leduc_public_tree
 from pokergpu.tree.builder import TreeBuildConfig
-from pokergpu.tree.builder import build_shallow_public_tree
+from pokergpu.tree.builder import build_public_tree
 from pokergpu.tree.public_tree import ChildLink
 from pokergpu.tree.public_tree import InfosetId
 from pokergpu.tree.public_tree import NodeId
@@ -91,8 +92,13 @@ def make_game_public_tree(
 def make_holdem_hu_public_tree(*, compact: bool = False) -> PublicTree:
     state = _make_canonical_holdem_state()
     abstraction = BaselineActionAbstraction(profile=make_compact_profile() if compact else make_holdem_hu_profile())
-    _ = TreeBuildConfig(max_depth=1 if compact else 2, max_nodes=256 if compact else 512)
-    return build_shallow_public_tree(state, abstraction=abstraction).tree
+    config = TreeBuildConfig(max_depth=1 if compact else 2, max_nodes=256 if compact else 512)
+    return build_public_tree(
+        state,
+        abstraction=abstraction,
+        config=config,
+        advance_next_board=_next_holdem_board if not compact else None,
+    ).tree
 
 
 def _make_canonical_holdem_state() -> GameState:
@@ -117,6 +123,16 @@ def _make_canonical_holdem_state() -> GameState:
         ),
         dealer=PlayerIndex(0),
     )
+
+
+def _next_holdem_board(state: GameState) -> Board | None:
+    if state.board.is_preflop:
+        return Board.from_str("AhKdTc")
+    if state.board.is_flop:
+        return Board.from_str("AhKdTc9s")
+    if state.board.is_turn:
+        return Board.from_str("AhKdTc9s2d")
+    return None
 
 
 def resolve_game_state_spec(spec: GameStateSpec | None) -> GameStateSpec | None:

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from typing import Callable
 
 from pokergpu.abstraction.actions import ActionAbstraction, BaselineActionAbstraction
 from pokergpu.core.actions import Action
 from pokergpu.core.betting import Chips
 from pokergpu.core.state import GameState, HandPhase
+from pokergpu.core.transitions import advance_hand_to_next_street
 from pokergpu.core.transitions import apply_action
+from pokergpu.core.board import Board
 
 from .public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
@@ -29,11 +32,13 @@ def build_shallow_public_tree(
     state: GameState,
     *,
     abstraction: ActionAbstraction | None = None,
+    advance_next_board: Callable[[GameState], Board | None] | None = None,
 ) -> BuiltPublicTree:
     return build_public_tree(
         state,
         abstraction=abstraction,
         config=TreeBuildConfig(max_depth=1),
+        advance_next_board=advance_next_board,
     )
 
 
@@ -42,6 +47,7 @@ def build_public_tree(
     *,
     abstraction: ActionAbstraction | None = None,
     config: TreeBuildConfig | None = None,
+    advance_next_board: Callable[[GameState], Board | None] | None = None,
 ) -> BuiltPublicTree:
     abstraction_impl = abstraction or BaselineActionAbstraction()
     build_config = config or TreeBuildConfig()
@@ -51,9 +57,12 @@ def build_public_tree(
     ]
     first_child: list[int] = [0]
     child_count: list[int] = [0]
-    infoset_ids: list[InfosetId | None] = [
-        _infoset_id_for_state(state, 0, node_types[0])
-    ]
+    infoset_ids: list[InfosetId | None] = []
+    next_infoset_id = 0
+    root_infoset = _infoset_id_for_state(state, node_types[0], next_infoset_id)
+    if root_infoset is not None:
+        next_infoset_id += 1
+    infoset_ids.append(root_infoset)
     terminal_payoffs: list[Chips | None] = [_terminal_payoff_for_state(state)]
     node_states: list[GameState] = [state]
     actions_by_node: list[tuple[Action, ...]] = [()]
@@ -79,6 +88,7 @@ def build_public_tree(
                 break
 
             child_state = apply_action(node_state, action)
+            child_state = _advance_closed_street(child_state, advance_next_board)
             child_node_index = len(node_states)
             children.append(ChildLink(child=NodeId(child_node_index)))
             node_states.append(child_state)
@@ -93,9 +103,10 @@ def build_public_tree(
             node_types.append(child_type)
             first_child.append(0)
             child_count.append(0)
-            infoset_ids.append(
-                _infoset_id_for_state(child_state, child_node_index, child_type)
-            )
+            child_infoset = _infoset_id_for_state(child_state, child_type, next_infoset_id)
+            if child_infoset is not None:
+                next_infoset_id += 1
+            infoset_ids.append(child_infoset)
             terminal_payoffs.append(_terminal_payoff_for_state(child_state))
 
             if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
@@ -128,14 +139,14 @@ def _node_type_for_state(state: GameState, *, depth: int, max_depth: int) -> Nod
 
 def _infoset_id_for_state(
     state: GameState,
-    node_index: int,
     node_type: NodeType,
+    dense_infoset_id: int,
 ) -> InfosetId | None:
     if (
         node_type in {NodeType.PLAYER0, NodeType.PLAYER1}
         and state.phase is HandPhase.IN_PROGRESS
     ):
-        return InfosetId(node_index)
+        return InfosetId(dense_infoset_id)
     return None
 
 
@@ -143,3 +154,22 @@ def _terminal_payoff_for_state(state: GameState) -> Chips | None:
     if state.phase is HandPhase.TERMINAL:
         return Chips(0)
     return None
+
+
+def _advance_closed_street(
+    state: GameState,
+    advance_next_board: Callable[[GameState], Board | None] | None,
+) -> GameState:
+    if advance_next_board is None:
+        return state
+    if state.phase is not HandPhase.IN_PROGRESS:
+        return state
+    if state.board.is_river:
+        return state
+    if state.betting_round.to_act != state.dealer:
+        return state
+    next_board = advance_next_board(state)
+    if next_board is None:
+        return state
+    next_cards = next_board.cards
+    return advance_hand_to_next_street(state, next_board_cards=next_cards)

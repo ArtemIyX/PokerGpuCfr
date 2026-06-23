@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from .actions import Action, ActionType
 from .betting import BettingRoundState, Chips, PlayerBet, PlayerIndex, PlayerStack
 from .legality import is_legal_action
+from .board import Board
+from .cards import Card
 from .state import GameState, HandPhase, PlayerState
 from .terminal import non_all_in_active_players
 
@@ -54,6 +56,59 @@ def apply_action_with_record(state: GameState, action: Action) -> AppliedTransit
 
 def undo_transition(transition: AppliedTransition) -> GameState:
     return transition.previous_state
+
+
+def advance_board_to_next_street(state: GameState, *, next_board_cards: tuple[Card, ...]) -> GameState:
+    if state.phase is not HandPhase.IN_PROGRESS:
+        raise ValueError("cannot advance board for non-active hand")
+    if state.board.is_river:
+        raise ValueError("river board cannot advance further")
+    expected_length = {
+        0: 3,
+        3: 4,
+        4: 5,
+    }.get(len(state.board.cards))
+    if expected_length is None:
+        raise ValueError("board must be preflop, flop, or turn to advance")
+    if len(next_board_cards) != expected_length:
+        raise ValueError("next board cards must match the next street length")
+    next_board = Board(cards=next_board_cards)
+    return GameState(
+        board=next_board,
+        players=state.players,
+        betting_round=state.betting_round,
+        phase=state.phase,
+        dealer=state.dealer,
+    )
+
+
+def advance_hand_to_next_street(state: GameState, *, next_board_cards: tuple[Card, ...]) -> GameState:
+    if state.phase is not HandPhase.IN_PROGRESS:
+        raise ValueError("cannot advance hand for non-active hand")
+    if state.board.is_river:
+        raise ValueError("river board cannot advance further")
+    next_board = Board(cards=next_board_cards)
+    active_players = tuple(player for player in state.players if not player.folded)
+    if len(active_players) <= 1:
+        raise ValueError("cannot advance street without multiple active players")
+    next_to_act = _next_postflop_player(state.dealer, active_players)
+    reset_round = BettingRoundState(
+        pot=state.betting_round.pot,
+        stacks=state.betting_round.stacks,
+        bets=tuple(
+            PlayerBet(player=bet.player, committed=Chips(0), folded=bet.folded, all_in=bet.all_in)
+            for bet in state.betting_round.bets
+        ),
+        blinds=state.betting_round.blinds,
+        to_act=next_to_act,
+    )
+    return GameState(
+        board=next_board,
+        players=state.players,
+        betting_round=reset_round,
+        phase=state.phase,
+        dealer=state.dealer,
+    )
 
 
 def _apply_fold(state: GameState, player: PlayerIndex) -> GameState:
@@ -221,3 +276,13 @@ def _player_bet(betting_round: BettingRoundState, player: PlayerIndex) -> Player
     if match is None:
         raise ValueError("unknown player")
     return match
+
+
+def _next_postflop_player(dealer: PlayerIndex, players: tuple[PlayerState, ...]) -> PlayerIndex:
+    active_ids = tuple(player.player for player in players if not player.folded)
+    if not active_ids:
+        raise ValueError("cannot choose next player from empty active set")
+    if dealer not in active_ids:
+        return active_ids[0]
+    dealer_index = active_ids.index(dealer)
+    return active_ids[(dealer_index + 1) % len(active_ids)]
