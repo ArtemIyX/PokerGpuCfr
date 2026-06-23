@@ -16,7 +16,14 @@ from pokergpu.cfr.stage7 import (
     update_regret,
 )
 from pokergpu.cfr.solver import build_dense_infoset_table
+from pokergpu.cfr.solver import CfrVariant
+from pokergpu.cfr.solver import GameVariant
+from pokergpu.cfr.solver import SolverStageRequest
+from pokergpu.cfr.solver import make_game_public_tree
+from pokergpu.cfr.solver import run_solver_stage
+from pokergpu.cfr.solver import TimingSpec
 from pokergpu.core.betting import Chips
+from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
 
 
@@ -183,3 +190,31 @@ def test_apply_dense_backward_cfv_update_accumulates_over_iterations() -> None:
     assert second.regret_sums[0] == (-2.0, 2.0)
     assert first.strategy_sums[0] == (0.5, 0.5)
     assert second.strategy_sums[0] == (0.5, 1.5)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [CfrVariant.CFR, CfrVariant.CFR_PLUS, CfrVariant.DCFR, CfrVariant.PREDICTIVE_CFR_PLUS],
+)
+def test_holdem_tree_accepts_supported_cfr_variants(variant: CfrVariant) -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU, depth_limit=1)
+    table = build_dense_infoset_table(tree)
+    state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=variant,
+        depth_limit=1,
+        timing=TimingSpec(measure=False),
+    )
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=state,
+        board=Board(cards=()),
+    )
+
+    assert result.final_state is not None

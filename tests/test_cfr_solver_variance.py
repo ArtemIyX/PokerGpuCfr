@@ -82,6 +82,30 @@ def test_root_infoset_shapes_differ_between_kuhn_and_leduc() -> None:
     assert kuhn_table.infoset_nodes != leduc_table.infoset_nodes
 
 
+def test_holdem_root_strategy_differs_across_seeds_and_boards() -> None:
+    first = _run_and_get_root_strategy(
+        GameVariant.HOLDEM_HU,
+        iterations=2,
+        seed=7,
+        game_state=GameStateSpec(mode=GameStateMode.RANDOM, seed=7),
+    )
+    second = _run_and_get_root_strategy(
+        GameVariant.HOLDEM_HU,
+        iterations=2,
+        seed=91,
+        game_state=GameStateSpec(mode=GameStateMode.RANDOM, seed=91),
+    )
+    board_state = _run_and_get_root_strategy(
+        GameVariant.HOLDEM_HU,
+        iterations=2,
+        seed=7,
+        game_state=GameStateSpec(mode=GameStateMode.EXACT, seed=7, encoded_state=b"state"),
+    )
+
+    assert first != second
+    assert first != board_state
+
+
 def _run_and_get_root_strategy(
     game: GameVariant,
     *,
@@ -92,8 +116,14 @@ def _run_and_get_root_strategy(
     tree = make_game_public_tree(game)
     table = build_dense_infoset_table(tree)
     dense_state = DenseCfrState(
-        regret_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
-        strategy_sums=tuple((0.0, 0.0) for _ in range(table.infoset_count)),
+        regret_sums=tuple(
+            tuple(0.0 for _ in range(table.action_counts[index]))
+            for index in range(table.infoset_count)
+        ),
+        strategy_sums=tuple(
+            tuple(0.0 for _ in range(table.action_counts[index]))
+            for index in range(table.infoset_count)
+        ),
     )
     request = SolverStageRequest(
         game=game,
