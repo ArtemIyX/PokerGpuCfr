@@ -184,16 +184,16 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 
 ### Checklist
 
-- [ ] Verify repeated iterations continue to change root strategy.
-- [ ] Verify root regrets accumulate in the expected direction.
-- [ ] Verify CFR+, DCFR, and Predictive CFR+ still route correctly.
-- [ ] Verify repeated run determinism for a fixed seed.
+- [x] Verify repeated iterations continue to change root strategy.
+- [x] Verify root regrets accumulate in the expected direction.
+- [x] Verify CFR+, DCFR, and Predictive CFR+ still route correctly.
+- [x] Verify repeated run determinism for a fixed seed.
 
 ### Required Tests
 
-- [ ] `tests/test_cfr_stage7.py`: repeated updates accumulate regrets correctly.
-- [ ] `tests/test_holdem_hu_phase4.py`: root strategy changes over iterations on the repaired Hold'em spot.
-- [ ] `tests/test_cfr_solver_variance.py`: different games and states still produce distinct strategies.
+- [x] `tests/test_cfr_stage7.py`: repeated updates accumulate regrets correctly.
+- [x] `tests/test_holdem_hu_phase4.py`: root strategy changes over iterations on the repaired Hold'em spot.
+- [x] `tests/test_cfr_solver_variance.py`: different games and states still produce distinct strategies.
 
 ### Exit Criteria
 

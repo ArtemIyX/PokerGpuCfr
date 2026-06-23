@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import cast
 
+import numpy as np
 import pytest
 
 from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
@@ -280,6 +281,122 @@ def test_holdem_hu_root_strategy_accumulates_over_iterations() -> None:
     assert sum(abs(a - b) for a, b in zip(first, last, strict=True)) > 0.0
 
 
+def test_holdem_hu_root_regrets_accumulate_over_iterations() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        iterations=2,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+
+    board = Board.from_str("AhKdTc")
+    first = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+        backend=create_heuristic_leaf_backend(),
+    )
+    assert first.final_state is not None
+    first_state = cast(DenseCfrState, first.final_state)
+    second = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=first_state,
+        board=board,
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    first_diagnostics = first.diagnostics
+    second_diagnostics = second.diagnostics
+    assert first_diagnostics is not None
+    assert second_diagnostics is not None
+    first_regrets = cast(tuple[float, ...], first_diagnostics["root_regrets"])
+    second_regrets = cast(tuple[float, ...], second_diagnostics["root_regrets"])
+    assert first_regrets != second_regrets
+    assert any(abs(second_value) >= abs(first_value) for first_value, second_value in zip(first_regrets, second_regrets, strict=True))
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [CfrVariant.CFR, CfrVariant.CFR_PLUS, CfrVariant.DCFR, CfrVariant.PREDICTIVE_CFR_PLUS],
+)
+def test_holdem_hu_supported_variants_route_through_solver(
+    variant: CfrVariant,
+) -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=variant,
+        depth_limit=1,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=Board.from_str("AhKdTc"),
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert result.request.cfr_variant is variant
+    assert result.final_state is not None
+    assert result.diagnostics is not None
+    assert result.diagnostics["cfr_variant"] == variant.value
+
+
+def test_holdem_hu_repeat_runs_are_deterministic_for_fixed_seed() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        iterations=3,
+        seed=17,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+    board = Board.from_str("AhKdTc")
+
+    first = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+        backend=create_heuristic_leaf_backend(),
+    )
+    second = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert first.diagnostics == second.diagnostics
+    assert first.final_state == second.final_state
+
+
 def test_holdem_hu_cli_debug_prints_root_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -441,7 +558,7 @@ def test_holdem_hu_tree_depth_limit_hit_count_is_reported() -> None:
     )
 
     assert result.diagnostics is not None
-    assert result.diagnostics["tree_depth_limit_hits"] >= 1
+    assert cast(int, result.diagnostics["tree_depth_limit_hits"]) >= 1
 
 
 def test_holdem_hu_leaf_features_include_board_context() -> None:
@@ -455,7 +572,7 @@ def test_holdem_hu_leaf_features_include_board_context() -> None:
     assert all(value == 1.0 for value in aggregate.leaf_batch.features[:, 2])
     assert all(value == 3.0 for value in aggregate.leaf_batch.features[:, 3])
     assert all(value != 0.0 for value in aggregate.leaf_batch.features[:, 4])
-    assert all(value >= 0.0 for value in aggregate.leaf_batch.features[:, 6:58].ravel())
+    assert all(value >= 0.0 for value in np.asarray(aggregate.leaf_batch.features[:, 6:58].ravel(), dtype=np.float32))
 
 
 def test_holdem_hu_heuristic_leaf_backend_is_board_sensitive() -> None:
