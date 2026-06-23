@@ -51,13 +51,18 @@ def make_toy_pipeline_tree() -> PublicTree:
     )
 
 
-def make_game_public_tree(game: GameVariant, *, compact: bool = False) -> PublicTree:
+def make_game_public_tree(
+    game: GameVariant,
+    *,
+    compact: bool = False,
+    depth_limit: int | None = None,
+) -> PublicTree:
     if game is GameVariant.KUHN:
         return make_kuhn_public_tree()
     if game is GameVariant.LEDUC:
         return make_leduc_public_tree()
     if game is GameVariant.HOLDEM_HU:
-        return make_holdem_hu_public_tree(compact=compact)
+        return make_holdem_hu_public_tree(compact=compact or (depth_limit is not None and depth_limit <= 1))
     supported = ", ".join(
         (
             GameVariant.KUHN.value,

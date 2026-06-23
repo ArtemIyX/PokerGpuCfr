@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         measure_time=args.measure_time,
     )
 
-    tree = make_game_public_tree(GameVariant.HOLDEM_HU, compact=args.compact_tree)
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU, compact=args.compact_tree, depth_limit=args.depth)
     board = _resolve_board(args, request)
     dense_state = _make_dense_state(tree)
     leaf_backend = _build_leaf_backend(args.leaf_evaluator)

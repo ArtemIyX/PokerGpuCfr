@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         measure_time=args.measure_time,
     )
 
-    tree = make_game_public_tree(request.game)
+    tree = make_game_public_tree(request.game, depth_limit=request.depth_limit)
     board = _resolve_board(args, request)
     dense_state = _make_dense_state(tree)
     leaf_backend = _build_leaf_backend(args.leaf_evaluator)

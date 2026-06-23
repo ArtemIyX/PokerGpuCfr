@@ -239,7 +239,7 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - [x] Add street-specific betting sequences with distinct preflop, flop, turn, and river action sets.
 - [x] Expand from a single root branch to multiple street branches with meaningful public state separation.
 - [x] Ensure fold, call, check, bet, and raise transitions remain distinct when they should be.
-- [ ] Keep pruning and depth-limiting explicit in tree construction and CLI wiring.
+- [x] Keep pruning and depth-limiting explicit in tree construction and CLI wiring.
 - [x] Preserve the option to run tiny debug trees with a reduced abstraction profile.
 - [ ] Consider abstraction buckets or canonicalized states only where they reduce tree size without collapsing strategic differences.
 - [ ] Keep board-sensitive leaf evaluation aligned with the larger tree shape.
@@ -254,6 +254,7 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - Added a transition regression test in `tests/test_transitions.py` to ensure fold, call, and raise lead to distinct next states when legal.
 - Added an explicit compact-tree flag in `src/pokergpu/solver_holdem_hu_cli.py` so tiny debug trees can be requested directly.
 - Added a compact Hold'em tree mode in `src/pokergpu/cfr/solver/tree.py` for reduced-abstraction debug runs.
+- Threaded `depth_limit` through the tree factory and Hold'em CLIs so shallow solves can select a compact tree path explicitly.
 
 ### Required Tests
 
