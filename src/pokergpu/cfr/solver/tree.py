@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-from pokergpu.core.betting import Chips
-from pokergpu.abstraction.actions import action_labels_for_street
+from pokergpu.abstraction.actions import BaselineActionAbstraction
 from pokergpu.abstraction.actions import make_compact_profile
 from pokergpu.abstraction.actions import make_holdem_hu_profile
-from pokergpu.core.board import Street
+from pokergpu.core.board import Board
+from pokergpu.core.betting import BettingRoundState
+from pokergpu.core.betting import BlindStructure
+from pokergpu.core.betting import PlayerBet
+from pokergpu.core.betting import PlayerIndex
+from pokergpu.core.betting import PlayerStack
+from pokergpu.core.betting import Pot
+from pokergpu.core.betting import Chips
+from pokergpu.core.betting import chips
+from pokergpu.core.state import GameState
+from pokergpu.core.state import PlayerState
 from pokergpu.cfr.solver.spec import GameStateMode
 from pokergpu.cfr.solver.spec import GameStateSpec
 from pokergpu.cfr.solver.spec import GameVariant
 from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
 from pokergpu.cfr.solver.leduc import make_leduc_public_tree
-from pokergpu.tree.public_tree import ChildLink, InfosetId, NodeId, NodeType, PublicTree
+from pokergpu.tree.builder import TreeBuildConfig
+from pokergpu.tree.builder import build_shallow_public_tree
+from pokergpu.tree.public_tree import ChildLink
+from pokergpu.tree.public_tree import InfosetId
+from pokergpu.tree.public_tree import NodeId
+from pokergpu.tree.public_tree import NodeType
+from pokergpu.tree.public_tree import PublicTree
 
 
 def make_toy_public_tree() -> PublicTree:
@@ -74,76 +89,33 @@ def make_game_public_tree(
 
 
 def make_holdem_hu_public_tree(*, compact: bool = False) -> PublicTree:
-    profile = make_compact_profile() if compact else make_holdem_hu_profile()
-    streets = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
-    action_labels_by_street = tuple(action_labels_for_street(profile, street) for street in streets)
-    root_action_count = len(action_labels_by_street[0])
-    flop_action_count = root_action_count
-    turn_action_count = root_action_count
-    stage1_start = root_action_count
-    stage2_start = stage1_start + root_action_count
-    stage3_start = stage2_start + root_action_count
-    stage4_start = stage3_start + root_action_count
+    state = _make_canonical_holdem_state()
+    abstraction = BaselineActionAbstraction(profile=make_compact_profile() if compact else make_holdem_hu_profile())
+    _ = TreeBuildConfig(max_depth=1 if compact else 2, max_nodes=256 if compact else 512)
+    return build_shallow_public_tree(state, abstraction=abstraction).tree
 
-    node_types = (
-        NodeType.PLAYER0,
-        *(NodeType.PLAYER1 for _ in range(root_action_count)),
-        *(NodeType.PLAYER0 for _ in range(root_action_count)),
-        *(NodeType.PLAYER1 for _ in range(root_action_count)),
-        *(NodeType.TERMINAL for _ in range(5)),
-        NodeType.LEAF,
-    )
-    children = (
-        *(ChildLink(child=NodeId(1 + index)) for index in range(root_action_count)),
-        *(ChildLink(child=NodeId(1 + stage1_start + index)) for index in range(root_action_count)),
-        *(ChildLink(child=NodeId(1 + stage2_start + index)) for index in range(root_action_count)),
-        *(ChildLink(child=NodeId(1 + stage3_start + index)) for index in range(root_action_count)),
-    )
-    first_child = (
-        0,
-        *(stage1_start + index for index in range(root_action_count)),
-        *(stage2_start + index for index in range(root_action_count)),
-        *(stage3_start + index for index in range(root_action_count)),
-        *(len(children) for _ in range(5)),
-        len(children),
-    )
-    child_counts = (
-        root_action_count,
-        *(1 for _ in range(root_action_count)),
-        *(1 for _ in range(root_action_count)),
-        *(1 for _ in range(root_action_count)),
-        *(0 for _ in range(5)),
-        0,
-    )
-    infosets = (
-        InfosetId(0),
-        *(InfosetId(1 + index) for index in range(root_action_count)),
-        *(InfosetId(1 + root_action_count + index) for index in range(root_action_count)),
-        *(InfosetId(1 + 2 * root_action_count + index) for index in range(root_action_count)),
-        *(None for _ in range(5)),
-        None,
-    )
-    terminals = (
-        None,
-        *(None for _ in range(root_action_count * 3)),
-        *(Chips(index - 2) for index in range(5)),
-        None,
-    )
-    return PublicTree(
-        node_types=node_types,
-        first_child=first_child,
-        child_count=child_counts,
-        children=children,
-        infoset_ids=infosets,
-        terminal_payoffs=terminals,
-        action_labels=(
-            action_labels_by_street[0],
-            *(action_labels_by_street[0] for _ in range(root_action_count)),
-            *(action_labels_by_street[1] for _ in range(flop_action_count)),
-            *(action_labels_by_street[2] for _ in range(turn_action_count)),
-            *(None for _ in range(5)),
-            None,
+
+def _make_canonical_holdem_state() -> GameState:
+    return GameState(
+        board=Board(cards=()),
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
         ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(3)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1000)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1000)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(1)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(2)),
+            ),
+            blinds=BlindStructure(small_blind=chips(1), big_blind=chips(2)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
     )
 
 
