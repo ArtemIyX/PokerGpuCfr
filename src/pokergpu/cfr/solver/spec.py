@@ -64,8 +64,6 @@ class TimingSpec:
 class DebugSpec:
     enabled: bool = False
     log_dir: Path | None = None
-    start_tensorboard: bool = False
-    tensorboard_port: int | None = None
     sample_limit: int = 64
     histogram_bins: int = 64
     max_text_items: int = 128
@@ -77,8 +75,6 @@ class DebugSpec:
             raise ValueError("histogram_bins must be positive")
         if self.max_text_items <= 0:
             raise ValueError("max_text_items must be positive")
-        if self.tensorboard_port is not None and self.tensorboard_port <= 0:
-            raise ValueError("tensorboard_port must be positive")
 
 
 @dataclass(slots=True, frozen=True)

@@ -97,7 +97,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--print-profile", action="store_true", help="print cProfile top functions to the console")
     parser.add_argument("--board", type=str)
     parser.add_argument("--debug-log-dir", type=Path)
-    parser.add_argument("--debug-port", type=int)
     parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="model")
     parser.add_argument("--debug", action="store_true", help="print detailed solver debug information")
     parser.add_argument("--progress", action="store_true", help="show a tqdm progress bar")
@@ -126,8 +125,6 @@ def main(argv: list[str] | None = None) -> int:
         debug=DebugSpec(
             enabled=args.debug,
             log_dir=args.debug_log_dir,
-            start_tensorboard=args.debug,
-            tensorboard_port=args.debug_port,
         ),
         measure_time=args.measure_time,
     )
@@ -174,11 +171,8 @@ def main(argv: list[str] | None = None) -> int:
         print_profile=args.print_profile,
     )
     log_dir = getattr(debug_session, "log_dir", None)
-    tensorboard_url = getattr(debug_session, "tensorboard_url", None)
     if args.debug and log_dir is not None:
-        print(f"tensorboard_log_dir={log_dir}")
-    if args.debug and tensorboard_url is not None:
-        print(f"tensorboard_url={tensorboard_url}")
+        print(f"debug_log_dir={log_dir}")
     if args.summary_output is not None:
         _write_summary(
             args.summary_output,
@@ -187,7 +181,6 @@ def main(argv: list[str] | None = None) -> int:
             tree,
             board,
             debug_log_dir=log_dir if args.debug else None,
-            debug_url=tensorboard_url if args.debug else None,
         )
     return 0
 
@@ -271,7 +264,6 @@ def _write_summary(
     board: Board,
     *,
     debug_log_dir: Path | None = None,
-    debug_url: str | None = None,
 ) -> None:
     payload = {
         "game": result.request.game.value,
@@ -285,9 +277,7 @@ def _write_summary(
         "root_strategy": _format_root_strategy(dense_state, tree),
     }
     if debug_log_dir is not None:
-        payload["tensorboard_log_dir"] = str(debug_log_dir)
-    if debug_url is not None:
-        payload["tensorboard_url"] = debug_url
+        payload["debug_log_dir"] = str(debug_log_dir)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
