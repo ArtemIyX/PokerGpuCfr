@@ -40,6 +40,8 @@ class LeafEvalBatchOutput:
             raise ValueError("leaf eval values have an unexpected width")
         if self.values.shape[0] != len(self.node_ids):
             raise ValueError("leaf eval value rows must match node ids")
+        if not np.isfinite(self.values).all():
+            raise ValueError("leaf eval values must be finite")
 
 
 class LeafEvalBackend(Protocol):
@@ -62,5 +64,9 @@ def evaluate_leaf_batch(
         raise ValueError("leaf eval backend must preserve node ordering")
     if output.values.shape[0] != len(batch.node_ids):
         raise ValueError("leaf eval backend returned an unexpected row count")
+    if output.values.dtype != np.float32:
+        raise ValueError("leaf eval backend must return float32 values")
+    if not np.isfinite(output.values).all():
+        raise ValueError("leaf eval backend returned non-finite values")
     values = tuple(float(value) for value in output.values[:, 0])
     return LeafEvalResult(node_ids=output.node_ids, node_values=values)

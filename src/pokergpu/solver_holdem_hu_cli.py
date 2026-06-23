@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--board", type=str)
     parser.add_argument("--debug-log-dir", type=Path)
     parser.add_argument("--debug-port", type=int)
-    parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="heuristic")
+    parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="model")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--progress", action="store_true")
     parser.add_argument("--batch-size", type=int, default=1)

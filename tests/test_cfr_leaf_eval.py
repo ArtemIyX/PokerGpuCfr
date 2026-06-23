@@ -29,6 +29,14 @@ def test_leaf_eval_batch_output_validates_fixed_value_layout() -> None:
     assert batch.values.shape == (2, LEAF_EVAL_OUTPUT_WIDTH)
 
 
+def test_leaf_eval_batch_output_rejects_non_finite_values() -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        LeafEvalBatchOutput(
+            node_ids=(2,),
+            values=np.array([[np.inf]], dtype=np.float32),
+        )
+
+
 def test_leaf_eval_batch_rejects_mismatched_row_count() -> None:
     with pytest.raises(ValueError, match="feature rows must match node ids"):
         LeafEvalBatchInput(

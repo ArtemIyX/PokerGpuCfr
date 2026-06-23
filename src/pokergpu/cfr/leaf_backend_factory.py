@@ -31,19 +31,22 @@ class HeuristicLeafBackend(LeafEvalBackend):
         live_board_cards = np.sum(board_vector, axis=1, dtype=np.float32)
         blocked_cards = np.sum(board_mask, axis=1, dtype=np.float32)
         leaf_pressure = np.sum(leaf_vector, axis=1, dtype=np.float32)
+        board_texture = np.sum(np.abs(board_vector - board_mask), axis=1, dtype=np.float32)
 
-        values = (
-            (0.15 * reach)
-            + (0.35 * share)
-            + (0.02 * board_size)
+        raw_values = (
+            (0.08 * reach)
+            + (0.18 * share)
+            + (0.015 * board_size)
             + (0.01 * street)
-            + (0.0000001 * board_signature)
-            + (0.05 * leaf_index)
-            + (0.002 * live_board_cards)
-            - (0.001 * blocked_cards)
+            + (0.00000003 * board_signature)
+            + (0.02 * leaf_index)
+            + (0.006 * live_board_cards)
+            - (0.004 * blocked_cards)
             + (0.03 * leaf_pressure)
+            + (0.012 * board_texture)
         )
-        values = values.astype(np.float32, copy=False)
+        values = np.tanh(raw_values.astype(np.float32, copy=False)) * np.float32(1.0)
+        values = np.clip(values, np.float32(-1.25), np.float32(1.25)).astype(np.float32, copy=False)
         return LeafEvalBatchOutput(node_ids=batch.node_ids, values=values[:, None])
 
 

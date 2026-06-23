@@ -123,10 +123,10 @@ Status: decided. We are targeting a compact but real four-street HU tree with ab
 
 ### Required Tests
 
-- [ ] `tests/test_holdem_hu_phase4.py`: tree node count increases beyond the current synthetic root spot.
-- [ ] `tests/test_holdem_hu_phase4.py`: multiple infosets appear in the Hold'em tree.
-- [ ] `tests/test_holdem_hu_phase4.py`: street transitions are visible in the public tree.
-- [ ] `tests/test_cfr_solver_service.py`: tree diagnostics report the larger tree correctly.
+- [x] `tests/test_holdem_hu_phase4.py`: tree node count increases beyond the current synthetic root spot.
+- [x] `tests/test_holdem_hu_phase4.py`: multiple infosets appear in the Hold'em tree.
+- [x] `tests/test_holdem_hu_phase4.py`: street transitions are visible in the public tree.
+- [x] `tests/test_cfr_solver_service.py`: tree diagnostics report the larger tree correctly.
 
 ### Bug Coverage
 
@@ -151,10 +151,10 @@ Status: implemented as a first-pass compact multi-street chain. The tree is no l
 
 ### Checklist
 
-- [ ] Keep `HeuristicLeafBackend` bounded and board-sensitive.
-- [ ] Ensure the default leaf backend remains the main backend.
-- [ ] Make depth-limited behavior explicit in CLI and tests.
-- [ ] Add stronger range checks for leaf outputs.
+- [x] Keep `HeuristicLeafBackend` bounded and board-sensitive.
+- [x] Ensure the default leaf backend remains the main backend.
+- [x] Make depth-limited behavior explicit in CLI and tests.
+- [x] Add stronger range checks for leaf outputs.
 
 ### Notes
 
@@ -164,13 +164,15 @@ Status: implemented as a first-pass compact multi-street chain. The tree is no l
 
 ### Required Tests
 
-- [ ] `tests/test_holdem_hu_phase4.py`: heuristic leaf backend stays board-sensitive.
-- [ ] `tests/test_holdem_hu_phase4.py`: heuristic leaf backend stays in a sane numeric range.
-- [ ] `tests/test_holdem_hu_phase4.py`: default backend selection still uses the model/triton path.
+- [x] `tests/test_holdem_hu_phase4.py`: heuristic leaf backend stays board-sensitive.
+- [x] `tests/test_holdem_hu_phase4.py`: heuristic leaf backend stays in a sane numeric range.
+- [x] `tests/test_holdem_hu_phase4.py`: default backend selection still uses the model/triton path.
 
 ### Exit Criteria
 
 - Leaf evaluation remains informative but does not produce runaway values.
+
+Status: implemented. The heuristic fallback is now bounded and board-sensitive, the default solver path uses the model/Triton backend, and leaf outputs are validated for finite values and sane ranges.
 
 ## Phase D: Validate CFR Behavior On The Larger Tree
 

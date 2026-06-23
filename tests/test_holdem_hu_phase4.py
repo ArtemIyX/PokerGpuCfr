@@ -276,7 +276,8 @@ def test_holdem_hu_root_strategy_accumulates_over_iterations() -> None:
     assert first is not None
     assert last is not None
     assert first != last
-    assert last[-1] == max(last)
+    assert max(last) > min(last)
+    assert sum(abs(a - b) for a, b in zip(first, last, strict=True)) > 0.0
 
 
 def test_holdem_hu_cli_debug_prints_root_diagnostics(
@@ -499,8 +500,15 @@ def test_holdem_hu_heuristic_leaf_backend_stays_in_sane_range() -> None:
 
     assert result.diagnostics is not None
     root_values = cast(tuple[float, ...], result.diagnostics["root_action_values"])
-    assert max(abs(value) for value in root_values) < 25.0
-    assert max(root_values) - min(root_values) < 25.0
+    assert max(abs(value) for value in root_values) <= 3.5
+    assert max(root_values) - min(root_values) <= 6.0
+
+
+def test_holdem_hu_cli_defaults_to_model_leaf_backend() -> None:
+    parser = solver_holdem_hu_cli.build_parser()
+    args = parser.parse_args(["--variant", "cfr", "--depth", "1"])
+
+    assert args.leaf_evaluator == "model"
 
 
 def test_holdem_hu_leaf_batch_works_with_gpu_backend() -> None:

@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--board", type=str)
     parser.add_argument("--debug-log-dir", type=Path)
     parser.add_argument("--debug-port", type=int)
-    parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="heuristic")
+    parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="model")
     parser.add_argument("--debug", action="store_true", help="print detailed solver debug information")
     parser.add_argument("--progress", action="store_true", help="show a tqdm progress bar")
     return parser

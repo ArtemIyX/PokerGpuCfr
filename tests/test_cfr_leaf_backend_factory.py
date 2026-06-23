@@ -17,6 +17,21 @@ def test_create_leaf_backend_defaults_to_torch_kernel() -> None:
     assert backend.kernel.__class__.__name__ == "TorchLeafKernel"
 
 
+def test_create_heuristic_leaf_backend_stays_bounded() -> None:
+    from pokergpu.cfr.leaf_backend_factory import create_heuristic_leaf_backend
+
+    backend = create_heuristic_leaf_backend()
+    batch = LeafEvalBatchInput(
+        node_ids=(0, 1),
+        features=np.zeros((2, LEAF_EVAL_FEATURE_WIDTH), dtype=np.float32),
+    )
+
+    values = backend.evaluate(batch).values[:, 0]
+
+    assert np.isfinite(values).all()
+    assert np.max(np.abs(values)) <= 1.25
+
+
 def test_create_leaf_backend_can_choose_triton_kernel() -> None:
     backend = create_leaf_backend(prefer_triton=True)
 
