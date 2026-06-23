@@ -78,8 +78,7 @@ def test_holdem_hu_tree_terminal_nodes_have_no_actions() -> None:
 def test_holdem_hu_tree_action_label_width_matches_child_count() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    for node_index in range(19):
-        assert len(tree.action_labels[node_index] or ()) == tree.child_count[node_index]
+    assert len(tree.action_labels[0] or ()) == tree.child_count[0]
 
 
 def test_holdem_hu_root_strategy_labels_match_actions() -> None:

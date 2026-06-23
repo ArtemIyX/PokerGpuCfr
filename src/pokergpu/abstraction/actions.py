@@ -79,11 +79,11 @@ def make_holdem_hu_profile() -> AbstractionProfile:
                 raise_to_multipliers=(1.0, 1.5),
             ),
             Street.FLOP: StreetActionTemplate(
-                bet_sizes=(0.25, 0.5, 0.75, 1.0, 1.5),
+                bet_sizes=(0.25, 0.5, 0.75, 1.0),
                 raise_to_multipliers=(1.0, 1.5, 2.0),
             ),
             Street.TURN: StreetActionTemplate(
-                bet_sizes=(0.25, 0.5, 0.75, 1.0),
+                bet_sizes=(0.33, 0.5, 0.66, 1.0),
                 raise_to_multipliers=(1.0, 1.5, 2.0),
             ),
             Street.RIVER: StreetActionTemplate(

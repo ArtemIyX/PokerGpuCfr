@@ -214,8 +214,6 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - [x] Track depth-limit hits.
 - [x] Track infoset count.
 - [x] Track branching statistics.
-- [ ] Add street-specific counts if needed.
-- [ ] Add maximum depth reached if useful.
 
 ### Required Tests
 
@@ -231,25 +229,44 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 ### Objectives
 
 - Build toward a genuine heads-up Hold'em solver rather than a toy abstraction.
+- Make the public tree reflect realistic betting progression across streets.
 - Keep the system layered so we can still debug and benchmark small subgames.
+- Preserve deterministic, depth-limited behavior while the tree becomes richer.
+- Keep the default solver path practical for development and debugging.
 
 ### Checklist
 
-- [ ] Add more realistic betting sequences.
-- [ ] Expand from a single root branch to multiple street branches.
-- [ ] Consider abstraction buckets or canonicalized states for larger branches.
-- [ ] Keep pruning and depth-limiting explicit.
-- [ ] Preserve the option to run tiny debug trees.
+- [x] Add street-specific betting sequences with distinct preflop, flop, turn, and river action sets.
+- [x] Expand from a single root branch to multiple street branches with meaningful public state separation.
+- [ ] Ensure fold, call, check, bet, and raise transitions remain distinct when they should be.
+- [ ] Keep pruning and depth-limiting explicit in tree construction and CLI wiring.
+- [ ] Preserve the option to run tiny debug trees with a reduced abstraction profile.
+- [ ] Consider abstraction buckets or canonicalized states only where they reduce tree size without collapsing strategic differences.
+- [ ] Keep board-sensitive leaf evaluation aligned with the larger tree shape.
+- [ ] Keep repeated CFR runs deterministic for a fixed seed or exact state.
+- [ ] Keep diagnostics readable enough to inspect tree growth, street coverage, and truncation.
+
+### Progress Notes
+
+- Added street-specific Hold'em HU bet sizing in `src/pokergpu/abstraction/actions.py`.
+- Expanded the Hold'em public tree scaffold to preserve distinct street-labeled branches in `src/pokergpu/cfr/solver/tree.py`.
+- Updated tree-shape tests to expect a richer multi-street scaffold in `tests/test_cfr_game_support.py`.
 
 ### Required Tests
 
-- [ ] `tests/test_cfr_game_support.py`: new Hold'em tree remains deterministic.
-- [ ] `tests/test_holdem_hu_phase4.py`: diagnostics show the tree is larger than the toy root spot.
+- [x] `tests/test_cfr_game_support.py`: new Hold'em tree remains deterministic.
+- [x] `tests/test_holdem_hu_phase4.py`: diagnostics show the tree is larger than the toy root spot.
+- [ ] `tests/test_holdem_hu_phase4.py`: street transitions and action labels remain distinct across the expanded branches.
+- [ ] `tests/test_holdem_hu_phase4.py`: repeated runs with the same seed or exact state remain deterministic.
 - [ ] `tests/test_solver_holdem_hu_cli.py`: CLI output still reports the exact solved state.
+- [ ] `tests/test_cfr_solver_variance.py`: different boards and seeds continue to produce distinct strategies.
+- [ ] `tests/test_cfr_stage7.py`: the expanded tree still accepts all supported CFR variants.
 
 ### Exit Criteria
 
 - The Hold'em HU solver is solving a real structured subgame, not just a single-step toy model.
+- The public tree has multiple street branches and the solver remains deterministic and debuggable.
+- The solver still supports the small debug configuration without losing the realistic path.
 
 ## Recommended Order
 

@@ -196,12 +196,11 @@ def test_holdem_hu_profile_uses_street_specific_layouts() -> None:
         0.5,
         0.75,
         1.0,
-        1.5,
     )
     assert profile.template_for_street(Board.from_str("AhKdTc9s").street).bet_sizes == (
-        0.25,
+        0.33,
         0.5,
-        0.75,
+        0.66,
         1.0,
     )
     assert profile.template_for_street(Board.from_str("AhKdTc9s2d").street).bet_sizes == (
