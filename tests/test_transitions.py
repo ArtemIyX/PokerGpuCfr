@@ -99,3 +99,21 @@ def test_illegal_action_is_rejected() -> None:
 
     with pytest.raises(ValueError):
         apply_action(state, Action(ActionType.CALL))
+
+
+def test_legal_actions_produce_distinct_next_states() -> None:
+    state = _make_two_player_state(to_act=1, committed0=300, committed1=100)
+
+    fold_state = apply_action(state, Action(ActionType.FOLD))
+    call_state = apply_action(state, Action(ActionType.CALL))
+    raise_state = apply_action(state, Action(ActionType.RAISE, amount=chips(500)))
+
+    assert fold_state != call_state
+    assert call_state != raise_state
+    assert fold_state != raise_state
+    assert fold_state.phase is HandPhase.TERMINAL
+    assert call_state.phase is HandPhase.IN_PROGRESS
+    assert raise_state.phase is HandPhase.IN_PROGRESS
+    assert fold_state.player_state(PlayerIndex(1)).folded
+    assert call_state.betting_round.bets[1].committed == chips(300)
+    assert raise_state.betting_round.bets[1].committed == chips(500)
