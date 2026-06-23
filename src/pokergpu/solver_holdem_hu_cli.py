@@ -100,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug-log-dir", type=Path)
     parser.add_argument("--debug-port", type=int)
     parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="model")
+    parser.add_argument("--compact-tree", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--progress", action="store_true")
     parser.add_argument("--batch-size", type=int, default=1)
@@ -135,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         measure_time=args.measure_time,
     )
 
-    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU, compact=args.compact_tree)
     board = _resolve_board(args, request)
     dense_state = _make_dense_state(tree)
     leaf_backend = _build_leaf_backend(args.leaf_evaluator)

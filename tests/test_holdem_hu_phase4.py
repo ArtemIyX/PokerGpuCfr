@@ -627,6 +627,13 @@ def test_holdem_hu_cli_defaults_to_model_leaf_backend() -> None:
     assert args.leaf_evaluator == "model"
 
 
+def test_holdem_hu_cli_exposes_compact_tree_flag() -> None:
+    parser = solver_holdem_hu_cli.build_parser()
+    args = parser.parse_args(["--variant", "cfr", "--depth", "1", "--compact-tree"])
+
+    assert args.compact_tree is True
+
+
 def test_holdem_hu_leaf_batch_works_with_gpu_backend() -> None:
     build_dense_infoset_table.cache_clear()
     torch = pytest.importorskip("torch")

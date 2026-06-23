@@ -66,6 +66,15 @@ def test_make_game_public_tree_is_deterministic_for_holdem() -> None:
     assert first == second
 
 
+def test_make_game_public_tree_can_build_compact_holdem_tree() -> None:
+    full_tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    compact_tree = make_game_public_tree(GameVariant.HOLDEM_HU, compact=True)
+
+    assert compact_tree.node_count < full_tree.node_count
+    assert compact_tree.child_count[0] < full_tree.child_count[0]
+    assert compact_tree.node_types[-1].value == "leaf"
+
+
 def test_resolve_game_state_spec_preserves_exact_and_random_modes() -> None:
     exact = GameStateSpec(mode=GameStateMode.EXACT, encoded_state=b"state")
     random = GameStateSpec(mode=GameStateMode.RANDOM, seed=7)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pokergpu.core.betting import Chips
 from pokergpu.abstraction.actions import action_labels_for_street
+from pokergpu.abstraction.actions import make_compact_profile
 from pokergpu.abstraction.actions import make_holdem_hu_profile
 from pokergpu.core.board import Street
 from pokergpu.cfr.solver.spec import GameStateMode
@@ -50,13 +51,13 @@ def make_toy_pipeline_tree() -> PublicTree:
     )
 
 
-def make_game_public_tree(game: GameVariant) -> PublicTree:
+def make_game_public_tree(game: GameVariant, *, compact: bool = False) -> PublicTree:
     if game is GameVariant.KUHN:
         return make_kuhn_public_tree()
     if game is GameVariant.LEDUC:
         return make_leduc_public_tree()
     if game is GameVariant.HOLDEM_HU:
-        return make_holdem_hu_public_tree()
+        return make_holdem_hu_public_tree(compact=compact)
     supported = ", ".join(
         (
             GameVariant.KUHN.value,
@@ -67,8 +68,8 @@ def make_game_public_tree(game: GameVariant) -> PublicTree:
     raise NotImplementedError(f"unsupported game variant {game.value!r}; supported variants: {supported}")
 
 
-def make_holdem_hu_public_tree() -> PublicTree:
-    profile = make_holdem_hu_profile()
+def make_holdem_hu_public_tree(*, compact: bool = False) -> PublicTree:
+    profile = make_compact_profile() if compact else make_holdem_hu_profile()
     streets = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
     action_labels_by_street = tuple(action_labels_for_street(profile, street) for street in streets)
     root_action_count = len(action_labels_by_street[0])
