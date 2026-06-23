@@ -544,6 +544,7 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
     branch_counts = [count for count in tree.child_count if count > 0]
     max_branching = max(branch_counts) if branch_counts else 0
     avg_branching = (sum(branch_counts) / len(branch_counts)) if branch_counts else 0.0
+    action_label_variants = len({labels for labels in tree.action_labels if labels is not None})
     return {
         "tree_nodes": tree.node_count,
         "tree_player_nodes": player_count,
@@ -555,4 +556,6 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
         "tree_max_branching": max_branching,
         "tree_avg_branching": avg_branching,
         "tree_root_child_count": tree.child_count[0] if tree.child_count else 0,
+        "tree_action_label_variants": action_label_variants,
+        "tree_internal_nodes": tree.node_count - terminal_count - leaf_count,
     }

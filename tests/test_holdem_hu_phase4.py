@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import cast
+from random import Random
 
 import numpy as np
 import pytest
@@ -13,6 +14,8 @@ from pokergpu.cfr.stage2 import aggregate_prob_sum
 from pokergpu.cfr.stage1 import propagate_forward
 from pokergpu.cfr.solver import CfrVariant
 from pokergpu.cfr.solver import DenseCfrState
+from pokergpu.cfr.solver import GameStateMode
+from pokergpu.cfr.solver import GameStateSpec
 from pokergpu.cfr.solver import GameVariant
 from pokergpu.cfr.solver import SolverStageRequest
 from pokergpu.cfr.solver import TimingSpec
@@ -23,6 +26,7 @@ from pokergpu.core.board import Board
 from pokergpu.core.board import Street
 from pokergpu.abstraction.actions import action_labels_for_street
 from pokergpu.abstraction.actions import make_holdem_hu_profile
+from pokergpu.core.state_io import encode_game_state
 from pokergpu.tree.public_tree import NodeId
 from pokergpu import solver_holdem_hu_cli
 from pokergpu.solver_holdem_hu_cli import _format_root_strategy
@@ -396,6 +400,46 @@ def test_holdem_hu_repeat_runs_are_deterministic_for_fixed_seed() -> None:
     assert first.final_state == second.final_state
 
 
+def test_holdem_hu_repeat_runs_are_deterministic_for_exact_state() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    state = solver_holdem_hu_cli._make_random_holdem_state(rng=Random(17))
+    encoded_state = encode_game_state(state)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        iterations=3,
+        seed=17,
+        state=GameStateSpec(mode=GameStateMode.EXACT, seed=17, encoded_state=encoded_state),
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+    board = state.board
+
+    first = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+        backend=create_heuristic_leaf_backend(),
+    )
+    second = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=board,
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert first.diagnostics == second.diagnostics
+    assert first.final_state == second.final_state
+
+
 def test_holdem_hu_cli_debug_prints_root_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -591,6 +635,23 @@ def test_holdem_hu_heuristic_leaf_backend_is_board_sensitive() -> None:
     assert tuple(empty_values.values[:, 0]) != tuple(flop_values.values[:, 0])
 
 
+def test_holdem_hu_heuristic_leaf_backend_varies_by_street() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    forward = propagate_forward(tree)
+    backend = create_heuristic_leaf_backend()
+
+    preflop = backend.evaluate(build_leaf_eval_batch(aggregate_prob_sum(tree, forward, Board(cards=())).leaf_batch))
+    flop = backend.evaluate(build_leaf_eval_batch(aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc")).leaf_batch))
+    turn = backend.evaluate(build_leaf_eval_batch(aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc9s")).leaf_batch))
+    river = backend.evaluate(build_leaf_eval_batch(aggregate_prob_sum(tree, forward, Board.from_str("AhKdTc9s2d")).leaf_batch))
+
+    assert preflop.values.shape == flop.values.shape == turn.values.shape == river.values.shape
+    assert tuple(preflop.values[:, 0]) != tuple(flop.values[:, 0])
+    assert tuple(flop.values[:, 0]) != tuple(turn.values[:, 0])
+    assert tuple(turn.values[:, 0]) != tuple(river.values[:, 0])
+
+
 def test_holdem_hu_heuristic_leaf_backend_stays_in_sane_range() -> None:
     build_dense_infoset_table.cache_clear()
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
@@ -632,6 +693,69 @@ def test_holdem_hu_cli_exposes_compact_tree_flag() -> None:
     args = parser.parse_args(["--variant", "cfr", "--depth", "1", "--compact-tree"])
 
     assert args.compact_tree is True
+
+
+def test_holdem_hu_cli_debug_summary_includes_tree_shape_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_run_solver_stage(*args: object, **kwargs: object) -> SimpleNamespace:
+        request = args[0]
+        return SimpleNamespace(
+            request=request,
+            final_state=kwargs.get("dense_state"),
+            timing_seconds=None,
+            profiler_output=None,
+            diagnostics={
+                "tree_nodes": 25,
+                "tree_player_nodes": 19,
+                "tree_chance_nodes": 0,
+                "tree_terminal_nodes": 5,
+                "tree_leaf_nodes": 1,
+                "tree_depth_limit_hits": 1,
+                "tree_infosets": 19,
+                "tree_max_branching": 6,
+                "tree_avg_branching": 1.0,
+                "tree_root_child_count": 6,
+                "tree_action_label_variants": 4,
+                "tree_internal_nodes": 19,
+            },
+        )
+
+    class _FakeDebugSink:
+        def add_scalar(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def add_histogram(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def add_text(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def add_sample(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class _FakeDebugSession:
+        def __init__(self) -> None:
+            self.sink = _FakeDebugSink()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(solver_holdem_hu_cli, "run_solver_stage", fake_run_solver_stage)
+    monkeypatch.setattr(solver_holdem_hu_cli, "create_debug_session", lambda spec, run_name: _FakeDebugSession())
+
+    exit_code = solver_holdem_hu_cli.main(["--variant", "cfr", "--depth", "1", "--debug", "--compact-tree"])
+
+    captured = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "diagnostic.tree_nodes=25" in captured
+    assert "diagnostic.tree_root_child_count=6" in captured
+    assert "diagnostic.tree_action_label_variants=4" in captured
 
 
 def test_holdem_hu_leaf_batch_works_with_gpu_backend() -> None:

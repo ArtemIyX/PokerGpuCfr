@@ -242,9 +242,9 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - [x] Keep pruning and depth-limiting explicit in tree construction and CLI wiring.
 - [x] Preserve the option to run tiny debug trees with a reduced abstraction profile.
 - [ ] Consider abstraction buckets or canonicalized states only where they reduce tree size without collapsing strategic differences.
-- [ ] Keep board-sensitive leaf evaluation aligned with the larger tree shape.
-- [ ] Keep repeated CFR runs deterministic for a fixed seed or exact state.
-- [ ] Keep diagnostics readable enough to inspect tree growth, street coverage, and truncation.
+- [x] Keep board-sensitive leaf evaluation aligned with the larger tree shape.
+- [x] Keep repeated CFR runs deterministic for a fixed seed or exact state.
+- [x] Keep diagnostics readable enough to inspect tree growth, street coverage, and truncation.
 
 ### Progress Notes
 
@@ -255,6 +255,8 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - Added an explicit compact-tree flag in `src/pokergpu/solver_holdem_hu_cli.py` so tiny debug trees can be requested directly.
 - Added a compact Hold'em tree mode in `src/pokergpu/cfr/solver/tree.py` for reduced-abstraction debug runs.
 - Threaded `depth_limit` through the tree factory and Hold'em CLIs so shallow solves can select a compact tree path explicitly.
+- Added tree-shape diagnostics in `src/pokergpu/cfr/solver/service.py` for node counts, branching, and action-label variation.
+- Added a Hold'em leaf-eval regression test that checks distinct values across preflop, flop, turn, and river boards.
 
 ### Required Tests
 
