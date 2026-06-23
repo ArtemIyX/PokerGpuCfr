@@ -9,6 +9,8 @@ from numpy.typing import NDArray
 from pokergpu.abstraction.hands import PrivateHand, RangeVector, all_private_hands
 from pokergpu.core.board import Board
 from pokergpu.core.cards import Card
+from pokergpu.core.cards import Suit
+from pokergpu.core.board import Street
 from pokergpu.eval.treys_evaluator import TreysHandEvaluator
 
 BucketId = NewType("BucketId", int)
@@ -138,6 +140,33 @@ class PreflopClassBucketer:
         for hand_index, hand in enumerate(all_private_hands()):
             result[int(self.bucket_for_hand(hand))] += hand_range.values[hand_index]
         return result
+
+
+def canonical_board_bucket(board: Board) -> tuple[int, tuple[int, ...]]:
+    if board.is_preflop:
+        return 0, ()
+    rank_histogram = [0] * 13
+    suit_histogram = [0] * 4
+    for card in board.cards:
+        rank_histogram[card.rank.order_value - 2] += 1
+        suit_histogram[_suit_index(card.suit)] += 1
+    street_bucket = {
+        Street.FLOP: 1,
+        Street.TURN: 2,
+        Street.RIVER: 3,
+    }[board.street]
+    texture = tuple(sorted((count for count in rank_histogram if count > 0), reverse=True))
+    suit_texture = tuple(sorted((count for count in suit_histogram if count > 0), reverse=True))
+    return street_bucket, texture + suit_texture
+
+
+def _suit_index(suit: Suit) -> int:
+    return {
+        Suit.CLUBS: 0,
+        Suit.DIAMONDS: 1,
+        Suit.HEARTS: 2,
+        Suit.SPADES: 3,
+    }[suit]
 
 
 _PAIR_BUCKETS: dict[int, int] = {

@@ -9,6 +9,7 @@ from pokergpu.abstraction import (
     StrengthTierBucketer,
     private_hand_index,
 )
+from pokergpu.abstraction.buckets import canonical_board_bucket
 from pokergpu.core.board import board_from_str
 from pokergpu.core.cards import card_from_str
 
@@ -110,3 +111,12 @@ def test_preflop_class_bucketer_marks_blocked_hands() -> None:
     assert blocked.shape == (1326,)
     assert blocked[int(private_hand_index(card_from_str("Ah"), card_from_str("Kd")))] == -1
     assert blocked[int(private_hand_index(card_from_str("Qc"), card_from_str("Js")))] >= 0
+
+
+def test_canonical_board_bucket_collapses_suit_permutations() -> None:
+    flop_a = board_from_str("AhKdTc")
+    flop_b = board_from_str("AsKhTd")
+    turn = board_from_str("AhKdTc9s")
+
+    assert canonical_board_bucket(flop_a) == canonical_board_bucket(flop_b)
+    assert canonical_board_bucket(flop_a) != canonical_board_bucket(turn)

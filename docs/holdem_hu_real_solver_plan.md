@@ -241,7 +241,7 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - [x] Ensure fold, call, check, bet, and raise transitions remain distinct when they should be.
 - [x] Keep pruning and depth-limiting explicit in tree construction and CLI wiring.
 - [x] Preserve the option to run tiny debug trees with a reduced abstraction profile.
-- [ ] Consider abstraction buckets or canonicalized states only where they reduce tree size without collapsing strategic differences.
+- [x] Consider abstraction buckets or canonicalized states only where they reduce tree size without collapsing strategic differences.
 - [x] Keep board-sensitive leaf evaluation aligned with the larger tree shape.
 - [x] Keep repeated CFR runs deterministic for a fixed seed or exact state.
 - [x] Keep diagnostics readable enough to inspect tree growth, street coverage, and truncation.
@@ -257,6 +257,7 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - Threaded `depth_limit` through the tree factory and Hold'em CLIs so shallow solves can select a compact tree path explicitly.
 - Added tree-shape diagnostics in `src/pokergpu/cfr/solver/service.py` for node counts, branching, and action-label variation.
 - Added a Hold'em leaf-eval regression test that checks distinct values across preflop, flop, turn, and river boards.
+- Added a canonical board bucket helper in `src/pokergpu/abstraction/buckets.py` and wired it into stage2 board caching to collapse suit-equivalent public boards.
 
 ### Required Tests
 
