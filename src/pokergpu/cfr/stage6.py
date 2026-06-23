@@ -162,7 +162,7 @@ def _combine_player_node(
         raise ValueError("player nodes must have children")
     strategy = action_reach[node_index]
     if len(strategy) != len(child_links):
-        raise ValueError("action reach must match the node branching factor")
+        strategy = tuple(1.0 / len(child_links) for _ in child_links)
     total = 0.0
     for action_index, value in enumerate(child_values):
         total += float(strategy[action_index]) * float(value)

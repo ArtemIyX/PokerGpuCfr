@@ -258,6 +258,7 @@ Status: implemented. The heuristic fallback is now bounded and board-sensitive, 
 - Added tree-shape diagnostics in `src/pokergpu/cfr/solver/service.py` for node counts, branching, and action-label variation.
 - Added a Hold'em leaf-eval regression test that checks distinct values across preflop, flop, turn, and river boards.
 - Added a canonical board bucket helper in `src/pokergpu/abstraction/buckets.py` and wired it into stage2 board caching to collapse suit-equivalent public boards.
+- Made the Hold'em public tree branch widths street-specific instead of keeping a single repeated-width chain.
 
 ### Required Tests
 
