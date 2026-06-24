@@ -28,17 +28,25 @@ class TreeBuildConfig:
     max_nodes: int = 256
 
 
+@dataclass(slots=True, frozen=True)
+class ChanceOutcome:
+    state: GameState
+    probability: float
+
+
 def build_shallow_public_tree(
     state: GameState,
     *,
     abstraction: ActionAbstraction | None = None,
     advance_next_board: Callable[[GameState], Board | None] | None = None,
+    expand_chance: Callable[[GameState], tuple[ChanceOutcome, ...] | None] | None = None,
 ) -> BuiltPublicTree:
     return build_public_tree(
         state,
         abstraction=abstraction,
         config=TreeBuildConfig(max_depth=1),
         advance_next_board=advance_next_board,
+        expand_chance=expand_chance,
     )
 
 
@@ -48,6 +56,7 @@ def build_public_tree(
     abstraction: ActionAbstraction | None = None,
     config: TreeBuildConfig | None = None,
     advance_next_board: Callable[[GameState], Board | None] | None = None,
+    expand_chance: Callable[[GameState], tuple[ChanceOutcome, ...] | None] | None = None,
 ) -> BuiltPublicTree:
     abstraction_impl = abstraction or BaselineActionAbstraction()
     build_config = config or TreeBuildConfig()
@@ -76,6 +85,43 @@ def build_public_tree(
         node_type = node_types[node_index]
 
         if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
+            continue
+
+        chance_outcomes = expand_chance(node_state) if expand_chance is not None else None
+        if chance_outcomes is not None:
+            actions_by_node[node_index] = ()
+            node_types[node_index] = NodeType.CHANCE
+            first_child[node_index] = len(children)
+            child_count[node_index] = 0
+            added_children = 0
+            for outcome in chance_outcomes:
+                if len(node_states) >= build_config.max_nodes:
+                    break
+                if outcome.probability < 0.0 or outcome.probability > 1.0:
+                    raise ValueError("chance outcome probability must be in [0, 1]")
+                child_state = outcome.state
+                child_node_index = len(node_states)
+                children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
+                node_states.append(child_state)
+                actions_by_node.append(())
+                next_depth = depth + 1
+                child_type = _node_type_for_state(
+                    child_state,
+                    depth=next_depth,
+                    max_depth=build_config.max_depth,
+                )
+                added_children += 1
+                node_types.append(child_type)
+                first_child.append(0)
+                child_count.append(0)
+                child_infoset = _infoset_id_for_state(child_state, child_type, next_infoset_id)
+                if child_infoset is not None:
+                    next_infoset_id += 1
+                infoset_ids.append(child_infoset)
+                terminal_payoffs.append(_terminal_payoff_for_state(child_state))
+                if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
+                    queue.append((child_node_index, next_depth))
+            child_count[node_index] = added_children
             continue
 
         legal_actions = abstraction_impl.legal_actions(node_state)
