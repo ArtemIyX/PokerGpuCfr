@@ -425,7 +425,11 @@ def _print_debug_details(
     diagnostics = result.diagnostics or {}
     if diagnostics:
         for key in sorted(diagnostics):
-            print(f"diagnostic.{key}={diagnostics[key]}")
+            value = diagnostics[key]
+            if isinstance(value, dict):
+                print(f"diagnostic.{key}={_format_nested_mapping(value)}")
+            else:
+                print(f"diagnostic.{key}={value}")
     if dense_state is not None:
         root_strategy = _format_root_strategy(dense_state, tree)
         if root_strategy is not None:
@@ -494,6 +498,11 @@ def _format_action(action: Action) -> str:
     if action.amount is None:
         return action.action_type.value
     return f"{action.action_type.value}:{int(action.amount)}"
+
+
+def _format_nested_mapping(value: dict[str, object]) -> str:
+    parts = [f"{key}={value[key]}" for key in sorted(value)]
+    return "{" + ", ".join(parts) + "}"
 
 
 def _format_root_strategy(
