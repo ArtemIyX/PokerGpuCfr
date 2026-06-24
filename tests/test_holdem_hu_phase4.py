@@ -656,6 +656,38 @@ def test_holdem_hu_tree_depth_limit_hit_count_is_reported() -> None:
     assert cast(int, result.diagnostics["tree_depth_limit_hits"]) >= 1
 
 
+def test_holdem_hu_tree_diagnostics_report_chance_and_streets() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+    request = SolverStageRequest(
+        game=GameVariant.HOLDEM_HU,
+        cfr_variant=CfrVariant.CFR,
+        depth_limit=1,
+        timing=TimingSpec(measure=False),
+    )
+    dense_state = DenseCfrState(
+        regret_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+        strategy_sums=tuple(tuple(0.0 for _ in range(table.action_counts[index])) for index in range(table.infoset_count)),
+    )
+
+    result = run_solver_stage(
+        request,
+        tree=tree,
+        dense_state=dense_state,
+        board=Board.from_str("AhKdTc"),
+        backend=create_heuristic_leaf_backend(),
+    )
+
+    assert result.diagnostics is not None
+    assert cast(int, result.diagnostics["tree_chance_nodes"]) > 0
+    street_counts = cast(dict[str, int], result.diagnostics["tree_street_node_counts"])
+    assert street_counts["preflop"] > 0
+    assert street_counts["flop"] > 0
+    assert street_counts["turn"] > 0 or street_counts["river"] > 0
+    assert cast(int, result.diagnostics["tree_infosets"]) >= 5
+
+
 def test_holdem_hu_leaf_features_include_board_context() -> None:
     build_dense_infoset_table.cache_clear()
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
