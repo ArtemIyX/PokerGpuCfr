@@ -143,9 +143,11 @@ def _expand_holdem_root_chance(state: GameState) -> tuple[ChanceOutcome, ...] | 
         return None
     if state.phase is not HandPhase.IN_PROGRESS:
         return None
-    return (
-        ChanceOutcome(state=_make_holdem_dealt_state(state, Board.from_str("AhKdTc")), probability=0.5),
-        ChanceOutcome(state=_make_holdem_dealt_state(state, Board.from_str("QsJh9c")), probability=0.5),
+    boards = _holdem_root_board_samples()
+    probability = 1.0 / len(boards)
+    return tuple(
+        ChanceOutcome(state=_make_holdem_dealt_state(state, board), probability=probability)
+        for board in boards
     )
 
 
@@ -156,6 +158,15 @@ def _make_holdem_dealt_state(state: GameState, board: Board) -> GameState:
         betting_round=state.betting_round,
         phase=state.phase,
         dealer=state.dealer,
+    )
+
+
+def _holdem_root_board_samples() -> tuple[Board, ...]:
+    return (
+        Board.from_str("AhKdTc"),
+        Board.from_str("QsJh9c"),
+        Board.from_str("AsKh7d"),
+        Board.from_str("AdQc8s"),
     )
 
 

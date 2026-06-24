@@ -192,5 +192,5 @@ def test_holdem_hu_public_tree_starts_with_chance_root() -> None:
     tree = make_holdem_hu_public_tree(compact=False)
 
     assert tree.node_types[0] is NodeType.CHANCE
-    assert tree.child_count[0] >= 1
+    assert tree.child_count[0] == 4
     assert any(node_type is NodeType.PLAYER0 or node_type is NodeType.PLAYER1 for node_type in tree.node_types)
