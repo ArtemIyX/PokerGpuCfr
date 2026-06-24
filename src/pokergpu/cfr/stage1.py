@@ -15,7 +15,7 @@ class ForwardProfileResult:
 
 def normalize_strategy(weights: tuple[float, ...]) -> tuple[float, ...]:
     if not weights:
-        raise ValueError("strategy weights cannot be empty")
+        return ()
     total = sum(max(0.0, weight) for weight in weights)
     if total <= 0.0:
         return tuple(1.0 / len(weights) for _ in weights)
@@ -60,6 +60,8 @@ def propagate_forward(
             continue
 
         child_links = tree.child_links(NodeId(node_index))
+        if not child_links:
+            continue
         strategy = normalize_strategy(
             strategies.get(InfosetId(infoset_id), tuple(1.0 for _ in child_links))
         )

@@ -61,8 +61,10 @@ def build_public_tree(
     abstraction_impl = abstraction or BaselineActionAbstraction()
     build_config = config or TreeBuildConfig()
 
+    root_chance_outcomes = expand_chance(state) if expand_chance is not None else None
+    root_is_chance = root_chance_outcomes is not None
     node_types: list[NodeType] = [
-        _node_type_for_state(state, depth=0, max_depth=build_config.max_depth)
+        NodeType.CHANCE if root_is_chance else _node_type_for_state(state, depth=0, max_depth=build_config.max_depth)
     ]
     first_child: list[int] = [0]
     child_count: list[int] = [0]
@@ -79,6 +81,39 @@ def build_public_tree(
 
     queue: deque[tuple[int, int]] = deque([(0, 0)])
 
+    if root_chance_outcomes is not None:
+        actions_by_node[0] = ()
+        first_child[0] = len(children)
+        child_count[0] = 0
+        added_children = 0
+        for outcome in root_chance_outcomes:
+            if len(node_states) >= build_config.max_nodes:
+                break
+            if outcome.probability < 0.0 or outcome.probability > 1.0:
+                raise ValueError("chance outcome probability must be in [0, 1]")
+            child_state = outcome.state
+            child_node_index = len(node_states)
+            children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
+            node_states.append(child_state)
+            actions_by_node.append(())
+            child_type = _node_type_for_state(
+                child_state,
+                depth=1,
+                max_depth=build_config.max_depth,
+            )
+            added_children += 1
+            node_types.append(child_type)
+            first_child.append(0)
+            child_count.append(0)
+            child_infoset = _infoset_id_for_state(child_state, child_type, next_infoset_id)
+            if child_infoset is not None:
+                next_infoset_id += 1
+            infoset_ids.append(child_infoset)
+            terminal_payoffs.append(_terminal_payoff_for_state(child_state))
+            if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
+                queue.append((child_node_index, 1))
+        child_count[0] = added_children
+
     while queue and len(node_states) < build_config.max_nodes:
         node_index, depth = queue.popleft()
         node_state = node_states[node_index]
@@ -87,7 +122,9 @@ def build_public_tree(
         if node_type in {NodeType.LEAF, NodeType.TERMINAL}:
             continue
 
-        chance_outcomes = expand_chance(node_state) if expand_chance is not None else None
+        chance_outcomes = None
+        if expand_chance is not None and not (node_index == 0 and root_is_chance):
+            chance_outcomes = expand_chance(node_state)
         if chance_outcomes is not None:
             actions_by_node[node_index] = ()
             node_types[node_index] = NodeType.CHANCE
@@ -124,7 +161,16 @@ def build_public_tree(
             child_count[node_index] = added_children
             continue
 
+        if node_type is NodeType.CHANCE:
+            continue
+
         legal_actions = abstraction_impl.legal_actions(node_state)
+        if not legal_actions:
+            node_types[node_index] = NodeType.LEAF
+            actions_by_node[node_index] = ()
+            child_count[node_index] = 0
+            terminal_payoffs[node_index] = _terminal_payoff_for_state(node_state)
+            continue
         actions_by_node[node_index] = legal_actions
         first_child[node_index] = len(children)
         added_children = 0

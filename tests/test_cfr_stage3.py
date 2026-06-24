@@ -83,7 +83,7 @@ def test_compute_opponent_reach_uses_uniform_shares_for_zero_reach_infoset() -> 
     np.testing.assert_allclose(result.node_opponent_share, np.asarray((0.5, 0.5, 0.0)))
 
 
-def test_compute_opponent_reach_rejects_non_dense_infosets() -> None:
+def test_compute_opponent_reach_remaps_non_dense_infosets() -> None:
     tree = PublicTree(
         node_types=(NodeType.PLAYER0, NodeType.PLAYER0, NodeType.TERMINAL),
         first_child=(0, 1, 2),
@@ -104,8 +104,10 @@ def test_compute_opponent_reach_rejects_non_dense_infosets() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="infoset ids must be dense and contiguous"):
-        compute_opponent_reach(tree, aggregate)
+    result = compute_opponent_reach(tree, aggregate)
+
+    np.testing.assert_allclose(result.infoset_opponent_reach, np.asarray((1.0, 1.0)))
+    assert result.infoset_node_hand_ratio.shape == (2, 1326)
 
 
 def test_compute_opponent_reach_handles_repeated_infosets() -> None:

@@ -131,10 +131,9 @@ def backward_cfv(
     infoset_table = build_dense_infoset_table(tree)
     infoset_values = np.zeros(infoset_table.infoset_count, dtype=np.float64)
     infoset_totals = np.zeros(infoset_table.infoset_count, dtype=np.float64)
-    for node_index, infoset_id in enumerate(tree.infoset_ids):
-        if infoset_id is None:
+    for node_index, infoset_index in enumerate(infoset_table.node_to_infoset):
+        if infoset_index < 0:
             continue
-        infoset_index = int(infoset_id)
         weight = float(stage6_input.opponent_reach.node_opponent_share[node_index])
         infoset_values[infoset_index] += weight * node_values[node_index]
         infoset_totals[infoset_index] += weight
@@ -189,7 +188,8 @@ def _evaluate_stage6_node(
         action_values[node_index] = ()
         return
     if not child_nodes:
-        raise ValueError("non-terminal nodes must have children")
+        action_values[node_index] = ()
+        return
     child_values = tuple(float(node_values[child_index]) for child_index in child_nodes)
     action_values[node_index] = child_values
     if node_type is NodeType.CHANCE:

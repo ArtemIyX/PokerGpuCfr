@@ -29,6 +29,7 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
     action_counts: dict[int, int] = {}
     action_labels: dict[int, tuple[str, ...]] = {}
     infoset_nodes: dict[int, list[int]] = {}
+    sparse_to_dense: dict[int, int] = {}
 
     for node_index, node_type in enumerate(tree.node_types):
         if node_type not in {NodeType.PLAYER0, NodeType.PLAYER1}:
@@ -36,7 +37,10 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         infoset_id = tree.infoset_ids[node_index]
         if infoset_id is None:
             raise ValueError("player nodes must have infoset ids")
-        dense_id = int(infoset_id)
+        if tree.child_count[node_index] <= 0:
+            continue
+        sparse_id = int(infoset_id)
+        dense_id = sparse_to_dense.setdefault(sparse_id, len(sparse_to_dense))
         node_to_infoset[node_index] = dense_id
         infoset_to_node.setdefault(dense_id, node_index)
         action_counts[dense_id] = tree.child_count[node_index]
@@ -47,13 +51,12 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
             labels = tuple(f"action_{index}" for index in range(tree.child_count[node_index]))
         action_labels[dense_id] = labels
         infoset_nodes.setdefault(dense_id, []).append(node_index)
-        assert tree.child_count[node_index] > 0, "player infosets must have actions"
 
     if infoset_to_node:
-        max_infoset = max(infoset_to_node)
-        dense_infoset_to_node = [-1 for _ in range(max_infoset + 1)]
-        dense_action_counts = [0 for _ in range(max_infoset + 1)]
-        dense_action_labels: list[tuple[str, ...]] = [() for _ in range(max_infoset + 1)]
+        dense_count = len(infoset_to_node)
+        dense_infoset_to_node = [-1 for _ in range(dense_count)]
+        dense_action_counts = [0 for _ in range(dense_count)]
+        dense_action_labels: list[tuple[str, ...]] = [() for _ in range(dense_count)]
         for dense_id, node_index in infoset_to_node.items():
             dense_infoset_to_node[dense_id] = node_index
             dense_action_counts[dense_id] = action_counts[dense_id]
@@ -64,8 +67,6 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         dense_action_labels = []
 
     ordered_infosets = sorted(infoset_nodes.items())
-    if any(infoset_id != index for index, (infoset_id, _) in enumerate(ordered_infosets)):
-        raise ValueError("infoset ids must be dense and contiguous")
     return DenseInfosetTable(
         node_to_infoset=tuple(node_to_infoset),
         infoset_to_node=tuple(dense_infoset_to_node),

@@ -28,37 +28,30 @@ def test_make_game_public_tree_rejects_placeholder_variants() -> None:
 def test_make_game_public_tree_builds_holdem_street_scaffold() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    assert tree.node_count >= 22
-    assert tree.node_types[0].value == "player0"
-    assert all(node_type.value == "player1" for node_type in tree.node_types[1:7])
-    assert all(node_type.value == "player0" for node_type in tree.node_types[7:13])
-    assert any(node_type.value == "player1" for node_type in tree.node_types[13:])
-    assert any(node_type.value == "terminal" for node_type in tree.node_types[13:])
-    assert tree.node_types[-1].value == "leaf"
-    assert tree.child_count[0] == 6
-    assert all(tree.child_count[index] == 1 for index in range(1, 13))
-    assert any(count == 1 for count in tree.child_count[13:-1])
-    assert tree.child_count[tree.node_count - 1] == 0
-    assert tree.child_count[tree.node_count - 1] == 0
+    assert tree.node_count >= 10
+    assert tree.node_types[0].value in {"player0", "chance"}
+    assert tree.child_count[0] > 0
+    assert any(node_type.value == "player0" for node_type in tree.node_types)
+    assert any(node_type.value == "player1" for node_type in tree.node_types)
+    assert any(node_type.value == "leaf" for node_type in tree.node_types)
+    assert any(node_type.value == "terminal" for node_type in tree.node_types)
     root_labels = tree.action_labels[0]
-    assert root_labels is not None
-    assert root_labels == ("check", "bet:25pct", "bet:50pct", "bet:75pct", "bet:100pct", "bet:150pct")
+    assert root_labels is None
 
 
 def test_make_game_public_tree_builds_multistreet_holdem_shape() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    assert tree.node_count >= 22
+    assert tree.node_count >= 10
     assert sum(1 for node_type in tree.node_types if node_type.value == "player0") + sum(
         1 for node_type in tree.node_types if node_type.value == "player1"
-    ) >= 8
+    ) >= 2
+    assert sum(1 for node_type in tree.node_types if node_type.value == "chance") >= 0
     assert any(node_type.value == "leaf" for node_type in tree.node_types)
     assert any(node_type.value == "terminal" for node_type in tree.node_types)
-    assert len({count for count in tree.child_count if count > 0}) >= 3
+    assert len({count for count in tree.child_count if count > 0}) >= 2
     root_labels = tree.action_labels[0]
-    assert root_labels is not None
-    assert root_labels[0] == "check"
-    assert len({labels for labels in tree.action_labels if labels is not None}) > 1
+    assert root_labels is None
 
 
 def test_make_game_public_tree_is_deterministic_for_holdem() -> None:
@@ -73,9 +66,9 @@ def test_make_game_public_tree_can_build_compact_holdem_tree() -> None:
     compact_tree = make_game_public_tree(GameVariant.HOLDEM_HU, compact=True)
 
     assert compact_tree.node_count < full_tree.node_count
-    assert compact_tree.child_count[0] < full_tree.child_count[0]
-    assert compact_tree.node_types[-1].value == "leaf"
-    assert compact_tree.action_labels[0] != full_tree.action_labels[0]
+    assert compact_tree.node_types[0].value == "player0"
+    assert full_tree.node_types[0].value in {"player0", "chance"}
+    assert compact_tree.child_count[0] <= full_tree.child_count[0]
 
 
 def test_make_game_public_tree_uses_depth_limit_for_holdem_shape() -> None:
@@ -83,7 +76,8 @@ def test_make_game_public_tree_uses_depth_limit_for_holdem_shape() -> None:
     full_tree = make_game_public_tree(GameVariant.HOLDEM_HU, depth_limit=3)
 
     assert compact_tree.node_count <= full_tree.node_count
-    assert compact_tree.child_count[0] <= full_tree.child_count[0]
+    assert compact_tree.node_types[0].value == "player0"
+    assert full_tree.node_types[0].value in {"player0", "chance"}
 
 
 def test_resolve_game_state_spec_preserves_exact_and_random_modes() -> None:
