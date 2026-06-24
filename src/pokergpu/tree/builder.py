@@ -137,15 +137,15 @@ def build_public_tree(
             for outcome in chance_outcomes:
                 if len(node_states) >= build_config.max_nodes:
                     break
-            if outcome.probability < 0.0 or outcome.probability > 1.0:
-                raise ValueError("chance outcome probability must be in [0, 1]")
-            child_state = outcome.state
-            child_node_index = len(node_states)
-            children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
-            node_states.append(child_state)
-            actions_by_node.append(())
-            action_labels.append(None)
-            next_depth = depth + 1
+                if outcome.probability < 0.0 or outcome.probability > 1.0:
+                    raise ValueError("chance outcome probability must be in [0, 1]")
+                child_state = outcome.state
+                child_node_index = len(node_states)
+                children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
+                node_states.append(child_state)
+                actions_by_node.append(())
+                action_labels.append(None)
+                next_depth = depth + 1
                 child_type = _node_type_for_state(
                     child_state,
                     depth=next_depth,
