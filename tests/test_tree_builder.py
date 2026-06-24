@@ -17,6 +17,7 @@ from pokergpu.tree.builder import (
     build_shallow_public_tree,
 )
 from pokergpu.tree.public_tree import NodeType
+from pokergpu.cfr.solver.tree import make_holdem_hu_public_tree
 
 
 def test_build_shallow_public_tree_creates_root_and_children() -> None:
@@ -185,3 +186,11 @@ def test_build_public_tree_can_emit_chance_root() -> None:
     assert built.tree.node_types[0] is NodeType.CHANCE
     assert built.tree.child_count[0] == 2
     assert built.tree.children[0].chance_prob == 0.25
+
+
+def test_holdem_hu_public_tree_starts_with_chance_root() -> None:
+    tree = make_holdem_hu_public_tree(compact=False)
+
+    assert tree.node_types[0] is NodeType.CHANCE
+    assert tree.child_count[0] >= 1
+    assert any(node_type is NodeType.PLAYER0 or node_type is NodeType.PLAYER1 for node_type in tree.node_types)

@@ -14,12 +14,14 @@ from pokergpu.core.betting import Chips
 from pokergpu.core.betting import chips
 from pokergpu.core.cards import Card
 from pokergpu.core.state import GameState
+from pokergpu.core.state import HandPhase
 from pokergpu.core.state import PlayerState
 from pokergpu.cfr.solver.spec import GameStateMode
 from pokergpu.cfr.solver.spec import GameStateSpec
 from pokergpu.cfr.solver.spec import GameVariant
 from pokergpu.cfr.solver.kuhn import make_kuhn_public_tree
 from pokergpu.cfr.solver.leduc import make_leduc_public_tree
+from pokergpu.tree.builder import ChanceOutcome
 from pokergpu.tree.builder import TreeBuildConfig
 from pokergpu.tree.builder import build_public_tree
 from pokergpu.tree.public_tree import ChildLink
@@ -98,6 +100,7 @@ def make_holdem_hu_public_tree(*, compact: bool = False) -> PublicTree:
         abstraction=abstraction,
         config=config,
         advance_next_board=_next_holdem_board if not compact else None,
+        expand_chance=_expand_holdem_root_chance if not compact else None,
     ).tree
 
 
@@ -133,6 +136,27 @@ def _next_holdem_board(state: GameState) -> Board | None:
     if state.board.is_turn:
         return Board.from_str("AhKdTc9s2d")
     return None
+
+
+def _expand_holdem_root_chance(state: GameState) -> tuple[ChanceOutcome, ...] | None:
+    if state.board.cards:
+        return None
+    if state.phase is not HandPhase.IN_PROGRESS:
+        return None
+    return (
+        ChanceOutcome(state=_make_holdem_dealt_state(state, Board.from_str("AhKdTc")), probability=0.5),
+        ChanceOutcome(state=_make_holdem_dealt_state(state, Board.from_str("QsJh9c")), probability=0.5),
+    )
+
+
+def _make_holdem_dealt_state(state: GameState, board: Board) -> GameState:
+    return GameState(
+        board=board,
+        players=state.players,
+        betting_round=state.betting_round,
+        phase=state.phase,
+        dealer=state.dealer,
+    )
 
 
 def resolve_game_state_spec(spec: GameStateSpec | None) -> GameStateSpec | None:
