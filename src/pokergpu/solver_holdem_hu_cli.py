@@ -525,7 +525,7 @@ def _format_root_strategy(
         strategy = tuple(1.0 / len(strategy_sums) for _ in strategy_sums)
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
-    labels = _root_action_labels(tree, root_infoset, len(strategy))
+    labels = _root_infoset_labels(tree, root_infoset, len(strategy))
     parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
     return "{" + parts + "}"
 
@@ -535,11 +535,11 @@ def _format_root_infoset_labels(tree: PublicTree) -> str | None:
     if not table.infoset_order:
         return None
     root_infoset = table.infoset_order[0]
-    labels = table.action_labels[root_infoset]
+    labels = _root_infoset_labels(tree, root_infoset, len(table.action_labels[root_infoset]))
     return "{" + ", ".join(labels) + "}" if labels else "none"
 
 
-def _root_action_labels(tree: PublicTree, root_infoset: int, action_count: int) -> tuple[str, ...]:
+def _root_infoset_labels(tree: PublicTree, root_infoset: int, action_count: int) -> tuple[str, ...]:
     table = build_dense_infoset_table(tree)
     labels = table.action_labels[root_infoset]
     if len(labels) != action_count:
