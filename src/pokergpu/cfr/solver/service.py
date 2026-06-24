@@ -541,6 +541,13 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
     terminal_count = sum(1 for node_type in tree.node_types if node_type is NodeType.TERMINAL)
     chance_count = sum(1 for node_type in tree.node_types if node_type is NodeType.CHANCE)
     player_count = sum(1 for node_type in tree.node_types if node_type in {NodeType.PLAYER0, NodeType.PLAYER1})
+    node_type_counts = {
+        "player0": sum(1 for node_type in tree.node_types if node_type is NodeType.PLAYER0),
+        "player1": sum(1 for node_type in tree.node_types if node_type is NodeType.PLAYER1),
+        "chance": chance_count,
+        "terminal": terminal_count,
+        "leaf": leaf_count,
+    }
     branch_counts = [count for count in tree.child_count if count > 0]
     max_branching = max(branch_counts) if branch_counts else 0
     avg_branching = (sum(branch_counts) / len(branch_counts)) if branch_counts else 0.0
@@ -570,6 +577,7 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
     player_branching = [count for node_type, count in zip(tree.node_types, tree.child_count, strict=True) if node_type in {NodeType.PLAYER0, NodeType.PLAYER1}]
     return {
         "tree_nodes": tree.node_count,
+        "tree_node_type_counts": node_type_counts,
         "tree_player_nodes": player_count,
         "tree_chance_nodes": chance_count,
         "tree_terminal_nodes": terminal_count,
