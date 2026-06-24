@@ -4,11 +4,15 @@ import pytest
 
 from pokergpu.cfr.solver import (
     DenseCfrState,
+    GameVariant,
     build_dense_infoset_table,
+    make_game_public_tree,
     make_kuhn_public_tree,
     propagate_reach,
 )
 from pokergpu.cfr.solver.chunking import chunk_indices
+from pokergpu.cfr.solver.tree import make_holdem_hu_public_tree
+from pokergpu.core.board import Board
 from pokergpu.tree.public_tree import (
     ChildLink,
     InfosetId,
@@ -80,6 +84,55 @@ def test_build_dense_infoset_table_groups_repeated_infosets() -> None:
     assert table.infoset_order == (0, 1)
     assert reach.infoset_reach[0] == 1.75
     assert reach.cumulative_strategy[0] == (0.4375, 1.3125)
+
+
+def test_holdem_hu_infosets_distinguish_different_board_states() -> None:
+    empty_tree = make_holdem_hu_public_tree(state=_make_boardless_holdem_state(Board(cards=())))
+    flop_tree = make_holdem_hu_public_tree(state=_make_boardless_holdem_state(Board.from_str("AhKdTc")))
+
+    empty_table = build_dense_infoset_table(empty_tree)
+    flop_table = build_dense_infoset_table(flop_tree)
+
+    assert empty_table.infoset_count > 0
+    assert flop_table.infoset_count > 0
+    assert empty_tree.infoset_ids != flop_tree.infoset_ids
+    assert empty_table.infoset_order == tuple(range(empty_table.infoset_count))
+    assert flop_table.infoset_order == tuple(range(flop_table.infoset_count))
+    assert empty_table.action_counts != flop_table.action_counts or empty_table.action_labels != flop_table.action_labels
+
+
+def _make_boardless_holdem_state(board: Board):
+    from pokergpu.core.betting import BettingRoundState
+    from pokergpu.core.betting import BlindStructure
+    from pokergpu.core.betting import PlayerBet
+    from pokergpu.core.betting import PlayerIndex
+    from pokergpu.core.betting import PlayerStack
+    from pokergpu.core.betting import Pot
+    from pokergpu.core.betting import chips
+    from pokergpu.core.state import GameState
+    from pokergpu.core.state import PlayerState
+
+    return GameState(
+        board=board,
+        players=(
+            PlayerState(player=PlayerIndex(0)),
+            PlayerState(player=PlayerIndex(1)),
+        ),
+        betting_round=BettingRoundState(
+            pot=Pot(amount=chips(3)),
+            stacks=(
+                PlayerStack(player=PlayerIndex(0), stack=chips(1000)),
+                PlayerStack(player=PlayerIndex(1), stack=chips(1000)),
+            ),
+            bets=(
+                PlayerBet(player=PlayerIndex(0), committed=chips(1)),
+                PlayerBet(player=PlayerIndex(1), committed=chips(2)),
+            ),
+            blinds=BlindStructure(small_blind=chips(1), big_blind=chips(2)),
+            to_act=PlayerIndex(0),
+        ),
+        dealer=PlayerIndex(0),
+    )
 
 
 def test_propagate_reach_threaded_matches_serial() -> None:
