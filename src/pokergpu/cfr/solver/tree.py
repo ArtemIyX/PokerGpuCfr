@@ -78,13 +78,17 @@ def make_game_public_tree(
     *,
     compact: bool = False,
     depth_limit: int | None = None,
+    state: GameState | None = None,
 ) -> PublicTree:
     if game is GameVariant.KUHN:
         return make_kuhn_public_tree()
     if game is GameVariant.LEDUC:
         return make_leduc_public_tree()
     if game is GameVariant.HOLDEM_HU:
-        return make_holdem_hu_public_tree(compact=compact or (depth_limit is not None and depth_limit <= 1))
+        return make_holdem_hu_public_tree(
+            compact=compact or (depth_limit is not None and depth_limit <= 1),
+            state=state,
+        )
     supported = ", ".join(
         (
             GameVariant.KUHN.value,
@@ -95,8 +99,8 @@ def make_game_public_tree(
     raise NotImplementedError(f"unsupported game variant {game.value!r}; supported variants: {supported}")
 
 
-def make_holdem_hu_public_tree(*, compact: bool = False) -> PublicTree:
-    state = _make_canonical_holdem_state()
+def make_holdem_hu_public_tree(*, compact: bool = False, state: GameState | None = None) -> PublicTree:
+    state = state or _make_canonical_holdem_state()
     abstraction = BaselineActionAbstraction(profile=make_compact_profile() if compact else make_holdem_hu_profile())
     config = TreeBuildConfig(max_depth=1 if compact else 6, max_nodes=256 if compact else 1024)
     return build_public_tree(

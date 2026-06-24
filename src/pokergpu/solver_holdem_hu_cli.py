@@ -38,6 +38,7 @@ from pokergpu.core import BlindStructure
 from pokergpu.core import GameState
 from pokergpu.core import HandPhase
 from pokergpu.core import PlayerBet
+from pokergpu.tree.public_tree import NodeType
 from pokergpu.core import PlayerIndex
 from pokergpu.core import PlayerStack
 from pokergpu.core import Pot
@@ -133,7 +134,12 @@ def main(argv: list[str] | None = None) -> int:
         measure_time=args.measure_time,
     )
 
-    tree = make_game_public_tree(GameVariant.HOLDEM_HU, compact=args.compact_tree, depth_limit=args.depth)
+    tree = make_game_public_tree(
+        GameVariant.HOLDEM_HU,
+        compact=args.compact_tree,
+        depth_limit=args.depth,
+        state=runtime_state,
+    )
     board = _resolve_board(args, request)
     dense_state = _make_dense_state(tree)
     leaf_backend = _build_leaf_backend(args.leaf_evaluator)
@@ -258,14 +264,11 @@ def _print_summary(
     print(f"seed={result.request.seed if result.request.seed is not None else 'none'}")
     print(f"batch_size={result.request.batch_size}")
     print(f"state={_format_game_state(runtime_state, result)}")
-    print(f"legal_actions={_format_legal_actions(runtime_state)}")
+    print(f"position_legal_actions={_format_legal_actions(runtime_state)}")
     if debug:
         _print_debug_details(result, board, tree, dense_state)
     if dense_state is not None:
-        print(f"root_infoset_labels={_format_root_infoset_labels(tree)}")
-        root_strategy = _format_root_strategy(dense_state, tree)
-        if root_strategy is not None:
-            print(f"root_strategy={root_strategy}")
+        print(f"position_strategy={_format_position_strategy(dense_state, runtime_state)}")
     if result.timing_seconds is not None:
         _print_timing_seconds(result.timing_seconds)
     if result.profiler_output is not None:
@@ -293,7 +296,7 @@ def _write_summary(
         "timing_seconds": result.timing_seconds,
         "diagnostics": result.diagnostics,
         "profiler_output": result.profiler_output,
-        "root_strategy": _format_root_strategy(dense_state, tree),
+        "position_strategy": _format_position_strategy(dense_state, runtime_state),
     }
     if debug_log_dir is not None:
         payload["debug_log_dir"] = str(debug_log_dir)
@@ -312,13 +315,13 @@ def _make_random_holdem_state(*, rng: Random) -> GameState:
         PlayerStack(player=PlayerIndex(0), stack=chips(rng.randrange(50, 501))),
         PlayerStack(player=PlayerIndex(1), stack=chips(rng.randrange(50, 501))),
     )
-    committed0, committed1 = _make_random_bets(rng, int(stacks[0].stack), int(stacks[1].stack))
+    committed0, committed1 = _make_random_bets(rng, int(stacks[0].stack), int(stacks[1].stack), board)
     bets = (
         PlayerBet(player=PlayerIndex(0), committed=chips(committed0)),
         PlayerBet(player=PlayerIndex(1), committed=chips(committed1)),
     )
     dealer = PlayerIndex(rng.randrange(2))
-    to_act = PlayerIndex(rng.randrange(2))
+    to_act = PlayerIndex(0 if board.is_preflop else rng.randrange(2))
     betting_round = BettingRoundState(
         pot=Pot(amount=chips(committed0 + committed1)),
         stacks=stacks,
@@ -349,22 +352,18 @@ def _make_random_board_and_used_cards(deck: list[Card], rng: Random) -> tuple[Bo
     return Board(cards=cards), cards
 
 
-def _make_random_bets(rng: Random, stack0: int, stack1: int) -> tuple[int, int]:
-    base = rng.randrange(0, 3)
+def _make_random_bets(rng: Random, stack0: int, stack1: int, board: Board) -> tuple[int, int]:
+    if board.is_preflop:
+        small_blind = min(1, stack0)
+        big_blind = min(2, stack1)
+        return small_blind, big_blind
+    if stack0 <= 0 or stack1 <= 0:
+        return 0, 0
+    base = rng.randrange(0, 2)
     if base == 0:
         return 0, 0
-    if base == 1:
-        max_commit = min(stack0, stack1)
-        if max_commit <= 0:
-            return 0, 0
-        committed = rng.randrange(1, max_commit + 1)
-        return committed, committed
-    max_commit = min(stack0, stack1)
-    if max_commit <= 1:
-        return 0, 0
-    committed0 = rng.randrange(1, max_commit + 1)
-    committed1 = rng.randrange(0, committed0)
-    return committed0, committed1
+    committed = min(stack0, stack1, rng.randrange(0, 3))
+    return committed, committed
 
 
 def _dense_state_to_infoset_strategies(
@@ -432,10 +431,7 @@ def _print_debug_details(
             else:
                 print(f"diagnostic.{key}={value}")
     if dense_state is not None:
-        print(f"debug.root_infoset_labels={_format_root_infoset_labels(tree)}")
-        root_strategy = _format_root_strategy(dense_state, tree)
-        if root_strategy is not None:
-            print(f"debug.root_strategy={root_strategy}")
+        print(f"debug.position_strategy={_format_position_strategy(dense_state, runtime_state)}")
 
 
 def _format_board_cards(board: Board) -> str:
@@ -507,57 +503,39 @@ def _format_nested_mapping(value: dict[str, object]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def _format_root_strategy(
+def _format_position_strategy(
     dense_state: DenseCfrState | None,
-    tree: PublicTree,
+    runtime_state: GameState | None,
 ) -> str | None:
     if dense_state is None:
         return None
-    table = build_dense_infoset_table(tree)
-    root_node = _first_decision_node(tree)
-    if root_node is None:
+    if runtime_state is None:
         return None
-    root_infoset = table.node_to_infoset[root_node]
-    if root_infoset < 0:
+    labels, strategy = _position_strategy_and_labels(dense_state, runtime_state)
+    if not labels or not strategy:
         return None
-    strategy_sums = dense_state.strategy_sums[root_infoset]
+    parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
+    return "{" + parts + "}"
+
+
+def _position_strategy_and_labels(
+    dense_state: DenseCfrState,
+    runtime_state: GameState,
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(runtime_state)
+    labels = tuple(_format_action(action) for action in actions)
+    strategy_sums = dense_state.strategy_sums[0] if dense_state.strategy_sums else ()
     if not strategy_sums:
-        return None
+        return labels, ()
+    if len(strategy_sums) != len(labels):
+        strategy = tuple(1.0 / len(labels) for _ in labels)
+        return labels, strategy
     total = sum(max(0.0, value) for value in strategy_sums)
     if total <= 0.0:
         strategy = tuple(1.0 / len(strategy_sums) for _ in strategy_sums)
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
-    labels = _root_infoset_labels(tree, root_infoset, len(strategy))
-    parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
-    return "{" + parts + "}"
-
-
-def _format_root_infoset_labels(tree: PublicTree) -> str | None:
-    table = build_dense_infoset_table(tree)
-    root_node = _first_decision_node(tree)
-    if root_node is None:
-        return None
-    root_infoset = table.node_to_infoset[root_node]
-    if root_infoset < 0:
-        return None
-    labels = _root_infoset_labels(tree, root_infoset, len(table.action_labels[root_infoset]))
-    return "{" + ", ".join(labels) + "}" if labels else "none"
-
-
-def _root_infoset_labels(tree: PublicTree, root_infoset: int, action_count: int) -> tuple[str, ...]:
-    table = build_dense_infoset_table(tree)
-    labels = table.action_labels[root_infoset]
-    if len(labels) != action_count:
-        return tuple(f"action_{index}" for index in range(action_count))
-    return labels
-
-
-def _first_decision_node(tree: PublicTree) -> int | None:
-    for node_index, node_type in enumerate(tree.node_types):
-        if node_type in {NodeType.PLAYER0, NodeType.PLAYER1}:
-            return node_index
-    return None
+    return labels, strategy
 
 
 def _build_leaf_backend(kind: str) -> LeafEvalBackend:
