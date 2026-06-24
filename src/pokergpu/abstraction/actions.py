@@ -42,7 +42,15 @@ def action_labels_for_street(
     labels: list[str] = []
     if include_check:
         labels.append(f"{prefix}check")
+    labels.append(f"{prefix}fold")
+    labels.append(f"{prefix}call")
     labels.extend(f"{prefix}bet:{int(round(size * 100))}pct" for size in template.bet_sizes)
+    labels.extend(
+        f"{prefix}raise:{int(round(multiplier * 100))}pct_min"
+        for multiplier in template.raise_to_multipliers
+    )
+    labels.append(f"{prefix}bet:allin")
+    labels.append(f"{prefix}raise:allin")
     return tuple(labels)
 
 
@@ -138,9 +146,8 @@ class BaselineActionAbstraction:
         if can_raise(betting_state):
             minimum = min_raise_to(betting_state, betting_state.to_act)
             maximum = max_raise_to(betting_state, betting_state.to_act)
-            span = maximum - minimum
             for multiplier in template.raise_to_multipliers:
-                amount = Chips(int(round(minimum + span * max(0.0, multiplier - 1.0))))
+                amount = Chips(int(round(float(minimum) * max(1.0, multiplier))))
                 clamped = Chips(min(maximum, max(minimum, amount)))
                 _append_unique_action(actions, Action(ActionType.RAISE, amount=clamped))
             _append_unique_action(actions, Action(ActionType.RAISE, amount=maximum))
