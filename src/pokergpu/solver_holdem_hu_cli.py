@@ -440,7 +440,7 @@ def _print_debug_details(
         root_strategy = _format_root_strategy(dense_state, tree)
         if root_strategy is not None:
             print(f"debug.root_strategy={root_strategy}")
-        print(f"debug.position_strategy={_format_position_strategy(dense_state, runtime_state)}")
+        print(f"debug.position_strategy={_format_position_strategy_display(dense_state, runtime_state, tree)}")
 
 
 def _format_board_cards(board: Board) -> str:

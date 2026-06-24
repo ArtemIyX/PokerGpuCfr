@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 from typing import cast
+from random import Random
 
 import pytest
 
@@ -89,3 +90,47 @@ def test_main_shows_position_strategy_hint_when_unavailable(
 ) -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU, depth_limit=1)
     assert solver_holdem_hu_cli._format_position_strategy_display(None, None, tree) == "unavailable: no dense state"
+
+
+def test_main_formats_actual_position_strategy_when_available() -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    dense_state = solver_holdem_hu_cli._make_dense_state(tree)
+    runtime_state = solver_holdem_hu_cli._make_random_holdem_state(rng=Random(64))
+
+    formatted = solver_holdem_hu_cli._format_position_strategy_display(dense_state, runtime_state, tree)
+
+    assert formatted is not None
+    assert not formatted.startswith("unavailable:")
+    assert "{" in formatted
+
+
+def test_debug_details_use_display_strategy_when_available(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    dense_state = solver_holdem_hu_cli._make_dense_state(tree)
+    runtime_state = solver_holdem_hu_cli._make_random_holdem_state(rng=Random(64))
+    result = SimpleNamespace(
+        request=SimpleNamespace(
+            state=None,
+            iterations=1,
+            cpu_workers=2,
+            effective_cpu_workers_stage3=2,
+            effective_cpu_workers_stage4=2,
+            effective_cpu_workers_stage6=2,
+            effective_cpu_workers_stage7=2,
+        ),
+        diagnostics={},
+    )
+
+    solver_holdem_hu_cli._print_debug_details(
+        result,
+        runtime_state.board,
+        tree,
+        dense_state,
+        runtime_state,
+    )
+
+    captured = capsys.readouterr().out
+    assert "debug.position_strategy=" in captured
+    assert "unavailable:" not in captured
