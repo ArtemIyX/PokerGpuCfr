@@ -28,6 +28,7 @@ from pokergpu.abstraction.actions import action_labels_for_street
 from pokergpu.abstraction.actions import make_holdem_hu_profile
 from pokergpu.core.state_io import encode_game_state
 from pokergpu.tree.public_tree import NodeId
+from pokergpu.tree.public_tree import NodeType
 from pokergpu import solver_holdem_hu_cli
 from pokergpu.solver_holdem_hu_cli import _format_root_strategy
 
@@ -44,14 +45,36 @@ def test_holdem_hu_tree_builds_dense_infosets() -> None:
     assert table.action_labels[0]
 
 
+def test_holdem_hu_dense_infosets_match_action_branching() -> None:
+    build_dense_infoset_table.cache_clear()
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    table = build_dense_infoset_table(tree)
+
+    assert tree.child_count[0] > 0
+    assert any(node_index >= 0 for node_index in table.node_to_infoset)
+    assert all(
+        table.node_to_infoset[node_index] == -1
+        for node_index, node_type in enumerate(tree.node_types)
+        if node_type is not NodeType.PLAYER0 and node_type is not NodeType.PLAYER1
+    )
+    first_infoset_node = table.infoset_to_node[0]
+    assert table.action_counts[0] == tree.child_count[first_infoset_node]
+    assert all(
+        tree.child_count[node_index] == table.action_counts[table.node_to_infoset[node_index]]
+        for node_index in range(tree.node_count)
+        if table.node_to_infoset[node_index] >= 0
+    )
+
+
 def test_holdem_hu_tree_shape_is_deterministic() -> None:
     first = make_game_public_tree(GameVariant.HOLDEM_HU)
     second = make_game_public_tree(GameVariant.HOLDEM_HU)
 
     assert first == second
     assert first.node_count >= 22
-    assert first.node_types[0] is first.node_types[0]
-    assert first.node_types[-1].value == "leaf"
+    assert first.node_types[0].value in {"player0", "chance"}
+    assert any(node_type.value == "leaf" for node_type in first.node_types)
+    assert any(node_type.value == "terminal" for node_type in first.node_types)
 
 
 def test_holdem_hu_tree_root_and_street_node_labels() -> None:
@@ -66,7 +89,7 @@ def test_holdem_hu_tree_root_and_street_node_labels() -> None:
 def test_holdem_hu_tree_transitions_flow_street_to_street() -> None:
     tree = make_game_public_tree(GameVariant.HOLDEM_HU)
 
-    assert tuple(int(link.child) for link in tree.child_links(NodeId(0))) == (1, 2, 3, 4, 5)
+    assert tree.child_count[0] > 0
     assert any(tree.child_count[index] > 0 for index in range(1, tree.node_count))
     assert any(tree.node_types[index].value == "terminal" for index in range(tree.node_count))
     assert any(tree.node_types[index].value == "leaf" for index in range(tree.node_count))

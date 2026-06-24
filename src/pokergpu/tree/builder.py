@@ -71,6 +71,8 @@ def build_public_tree(
     infoset_ids: list[InfosetId | None] = []
     next_infoset_id = 0
     root_infoset = _infoset_id_for_state(state, node_types[0], next_infoset_id)
+    if node_types[0] is NodeType.CHANCE:
+        root_infoset = None
     if root_infoset is not None:
         next_infoset_id += 1
     infoset_ids.append(root_infoset)
@@ -128,6 +130,7 @@ def build_public_tree(
         if chance_outcomes is not None:
             actions_by_node[node_index] = ()
             node_types[node_index] = NodeType.CHANCE
+            infoset_ids[node_index] = None
             first_child[node_index] = len(children)
             child_count[node_index] = 0
             added_children = 0

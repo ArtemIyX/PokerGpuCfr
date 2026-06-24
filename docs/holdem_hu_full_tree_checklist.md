@@ -2,11 +2,25 @@
 
 Use this as the step-by-step execution checklist.
 
+## Current status
+
+- [x] Replace placeholder root-only chance outcomes with a street-aware chance expander
+- [x] Expand preflop to sampled flop boards
+- [x] Expand flop to sampled turn boards
+- [x] Expand turn to sampled river boards
+- [x] Remove the deterministic `_next_holdem_board` path
+- [x] Increase the Hold'em non-compact depth budget so later street chance layers can appear
+- [x] Confirm the test suite still passes after the tree expansion change
+
+Next step:
+
+- add diagnostics and regression tests that verify the new chance layers, street progression, and node counts do not collapse back to the tiny tree
+
 ## Step 0: Baseline snapshot
 
-- [ ] Record current tree diagnostics for the Hold'em HU solver
-- [ ] Record current root branching and depth-limit behavior
-- [ ] Confirm which CLI path builds the tree used by diagnostics
+- [x] Record current tree diagnostics for the Hold'em HU solver
+- [x] Record current root branching and depth-limit behavior
+- [x] Confirm which CLI path builds the tree used by diagnostics
 
 Files:
 
@@ -15,9 +29,9 @@ Files:
 
 ## Step 1: Tree data model
 
-- [ ] Add support for chance node representation if missing
-- [ ] Add chance edge probabilities if missing
-- [ ] Keep the tree structure compact and typed
+- [x] Add support for chance node representation if missing
+- [x] Add chance edge probabilities if missing
+- [x] Keep the tree structure compact and typed
 
 Files:
 
@@ -26,10 +40,10 @@ Files:
 
 ## Step 2: Builder behavior
 
-- [ ] Expand the builder beyond player-only traversal
-- [ ] Insert chance nodes for card dealing
-- [ ] Advance streets correctly after betting rounds end
-- [ ] Stop using a single fixed board path as the only future board
+- [x] Expand the builder beyond player-only traversal
+- [x] Insert chance nodes for card dealing
+- [x] Advance streets correctly after betting rounds end
+- [x] Stop using a single fixed board path as the only future board
 
 Files:
 
@@ -38,9 +52,9 @@ Files:
 
 ## Step 3: Hold'em root
 
-- [ ] Build a proper canonical heads-up root state
-- [ ] Separate chance dealing from betting nodes
-- [ ] Preserve street progression from preflop to river
+- [x] Build a proper canonical heads-up root state
+- [x] Separate chance dealing from betting nodes
+- [x] Preserve street progression from preflop to river
 
 Files:
 
@@ -88,4 +102,3 @@ Files:
 Files:
 
 - [`tests/`](/C:/Users/xeuse/RiderProjects/PokerGPU/tests)
-

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import combinations
+
 from pokergpu.abstraction.actions import BaselineActionAbstraction
 from pokergpu.abstraction.actions import make_compact_profile
 from pokergpu.abstraction.actions import make_holdem_hu_profile
@@ -159,7 +161,6 @@ def _make_holdem_dealt_state(state: GameState, board: Board) -> GameState:
 def _sample_public_boards(street: Street, *, prefix: tuple[Card, ...] = (), limit: int = 4) -> tuple[Board, ...]:
     deck = make_deck()
     dead_cards = set(prefix)
-    boards: list[Board] = []
     target_len = {
         Street.FLOP: 3,
         Street.TURN: 4,
@@ -169,14 +170,13 @@ def _sample_public_boards(street: Street, *, prefix: tuple[Card, ...] = (), limi
         return ()
     if len(prefix) == target_len:
         return (Board(cards=prefix),)
-    for card in deck:
-        if card in dead_cards:
-            continue
-        next_cards = prefix + (card,)
-        if len(next_cards) == target_len:
-            boards.append(Board(cards=next_cards))
-            if len(boards) >= limit:
-                break
+    remaining_cards = [card for card in deck if card not in dead_cards]
+    needed_cards = target_len - len(prefix)
+    boards: list[Board] = []
+    for extra_cards in combinations(remaining_cards, needed_cards):
+        boards.append(Board(cards=prefix + extra_cards))
+        if len(boards) >= limit:
+            break
     return tuple(boards)
 
 

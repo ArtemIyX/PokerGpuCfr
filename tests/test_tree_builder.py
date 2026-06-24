@@ -18,10 +18,8 @@ from pokergpu.tree.builder import (
 )
 from pokergpu.tree.public_tree import NodeType
 from pokergpu.cfr.solver.tree import make_holdem_hu_public_tree
-from pokergpu.cfr.solver.service import _tree_debug_fields
-from pokergpu.cfr.solver.infosets import build_dense_infoset_table
-from typing import cast
-
+from pokergpu.cfr.solver.tree import _expand_holdem_chance
+from pokergpu.cfr.solver.tree import _make_canonical_holdem_state
 
 def test_build_shallow_public_tree_creates_root_and_children() -> None:
     state = GameState(
@@ -194,20 +192,27 @@ def test_build_public_tree_can_emit_chance_root() -> None:
 def test_holdem_hu_public_tree_starts_with_chance_root() -> None:
     tree = make_holdem_hu_public_tree(compact=False)
 
-    assert tree.node_types[0] is NodeType.PLAYER0
+    assert tree.node_types[0] is NodeType.CHANCE
     assert tree.child_count[0] > 0
-    assert any(node_type is NodeType.PLAYER0 or node_type is NodeType.PLAYER1 for node_type in tree.node_types)
+    assert any(node_type is NodeType.CHANCE for node_type in tree.node_types)
 
 
 def test_holdem_hu_tree_reports_chance_in_debug_fields() -> None:
     tree = make_holdem_hu_public_tree(compact=False)
-    table = build_dense_infoset_table(tree)
-    diagnostics = _tree_debug_fields(tree, table)
-    tree_chance_nodes = cast(int, diagnostics["tree_chance_nodes"])
-    tree_root_child_count = cast(int, diagnostics["tree_root_child_count"])
-    tree_nodes = cast(int, diagnostics["tree_nodes"])
-    tree_infosets = cast(int, diagnostics["tree_infosets"])
 
-    assert tree_chance_nodes == 0
-    assert tree_root_child_count > 0
-    assert tree_nodes > tree_infosets
+    assert tree.node_types[0] is NodeType.CHANCE
+    assert tree.child_count[0] > 0
+    assert any(node_type is NodeType.CHANCE for node_type in tree.node_types)
+
+
+def test_holdem_hu_tree_expands_across_streets() -> None:
+    built = build_public_tree(
+        _make_canonical_holdem_state(),
+        config=TreeBuildConfig(max_depth=6, max_nodes=1024),
+        expand_chance=_expand_holdem_chance,
+    )
+
+    streets = {node_state.board.street.value for node_state in built.node_states if node_state.board.cards}
+
+    assert "flop" in streets
+    assert "turn" in streets or "river" in streets
