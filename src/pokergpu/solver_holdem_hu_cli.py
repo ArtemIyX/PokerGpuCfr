@@ -262,6 +262,7 @@ def _print_summary(
     if debug:
         _print_debug_details(result, board, tree, dense_state)
     if dense_state is not None:
+        print(f"root_infoset_labels={_format_root_infoset_labels(tree)}")
         root_strategy = _format_root_strategy(dense_state, tree)
         if root_strategy is not None:
             print(f"root_strategy={root_strategy}")
@@ -431,6 +432,7 @@ def _print_debug_details(
             else:
                 print(f"diagnostic.{key}={value}")
     if dense_state is not None:
+        print(f"debug.root_infoset_labels={_format_root_infoset_labels(tree)}")
         root_strategy = _format_root_strategy(dense_state, tree)
         if root_strategy is not None:
             print(f"debug.root_strategy={root_strategy}")
@@ -526,6 +528,15 @@ def _format_root_strategy(
     labels = _root_action_labels(tree, root_infoset, len(strategy))
     parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
     return "{" + parts + "}"
+
+
+def _format_root_infoset_labels(tree: PublicTree) -> str | None:
+    table = build_dense_infoset_table(tree)
+    if not table.infoset_order:
+        return None
+    root_infoset = table.infoset_order[0]
+    labels = table.action_labels[root_infoset]
+    return "{" + ", ".join(labels) + "}" if labels else "none"
 
 
 def _root_action_labels(tree: PublicTree, root_infoset: int, action_count: int) -> tuple[str, ...]:

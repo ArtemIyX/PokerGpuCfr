@@ -137,24 +137,36 @@ class BaselineActionAbstraction:
                 for stack in betting_state.stacks
                 if stack.player == betting_state.to_act
             )
+            seen_amounts: set[int] = set()
             for size in template.bet_sizes:
                 amount = Chips(int(round(betting_state.pot.amount * size)))
                 clamped = Chips(min(max_bet, max(betting_state.blinds.big_blind, amount)))
-                _append_unique_action(actions, Action(ActionType.BET, amount=clamped))
-            _append_unique_action(actions, Action(ActionType.BET, amount=max_bet))
+                _append_unique_action(actions, Action(ActionType.BET, amount=clamped), seen_amounts=seen_amounts)
+            _append_unique_action(actions, Action(ActionType.BET, amount=max_bet), seen_amounts=seen_amounts)
 
         if can_raise(betting_state):
             minimum = min_raise_to(betting_state, betting_state.to_act)
             maximum = max_raise_to(betting_state, betting_state.to_act)
+            seen_amounts = set()
             for multiplier in template.raise_to_multipliers:
                 amount = Chips(int(round(float(minimum) * max(1.0, multiplier))))
                 clamped = Chips(min(maximum, max(minimum, amount)))
-                _append_unique_action(actions, Action(ActionType.RAISE, amount=clamped))
-            _append_unique_action(actions, Action(ActionType.RAISE, amount=maximum))
+                _append_unique_action(actions, Action(ActionType.RAISE, amount=clamped), seen_amounts=seen_amounts)
+            _append_unique_action(actions, Action(ActionType.RAISE, amount=maximum), seen_amounts=seen_amounts)
 
         return tuple(actions)
 
 
-def _append_unique_action(actions: list[Action], action: Action) -> None:
+def _append_unique_action(
+    actions: list[Action],
+    action: Action,
+    *,
+    seen_amounts: set[int] | None = None,
+) -> None:
+    if seen_amounts is not None and action.amount is not None:
+        amount = int(action.amount)
+        if amount in seen_amounts:
+            return
+        seen_amounts.add(amount)
     if action not in actions:
         actions.append(action)

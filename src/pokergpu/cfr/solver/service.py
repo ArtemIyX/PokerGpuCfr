@@ -545,6 +545,17 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
     max_branching = max(branch_counts) if branch_counts else 0
     avg_branching = (sum(branch_counts) / len(branch_counts)) if branch_counts else 0.0
     action_label_variants = len({labels for labels in tree.action_labels if labels is not None})
+    inconsistent_infosets = sum(
+        1
+        for infoset_nodes in table.infoset_nodes
+        if len({tree.child_count[node_index] for node_index in infoset_nodes}) > 1
+        or len({tree.action_labels[node_index] for node_index in infoset_nodes}) > 1
+    )
+    action_label_mismatches = sum(
+        1
+        for infoset_id, labels in enumerate(table.action_labels)
+        if labels and table.action_counts[infoset_id] != len(labels)
+    )
     street_node_counts = {
         "preflop": sum(
             1
@@ -571,6 +582,8 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
         "tree_player_branching": tuple(player_branching[:16]),
         "tree_root_child_count": tree.child_count[0] if tree.child_count else 0,
         "tree_action_label_variants": action_label_variants,
+        "tree_infoset_consistency_issues": inconsistent_infosets,
+        "tree_infoset_label_mismatches": action_label_mismatches,
         "tree_street_node_counts": street_node_counts,
         "tree_internal_nodes": tree.node_count - terminal_count - leaf_count,
     }
