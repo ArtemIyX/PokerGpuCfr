@@ -121,13 +121,20 @@ def make_holdem_hu_public_tree(
         profile=make_compact_profile() if effective_compact else make_holdem_hu_profile()
     )
     build_config = TreeBuildConfig(max_depth=1 if effective_compact else 6, max_nodes=256 if effective_compact else 1024)
+    expand_chance = None
+    if not effective_compact:
+        def expand_chance(current_state: GameState) -> tuple[ChanceOutcome, ...] | None:
+            if not current_state.board.is_preflop:
+                return None
+            return _expand_holdem_chance(
+                current_state,
+                board_sample_limit=tree_config.board_sample_limit,
+            )
     return build_public_tree(
         state,
         abstraction=abstraction,
         config=build_config,
-        expand_chance=None
-        if effective_compact
-        else (lambda current_state: _expand_holdem_chance(current_state, board_sample_limit=tree_config.board_sample_limit)),
+        expand_chance=expand_chance,
     ).tree
 
 

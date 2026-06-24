@@ -180,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     assert result is not None
     _print_summary(
         result,
-        current if isinstance(current, SolverDenseCfrState) else None,
+        current,
         tree,
         board,
         runtime_state=runtime_state,
@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_summary(
             args.summary_output,
             result,
-            current if isinstance(current, SolverDenseCfrState) else None,
+            current,
             tree,
             board,
             runtime_state=runtime_state,
@@ -496,15 +496,28 @@ def _format_legal_actions(runtime_state: GameState | None) -> str:
             dealer=decoded.dealer,
         )
         actions = abstraction.legal_actions(player_state)
-        action_text = ", ".join(_format_action(action) for action in actions)
+        action_text = ", ".join(_format_action(action, decoded, player.player) for action in actions)
         parts.append(f"p{int(player.player)}=[{action_text}]")
     return "{" + ", ".join(parts) + "}"
 
 
-def _format_action(action: Action) -> str:
+def _format_action(action: Action, runtime_state: GameState | None = None, acting_player: PlayerIndex | None = None) -> str:
     if action.amount is None:
         return action.action_type.value
-    return f"{action.action_type.value}:{int(action.amount)}"
+    label = f"{action.action_type.value}:{int(action.amount)}"
+    if runtime_state is not None and acting_player is not None and action.action_type.value in {"bet", "raise"}:
+        if _is_all_in_action(runtime_state, acting_player, action):
+            label += " (all-in)"
+    return label
+
+
+def _is_all_in_action(runtime_state: GameState, acting_player: PlayerIndex, action: Action) -> bool:
+    if action.amount is None or action.amount <= 0:
+        return False
+    player_stack = next((stack.stack for stack in runtime_state.betting_round.stacks if stack.player == acting_player), None)
+    if player_stack is None:
+        return False
+    return int(action.amount) >= int(player_stack)
 
 
 def _format_nested_mapping(value: dict[str, object]) -> str:
@@ -532,7 +545,7 @@ def _position_strategy_and_labels(
     runtime_state: GameState,
 ) -> tuple[tuple[str, ...], tuple[float, ...]]:
     actions = BaselineActionAbstraction(profile=make_holdem_hu_profile()).legal_actions(runtime_state)
-    labels = tuple(_format_action(action) for action in actions)
+    labels = _format_position_action_labels(runtime_state, actions)
     strategy_sums = dense_state.strategy_sums[0] if dense_state.strategy_sums else ()
     if not strategy_sums:
         return labels, ()
@@ -545,6 +558,29 @@ def _position_strategy_and_labels(
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
     return labels, strategy
+
+
+def _format_position_action_labels(runtime_state: GameState, actions: tuple[Action, ...]) -> tuple[str, ...]:
+    labels: list[str] = []
+    for action in actions:
+        if action.amount is None:
+            labels.append(action.action_type.value)
+            continue
+        labels.append(_format_action_label(runtime_state, action))
+    return tuple(labels)
+
+
+def _format_action_label(runtime_state: GameState, action: Action) -> str:
+    amount = int(action.amount) if action.amount is not None else None
+    if amount is None:
+        return action.action_type.value
+    if action.action_type.value in {"bet", "raise"} and _is_all_in_action(runtime_state, runtime_state.betting_round.to_act, action):
+        return f"{action.action_type.value}:all-in"
+    if action.action_type.value == "bet":
+        return f"bet:{amount}bb"
+    if action.action_type.value == "raise":
+        return f"raise:{amount}bb"
+    return f"{action.action_type.value}:{amount}"
 
 
 def _format_position_strategy_display(

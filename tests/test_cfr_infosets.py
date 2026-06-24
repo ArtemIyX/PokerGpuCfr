@@ -13,6 +13,7 @@ from pokergpu.cfr.solver import (
 from pokergpu.cfr.solver.chunking import chunk_indices
 from pokergpu.cfr.solver.tree import make_holdem_hu_public_tree
 from pokergpu.core.board import Board
+from pokergpu.core.state import GameState
 from pokergpu.tree.public_tree import (
     ChildLink,
     InfosetId,
@@ -102,7 +103,7 @@ def test_holdem_hu_infosets_distinguish_different_board_states() -> None:
     assert empty_table.action_counts != flop_table.action_counts or empty_table.action_labels != flop_table.action_labels
 
 
-def _make_boardless_holdem_state(board: Board):
+def _make_boardless_holdem_state(board: Board) -> GameState:
     from pokergpu.core.betting import BettingRoundState
     from pokergpu.core.betting import BlindStructure
     from pokergpu.core.betting import PlayerBet

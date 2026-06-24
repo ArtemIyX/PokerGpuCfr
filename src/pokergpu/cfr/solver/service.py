@@ -173,20 +173,20 @@ class SolverStageService:
             if request.debug.enabled:
                 _log_stage7_debug(sink, final_state, dense_state, table, debug_step)
                 sink.add_text("debug/timings", "\n".join(f"{k}: {v:.6f}" for k, v in timings.items()), debug_step)
-                sink.add_text("debug/diagnostics", "\n".join(f"{k}: {v}" for k, v in _tree_debug_fields(tree, table).items()), debug_step)
+                sink.add_text("debug/diagnostics", "\n".join(f"{k}: {v}" for k, v in _tree_debug_fields(tree, table, board).items()), debug_step)
 
             if profiler is not None:
                 profiler_output = _finalize_profiler_output(request, profiler)
 
         return SolverStageResult(
-            request=request,
-            final_state=final_state,
-            timing_seconds=timings if request.measure_timing else None,
-            profiler_output=profiler_output,
-            diagnostics={
+                request=request,
+                final_state=final_state,
+                timing_seconds=timings if request.measure_timing else None,
+                profiler_output=profiler_output,
+                diagnostics={
                 "game": request.game.value,
                 "cfr_variant": request.cfr_variant.value,
-                **_tree_debug_fields(tree, table),
+                **_tree_debug_fields(tree, table, board),
                 "root_infoset": table.infoset_order[0] if table.infoset_order else None,
                 "root_regrets": final_state.regret_sums[table.infoset_order[0]] if final_state is not None and table.infoset_order else None,
                 "root_strategy_sums": final_state.strategy_sums[table.infoset_order[0]] if final_state is not None and table.infoset_order else None,
@@ -531,7 +531,7 @@ def _log_stage7_debug(
             ], step)
 
 
-def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, object]:
+def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable, board: Board | None) -> dict[str, object]:
     leaf_count = sum(1 for node_type in tree.node_types if node_type is NodeType.LEAF)
     depth_limit_hit_count = sum(
         1
@@ -589,5 +589,6 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
         "tree_infoset_consistency_issues": inconsistent_infosets,
         "tree_infoset_label_mismatches": action_label_mismatches,
         "tree_street_node_counts": street_node_counts,
+        "tree_active_street": board.street.value if board is not None else "preflop",
         "tree_internal_nodes": tree.node_count - terminal_count - leaf_count,
     }
