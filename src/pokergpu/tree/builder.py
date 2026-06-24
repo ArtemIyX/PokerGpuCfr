@@ -69,12 +69,10 @@ def build_public_tree(
     first_child: list[int] = [0]
     child_count: list[int] = [0]
     infoset_ids: list[InfosetId | None] = []
-    next_infoset_id = 0
-    root_infoset = _infoset_id_for_state(state, node_types[0], next_infoset_id)
+    infoset_registry: dict[tuple[object, ...], InfosetId] = {}
+    root_infoset = _infoset_id_for_state(state, node_types[0], infoset_registry)
     if node_types[0] is NodeType.CHANCE:
         root_infoset = None
-    if root_infoset is not None:
-        next_infoset_id += 1
     infoset_ids.append(root_infoset)
     terminal_payoffs: list[Chips | None] = [_terminal_payoff_for_state(state)]
     node_states: list[GameState] = [state]
@@ -107,9 +105,7 @@ def build_public_tree(
             node_types.append(child_type)
             first_child.append(0)
             child_count.append(0)
-            child_infoset = _infoset_id_for_state(child_state, child_type, next_infoset_id)
-            if child_infoset is not None:
-                next_infoset_id += 1
+            child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
             infoset_ids.append(child_infoset)
             terminal_payoffs.append(_terminal_payoff_for_state(child_state))
             if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
@@ -154,9 +150,7 @@ def build_public_tree(
                 node_types.append(child_type)
                 first_child.append(0)
                 child_count.append(0)
-                child_infoset = _infoset_id_for_state(child_state, child_type, next_infoset_id)
-                if child_infoset is not None:
-                    next_infoset_id += 1
+                child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
                 infoset_ids.append(child_infoset)
                 terminal_payoffs.append(_terminal_payoff_for_state(child_state))
                 if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
@@ -198,9 +192,7 @@ def build_public_tree(
             node_types.append(child_type)
             first_child.append(0)
             child_count.append(0)
-            child_infoset = _infoset_id_for_state(child_state, child_type, next_infoset_id)
-            if child_infoset is not None:
-                next_infoset_id += 1
+            child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
             infoset_ids.append(child_infoset)
             terminal_payoffs.append(_terminal_payoff_for_state(child_state))
 
@@ -235,14 +227,37 @@ def _node_type_for_state(state: GameState, *, depth: int, max_depth: int) -> Nod
 def _infoset_id_for_state(
     state: GameState,
     node_type: NodeType,
-    dense_infoset_id: int,
+    infoset_registry: dict[tuple[object, ...], InfosetId],
 ) -> InfosetId | None:
     if (
         node_type in {NodeType.PLAYER0, NodeType.PLAYER1}
         and state.phase is HandPhase.IN_PROGRESS
     ):
-        return InfosetId(dense_infoset_id)
+        key = _infoset_key_for_state(state, node_type)
+        existing = infoset_registry.get(key)
+        if existing is not None:
+            return existing
+        dense_infoset_id = InfosetId(len(infoset_registry))
+        infoset_registry[key] = dense_infoset_id
+        return dense_infoset_id
     return None
+
+
+def _infoset_key_for_state(state: GameState, node_type: NodeType) -> tuple[object, ...]:
+    board_key = tuple(str(card) for card in state.board.cards)
+    betting = state.betting_round
+    stacks_key = tuple((int(entry.player), int(entry.stack)) for entry in betting.stacks)
+    bets_key = tuple((int(entry.player), int(entry.committed)) for entry in betting.bets)
+    return (
+        node_type.value,
+        int(state.dealer),
+        int(betting.to_act),
+        state.current_street.value,
+        board_key,
+        int(betting.pot.amount),
+        stacks_key,
+        bets_key,
+    )
 
 
 def _terminal_payoff_for_state(state: GameState) -> Chips | None:
