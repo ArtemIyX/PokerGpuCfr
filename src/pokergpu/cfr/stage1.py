@@ -62,11 +62,10 @@ def propagate_forward(
         child_links = tree.child_links(NodeId(node_index))
         if not child_links:
             continue
-        strategy = normalize_strategy(
-            strategies.get(InfosetId(infoset_id), tuple(1.0 for _ in child_links))
+        strategy = _aligned_strategy(
+            strategies.get(InfosetId(infoset_id)),
+            branching_factor=len(child_links),
         )
-        if len(strategy) != len(child_links):
-            raise ValueError("strategy length must match the node branching factor")
 
         infoset_reach_map[infoset_id] = infoset_reach_map.get(infoset_id, 0.0) + current_reach
         action_reach[node_index] = strategy
@@ -84,3 +83,15 @@ def propagate_forward(
         infoset_reach=tuple(infoset_reach),
         action_reach=tuple(action_reach),
     )
+
+
+def _aligned_strategy(
+    strategy: tuple[float, ...] | None,
+    *,
+    branching_factor: int,
+) -> tuple[float, ...]:
+    if branching_factor <= 0:
+        return ()
+    if strategy is None or len(strategy) != branching_factor:
+        return tuple(1.0 / branching_factor for _ in range(branching_factor))
+    return normalize_strategy(strategy)
