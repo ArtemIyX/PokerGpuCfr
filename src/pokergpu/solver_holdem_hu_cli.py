@@ -32,6 +32,7 @@ from pokergpu.abstraction.actions import make_holdem_hu_profile
 from pokergpu.cfr.solver.debug import create_debug_session
 from pokergpu.cfr.solver.state import DenseCfrState as SolverDenseCfrState
 from pokergpu.cfr.solver.tree import resolve_game_state_spec
+from pokergpu.cfr.solver.tree import HoldemHuTreeConfig
 from pokergpu.core.actions import Action
 from pokergpu.core import BettingRoundState
 from pokergpu.core import BlindStructure
@@ -101,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug-log-dir", type=Path)
     parser.add_argument("--leaf-evaluator", choices=["heuristic", "model", "triton"], default="model")
     parser.add_argument("--compact-tree", action="store_true")
+    parser.add_argument("--board-sample-limit", type=int, default=8)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--progress", action="store_true")
     parser.add_argument("--batch-size", type=int, default=1)
@@ -139,6 +141,10 @@ def main(argv: list[str] | None = None) -> int:
         compact=args.compact_tree,
         depth_limit=args.depth,
         state=runtime_state,
+        holdem_hu_tree_config=HoldemHuTreeConfig(
+            compact=args.compact_tree,
+            board_sample_limit=args.board_sample_limit,
+        ),
     )
     board = _resolve_board(args, request)
     dense_state = _make_dense_state(tree)
@@ -267,8 +273,7 @@ def _print_summary(
     print(f"position_legal_actions={_format_legal_actions(runtime_state)}")
     if debug:
         _print_debug_details(result, board, tree, dense_state, runtime_state)
-    if dense_state is not None:
-        print(f"position_strategy={_format_position_strategy(dense_state, runtime_state)}")
+    print(f"position_strategy={_format_position_strategy_display(dense_state, runtime_state, tree)}")
     if result.timing_seconds is not None:
         _print_timing_seconds(result.timing_seconds)
     if result.profiler_output is not None:
@@ -296,7 +301,7 @@ def _write_summary(
         "timing_seconds": result.timing_seconds,
         "diagnostics": result.diagnostics,
         "profiler_output": result.profiler_output,
-        "position_strategy": _format_position_strategy(dense_state, runtime_state),
+        "position_strategy": _format_position_strategy_display(dense_state, runtime_state, tree),
     }
     if debug_log_dir is not None:
         payload["debug_log_dir"] = str(debug_log_dir)
@@ -306,10 +311,10 @@ def _write_summary(
 def _make_random_holdem_state(*, rng: Random) -> GameState:
     deck = shuffled_deck(rng)
     board, used_cards = _make_random_board_and_used_cards(deck, rng)
-    hole_start = len(used_cards)
+    available_cards = [card for card in deck if card not in used_cards]
     players = (
-        PlayerState(player=PlayerIndex(0), hole_cards=(deck[hole_start], deck[hole_start + 1])),
-        PlayerState(player=PlayerIndex(1), hole_cards=(deck[hole_start + 2], deck[hole_start + 3])),
+        PlayerState(player=PlayerIndex(0), hole_cards=(available_cards[0], available_cards[1])),
+        PlayerState(player=PlayerIndex(1), hole_cards=(available_cards[2], available_cards[3])),
     )
     stacks = (
         PlayerStack(player=PlayerIndex(0), stack=chips(rng.randrange(50, 501))),
@@ -540,6 +545,24 @@ def _position_strategy_and_labels(
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
     return labels, strategy
+
+
+def _format_position_strategy_display(
+    dense_state: DenseCfrState | None,
+    runtime_state: GameState | None,
+    tree: PublicTree,
+) -> str:
+    formatted = _format_position_strategy(dense_state, runtime_state)
+    if formatted is not None:
+        return formatted
+    root_strategy = _format_root_strategy(dense_state, tree)
+    if root_strategy is not None:
+        return root_strategy
+    if dense_state is None:
+        return "unavailable: no dense state"
+    if runtime_state is None:
+        return "unavailable: no runtime state"
+    return "unavailable: no strategy rows for this position; try a different board/state"
 
 
 def _format_root_strategy(

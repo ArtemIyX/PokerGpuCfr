@@ -173,9 +173,18 @@ def _expand_holdem_chance(state: GameState, *, board_sample_limit: int = 8) -> t
 
 
 def _make_holdem_dealt_state(state: GameState, board: Board) -> GameState:
+    public_players = tuple(
+        PlayerState(
+            player=player.player,
+            hole_cards=None,
+            folded=player.folded,
+            all_in=player.all_in,
+        )
+        for player in state.players
+    )
     return GameState(
         board=board,
-        players=state.players,
+        players=public_players,
         betting_round=state.betting_round,
         phase=state.phase,
         dealer=state.dealer,

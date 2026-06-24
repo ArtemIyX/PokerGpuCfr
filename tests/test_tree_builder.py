@@ -187,7 +187,7 @@ def test_build_public_tree_can_emit_chance_root() -> None:
     assert built.tree.node_types[0] is not NodeType.PLAYER0
     assert built.tree.node_types[0] is NodeType.CHANCE
     assert built.tree.child_count[0] == 2
-    assert built.tree.children[0].chance_prob == 0.25
+    assert built.tree.children[0].chance_prob == 0.5
 
 
 def test_holdem_hu_public_tree_starts_with_chance_root() -> None:
@@ -228,3 +228,5 @@ def test_holdem_hu_tree_honors_board_sample_limit() -> None:
 
     assert default_tree.child_count[0] >= limited_tree.child_count[0]
     assert limited_tree.child_count[0] == 2
+    assert limited_tree.children[0].chance_prob == 0.5
+    assert limited_tree.children[1].chance_prob == 0.5

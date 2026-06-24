@@ -22,6 +22,7 @@ from pokergpu.tree.public_tree import (
 )
 from pokergpu.core.betting import Chips
 from pokergpu.cfr.solver import apply_dense_solver_strategy_update
+from pokergpu.cfr.solver.state import DenseCfrState as SolverDenseCfrState
 
 
 def test_build_dense_infoset_table_extracts_dense_mappings() -> None:
@@ -200,6 +201,13 @@ def test_apply_dense_solver_strategy_update_threaded_matches_serial() -> None:
     )
 
     assert threaded == serial
+
+
+def test_dense_cfr_state_allows_empty_tables() -> None:
+    state = SolverDenseCfrState(regret_sums=(), strategy_sums=())
+
+    assert state.regret_sums == ()
+    assert state.strategy_sums == ()
 
 
 def test_chunk_indices_splits_deterministically() -> None:

@@ -86,37 +86,24 @@ def build_public_tree(
     queue: deque[tuple[int, int]] = deque([(0, 0)])
 
     if root_chance_outcomes is not None:
-        actions_by_node[0] = ()
-        first_child[0] = len(children)
-        child_count[0] = 0
-        added_children = 0
-        for outcome in root_chance_outcomes:
-            if len(node_states) >= build_config.max_nodes:
-                break
-            if outcome.probability < 0.0 or outcome.probability > 1.0:
-                raise ValueError("chance outcome probability must be in [0, 1]")
-            child_state = outcome.state
-            child_node_index = len(node_states)
-            children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
-            node_states.append(child_state)
-            actions_by_node.append(())
-            action_labels.append(None)
-            child_type = _node_type_for_state(
-                child_state,
-                depth=1,
-                max_depth=build_config.max_depth,
-            )
-            added_children += 1
-            node_types.append(child_type)
-            streets.append(child_state.current_street.value)
-            first_child.append(0)
-            child_count.append(0)
-            child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry, child_count=0, action_labels=())
-            infoset_ids.append(child_infoset)
-            terminal_payoffs.append(_terminal_payoff_for_state(child_state))
-            if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
-                queue.append((child_node_index, 1))
-        child_count[0] = added_children
+        _append_chance_outcomes(
+            node_index=0,
+            outcomes=root_chance_outcomes,
+            node_states=node_states,
+            node_types=node_types,
+            streets=streets,
+            first_child=first_child,
+            child_count=child_count,
+            infoset_ids=infoset_ids,
+            infoset_registry=infoset_registry,
+            terminal_payoffs=terminal_payoffs,
+            actions_by_node=actions_by_node,
+            action_labels=action_labels,
+            children=children,
+            queue=queue,
+            build_config=build_config,
+            advance_depth=1,
+        )
 
     while queue and len(node_states) < build_config.max_nodes:
         node_index, depth = queue.popleft()
@@ -130,40 +117,24 @@ def build_public_tree(
         if expand_chance is not None and not (node_index == 0 and root_is_chance):
             chance_outcomes = expand_chance(node_state)
         if chance_outcomes is not None:
-            actions_by_node[node_index] = ()
-            node_types[node_index] = NodeType.CHANCE
-            infoset_ids[node_index] = None
-            first_child[node_index] = len(children)
-            child_count[node_index] = 0
-            added_children = 0
-            for outcome in chance_outcomes:
-                if len(node_states) >= build_config.max_nodes:
-                    break
-                if outcome.probability < 0.0 or outcome.probability > 1.0:
-                    raise ValueError("chance outcome probability must be in [0, 1]")
-                child_state = outcome.state
-                child_node_index = len(node_states)
-                children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
-                node_states.append(child_state)
-                actions_by_node.append(())
-                action_labels.append(None)
-                next_depth = depth + 1
-                child_type = _node_type_for_state(
-                    child_state,
-                    depth=next_depth,
-                    max_depth=build_config.max_depth,
-                )
-                added_children += 1
-                node_types.append(child_type)
-                streets.append(child_state.current_street.value)
-                first_child.append(0)
-                child_count.append(0)
-                child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry, child_count=0, action_labels=())
-                infoset_ids.append(child_infoset)
-                terminal_payoffs.append(_terminal_payoff_for_state(child_state))
-                if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
-                    queue.append((child_node_index, next_depth))
-            child_count[node_index] = added_children
+            _append_chance_outcomes(
+                node_index=node_index,
+                outcomes=chance_outcomes,
+                node_states=node_states,
+                node_types=node_types,
+                streets=streets,
+                first_child=first_child,
+                child_count=child_count,
+                infoset_ids=infoset_ids,
+                infoset_registry=infoset_registry,
+                terminal_payoffs=terminal_payoffs,
+                actions_by_node=actions_by_node,
+                action_labels=action_labels,
+                children=children,
+                queue=queue,
+                build_config=build_config,
+                advance_depth=depth + 1,
+            )
             continue
 
         if node_type is NodeType.CHANCE:
@@ -305,6 +276,73 @@ def _terminal_payoff_for_state(state: GameState) -> Chips | None:
     if state.phase is HandPhase.TERMINAL:
         return Chips(0)
     return None
+
+
+def _append_chance_outcomes(
+    *,
+    node_index: int,
+    outcomes: tuple[ChanceOutcome, ...],
+    node_states: list[GameState],
+    node_types: list[NodeType],
+    streets: list[str],
+    first_child: list[int],
+    child_count: list[int],
+    infoset_ids: list[InfosetId | None],
+    infoset_registry: dict[tuple[object, ...], InfosetId],
+    terminal_payoffs: list[Chips | None],
+    actions_by_node: list[tuple[Action, ...]],
+    action_labels: list[tuple[str, ...] | None],
+    children: list[ChildLink],
+    queue: deque[tuple[int, int]],
+    build_config: TreeBuildConfig,
+    advance_depth: int,
+) -> None:
+    actions_by_node[node_index] = ()
+    node_types[node_index] = NodeType.CHANCE
+    infoset_ids[node_index] = None
+    first_child[node_index] = len(children)
+    child_count[node_index] = 0
+
+    appended: list[ChanceOutcome] = []
+    for outcome in outcomes:
+        if len(node_states) >= build_config.max_nodes:
+            break
+        if outcome.probability < 0.0 or outcome.probability > 1.0:
+            raise ValueError("chance outcome probability must be in [0, 1]")
+        appended.append(outcome)
+
+    if not appended:
+        return
+
+    probability = 1.0 / len(appended)
+    for outcome in appended:
+        child_state = outcome.state
+        child_node_index = len(node_states)
+        children.append(ChildLink(child=NodeId(child_node_index), chance_prob=probability))
+        node_states.append(child_state)
+        actions_by_node.append(())
+        action_labels.append(None)
+        child_type = _node_type_for_state(
+            child_state,
+            depth=advance_depth,
+            max_depth=build_config.max_depth,
+        )
+        node_types.append(child_type)
+        streets.append(child_state.current_street.value)
+        first_child.append(0)
+        child_count.append(0)
+        child_infoset = _infoset_id_for_state(
+            child_state,
+            child_type,
+            infoset_registry,
+            child_count=0,
+            action_labels=(),
+        )
+        infoset_ids.append(child_infoset)
+        terminal_payoffs.append(_terminal_payoff_for_state(child_state))
+        if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
+            queue.append((child_node_index, advance_depth))
+    child_count[node_index] = len(appended)
 
 
 def _advance_closed_street(

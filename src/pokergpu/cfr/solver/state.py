@@ -9,7 +9,8 @@ class DenseCfrState:
     strategy_sums: tuple[tuple[float, ...], ...]
 
     def __post_init__(self) -> None:
-        assert self.regret_sums or self.strategy_sums, "dense CFR tables cannot be empty"
+        if not self.regret_sums and not self.strategy_sums:
+            return
         if len(self.regret_sums) != len(self.strategy_sums):
             raise ValueError("regret and strategy tables must have the same size")
         for regrets, strategy_sums in zip(self.regret_sums, self.strategy_sums, strict=True):

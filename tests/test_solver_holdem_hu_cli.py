@@ -83,3 +83,9 @@ def test_main_reports_exact_solved_state(
     assert "encoded_state=" in captured
     assert "debug_log_dir=" not in captured
     assert table.infoset_count > 0
+
+
+def test_main_shows_position_strategy_hint_when_unavailable(
+) -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU, depth_limit=1)
+    assert solver_holdem_hu_cli._format_position_strategy_display(None, None, tree) == "unavailable: no dense state"
