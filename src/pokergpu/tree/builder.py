@@ -68,6 +68,7 @@ def build_public_tree(
     node_types: list[NodeType] = [
         NodeType.CHANCE if root_is_chance else _node_type_for_state(state, depth=0, max_depth=build_config.max_depth)
     ]
+    streets: list[str] = [state.current_street.value]
     first_child: list[int] = [0]
     child_count: list[int] = [0]
     infoset_ids: list[InfosetId | None] = []
@@ -107,6 +108,7 @@ def build_public_tree(
             )
             added_children += 1
             node_types.append(child_type)
+            streets.append(child_state.current_street.value)
             first_child.append(0)
             child_count.append(0)
             child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
@@ -153,6 +155,7 @@ def build_public_tree(
                 )
                 added_children += 1
                 node_types.append(child_type)
+                streets.append(child_state.current_street.value)
                 first_child.append(0)
                 child_count.append(0)
                 child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
@@ -198,6 +201,7 @@ def build_public_tree(
             )
             added_children += 1
             node_types.append(child_type)
+            streets.append(child_state.current_street.value)
             first_child.append(0)
             child_count.append(0)
             child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
@@ -214,6 +218,7 @@ def build_public_tree(
         first_child=tuple(first_child),
         child_count=tuple(child_count),
         children=tuple(children),
+        streets=tuple(streets),
         infoset_ids=tuple(infoset_ids),
         terminal_payoffs=tuple(terminal_payoffs),
         action_labels=tuple(action_labels),

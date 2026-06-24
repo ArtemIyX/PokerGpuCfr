@@ -33,11 +33,13 @@ class PublicTree:
     children: tuple[ChildLink, ...]
     infoset_ids: tuple[InfosetId | None, ...]
     terminal_payoffs: tuple[Chips | None, ...]
+    streets: tuple[str, ...] = field(default_factory=tuple)
     action_labels: tuple[tuple[str, ...] | None, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         node_count = len(self.node_types)
         aligned_lengths = (
+            len(self.streets) if self.streets else node_count,
             len(self.first_child),
             len(self.child_count),
             len(self.infoset_ids),
@@ -45,6 +47,11 @@ class PublicTree:
         )
         if any(length != node_count for length in aligned_lengths):
             raise ValueError("all per-node arrays must have the same length")
+
+        if not self.streets:
+            object.__setattr__(self, "streets", tuple("" for _ in range(node_count)))
+        elif len(self.streets) != node_count:
+            raise ValueError("streets must match node count")
 
         if not self.action_labels:
             object.__setattr__(self, "action_labels", tuple(None for _ in range(node_count)))

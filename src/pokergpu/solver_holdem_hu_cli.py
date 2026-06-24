@@ -514,9 +514,12 @@ def _format_root_strategy(
     if dense_state is None:
         return None
     table = build_dense_infoset_table(tree)
-    if not table.infoset_order:
+    root_node = _first_decision_node(tree)
+    if root_node is None:
         return None
-    root_infoset = table.infoset_order[0]
+    root_infoset = table.node_to_infoset[root_node]
+    if root_infoset < 0:
+        return None
     strategy_sums = dense_state.strategy_sums[root_infoset]
     if not strategy_sums:
         return None
@@ -532,9 +535,12 @@ def _format_root_strategy(
 
 def _format_root_infoset_labels(tree: PublicTree) -> str | None:
     table = build_dense_infoset_table(tree)
-    if not table.infoset_order:
+    root_node = _first_decision_node(tree)
+    if root_node is None:
         return None
-    root_infoset = table.infoset_order[0]
+    root_infoset = table.node_to_infoset[root_node]
+    if root_infoset < 0:
+        return None
     labels = _root_infoset_labels(tree, root_infoset, len(table.action_labels[root_infoset]))
     return "{" + ", ".join(labels) + "}" if labels else "none"
 
@@ -545,6 +551,13 @@ def _root_infoset_labels(tree: PublicTree, root_infoset: int, action_count: int)
     if len(labels) != action_count:
         return tuple(f"action_{index}" for index in range(action_count))
     return labels
+
+
+def _first_decision_node(tree: PublicTree) -> int | None:
+    for node_index, node_type in enumerate(tree.node_types):
+        if node_type in {NodeType.PLAYER0, NodeType.PLAYER1}:
+            return node_index
+    return None
 
 
 def _build_leaf_backend(kind: str) -> LeafEvalBackend:

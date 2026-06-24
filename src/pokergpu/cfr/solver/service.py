@@ -564,14 +564,10 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
         if labels and table.action_counts[infoset_id] != len(labels)
     )
     street_node_counts = {
-        "preflop": sum(
-            1
-            for labels in tree.action_labels
-            if labels and not any(label.startswith(("flop_", "turn_", "river_")) for label in labels)
-        ),
-        "flop": sum(1 for labels in tree.action_labels if labels and any(label.startswith("flop_") for label in labels)),
-        "turn": sum(1 for labels in tree.action_labels if labels and any(label.startswith("turn_") for label in labels)),
-        "river": sum(1 for labels in tree.action_labels if labels and any(label.startswith("river_") for label in labels)),
+        "preflop": sum(1 for street in tree.streets if street == "preflop"),
+        "flop": sum(1 for street in tree.streets if street == "flop"),
+        "turn": sum(1 for street in tree.streets if street == "turn"),
+        "river": sum(1 for street in tree.streets if street == "river"),
     }
     chance_branching = [count for node_type, count in zip(tree.node_types, tree.child_count, strict=True) if node_type is NodeType.CHANCE]
     player_branching = [count for node_type, count in zip(tree.node_types, tree.child_count, strict=True) if node_type in {NodeType.PLAYER0, NodeType.PLAYER1}]
