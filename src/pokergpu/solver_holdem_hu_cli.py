@@ -266,7 +266,7 @@ def _print_summary(
     print(f"state={_format_game_state(runtime_state, result)}")
     print(f"position_legal_actions={_format_legal_actions(runtime_state)}")
     if debug:
-        _print_debug_details(result, board, tree, dense_state)
+        _print_debug_details(result, board, tree, dense_state, runtime_state)
     if dense_state is not None:
         print(f"position_strategy={_format_position_strategy(dense_state, runtime_state)}")
     if result.timing_seconds is not None:
@@ -407,6 +407,7 @@ def _print_debug_details(
     board: Board,
     tree: PublicTree,
     dense_state: DenseCfrState | None,
+    runtime_state: GameState | None,
 ) -> None:
     print(f"board={board if str(board) else 'preflop'}")
     print(f"board_cards={_format_board_cards(board)}")
@@ -431,6 +432,9 @@ def _print_debug_details(
             else:
                 print(f"diagnostic.{key}={value}")
     if dense_state is not None:
+        root_strategy = _format_root_strategy(dense_state, tree)
+        if root_strategy is not None:
+            print(f"debug.root_strategy={root_strategy}")
         print(f"debug.position_strategy={_format_position_strategy(dense_state, runtime_state)}")
 
 
@@ -536,6 +540,31 @@ def _position_strategy_and_labels(
     else:
         strategy = tuple(max(0.0, value) / total for value in strategy_sums)
     return labels, strategy
+
+
+def _format_root_strategy(
+    dense_state: DenseCfrState | None,
+    tree: PublicTree,
+) -> str | None:
+    if dense_state is None:
+        return None
+    table = build_dense_infoset_table(tree)
+    if not table.infoset_order:
+        return None
+    root_infoset = table.infoset_order[0]
+    strategy_sums = dense_state.strategy_sums[root_infoset]
+    if not strategy_sums:
+        return None
+    total = sum(max(0.0, value) for value in strategy_sums)
+    if total <= 0.0:
+        strategy = tuple(1.0 / len(strategy_sums) for _ in strategy_sums)
+    else:
+        strategy = tuple(max(0.0, value) / total for value in strategy_sums)
+    labels = table.action_labels[root_infoset]
+    if len(labels) != len(strategy):
+        labels = tuple(f"action_{index}" for index in range(len(strategy)))
+    parts = ", ".join(f"{label}: {value:.3f}" for label, value in zip(labels, strategy, strict=True))
+    return "{" + parts + "}"
 
 
 def _build_leaf_backend(kind: str) -> LeafEvalBackend:

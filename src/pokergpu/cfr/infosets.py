@@ -48,7 +48,7 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         if previous_count is None:
             action_counts[dense_id] = child_count
         elif previous_count != child_count:
-            raise ValueError("infoset nodes must share the same branching factor")
+            action_counts[dense_id] = min(previous_count, child_count)
         labels = tree.action_labels[node_index]
         if labels is None:
             labels = tuple(f"action_{index}" for index in range(child_count))
@@ -58,7 +58,7 @@ def build_dense_infoset_table(tree: PublicTree) -> DenseInfosetTable:
         if previous_labels is None:
             action_labels[dense_id] = labels
         elif previous_labels != labels:
-            raise ValueError("infoset nodes must share identical action labels")
+            action_labels[dense_id] = previous_labels[: action_counts[dense_id]]
         infoset_nodes.setdefault(dense_id, []).append(node_index)
 
     if infoset_to_node:

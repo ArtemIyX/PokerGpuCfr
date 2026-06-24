@@ -154,6 +154,27 @@ def test_holdem_hu_action_labels_vary_by_street() -> None:
     assert preflop != river
 
 
+def test_holdem_hu_action_labels_match_tree_root_branching() -> None:
+    tree = make_game_public_tree(GameVariant.HOLDEM_HU)
+    profile = make_holdem_hu_profile()
+
+    assert tree.node_types[0] is NodeType.CHANCE
+    assert tree.child_count[0] > 0
+    assert tree.action_labels[0] is None
+    assert tuple(tree.streets[0] for _ in range(1)) == ("preflop",)
+
+    preflop_labels = action_labels_for_street(profile, Street.PREFLOP)
+    flop_labels = action_labels_for_street(profile, Street.FLOP)
+    turn_labels = action_labels_for_street(profile, Street.TURN)
+    river_labels = action_labels_for_street(profile, Street.RIVER)
+
+    assert len(preflop_labels) > 0
+    assert len(flop_labels) > 0
+    assert len(turn_labels) > 0
+    assert len(river_labels) > 0
+    assert preflop_labels != flop_labels != turn_labels != river_labels
+
+
 def test_holdem_hu_tree_rejects_bad_manual_action_labels() -> None:
     from pokergpu.tree.public_tree import ChildLink
     from pokergpu.tree.public_tree import InfosetId

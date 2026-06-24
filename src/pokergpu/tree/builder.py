@@ -73,7 +73,7 @@ def build_public_tree(
     child_count: list[int] = [0]
     infoset_ids: list[InfosetId | None] = []
     infoset_registry: dict[tuple[object, ...], InfosetId] = {}
-    root_infoset = _infoset_id_for_state(state, node_types[0], infoset_registry)
+    root_infoset = _infoset_id_for_state(state, node_types[0], infoset_registry, child_count=0, action_labels=())
     if node_types[0] is NodeType.CHANCE:
         root_infoset = None
     infoset_ids.append(root_infoset)
@@ -111,7 +111,7 @@ def build_public_tree(
             streets.append(child_state.current_street.value)
             first_child.append(0)
             child_count.append(0)
-            child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
+            child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry, child_count=0, action_labels=())
             infoset_ids.append(child_infoset)
             terminal_payoffs.append(_terminal_payoff_for_state(child_state))
             if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
@@ -158,7 +158,7 @@ def build_public_tree(
                 streets.append(child_state.current_street.value)
                 first_child.append(0)
                 child_count.append(0)
-                child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
+                child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry, child_count=0, action_labels=())
                 infoset_ids.append(child_infoset)
                 terminal_payoffs.append(_terminal_payoff_for_state(child_state))
                 if child_type not in {NodeType.LEAF, NodeType.TERMINAL}:
@@ -178,7 +178,8 @@ def build_public_tree(
             terminal_payoffs[node_index] = _terminal_payoff_for_state(node_state)
             continue
         actions_by_node[node_index] = legal_actions
-        action_labels[node_index] = tuple(_action_label(action, node_state.current_street) for action in legal_actions)
+        current_action_labels = tuple(_action_label(action, node_state.current_street) for action in legal_actions)
+        action_labels[node_index] = current_action_labels
         first_child[node_index] = len(children)
         added_children = 0
 
@@ -204,7 +205,13 @@ def build_public_tree(
             streets.append(child_state.current_street.value)
             first_child.append(0)
             child_count.append(0)
-            child_infoset = _infoset_id_for_state(child_state, child_type, infoset_registry)
+            child_infoset = _infoset_id_for_state(
+                child_state,
+                child_type,
+                infoset_registry,
+                child_count=len(legal_actions),
+                action_labels=current_action_labels,
+            )
             infoset_ids.append(child_infoset)
             terminal_payoffs.append(_terminal_payoff_for_state(child_state))
 
@@ -242,12 +249,15 @@ def _infoset_id_for_state(
     state: GameState,
     node_type: NodeType,
     infoset_registry: dict[tuple[object, ...], InfosetId],
+    *,
+    child_count: int,
+    action_labels: tuple[str, ...],
 ) -> InfosetId | None:
     if (
         node_type in {NodeType.PLAYER0, NodeType.PLAYER1}
         and state.phase is HandPhase.IN_PROGRESS
     ):
-        key = _infoset_key_for_state(state, node_type)
+        key = _infoset_key_for_state(state, node_type, child_count=child_count, action_labels=action_labels)
         existing = infoset_registry.get(key)
         if existing is not None:
             return existing
@@ -257,7 +267,13 @@ def _infoset_id_for_state(
     return None
 
 
-def _infoset_key_for_state(state: GameState, node_type: NodeType) -> tuple[object, ...]:
+def _infoset_key_for_state(
+    state: GameState,
+    node_type: NodeType,
+    *,
+    child_count: int,
+    action_labels: tuple[str, ...],
+) -> tuple[object, ...]:
     board_key = tuple(str(card) for card in state.board.cards)
     betting = state.betting_round
     stacks_key = tuple((int(entry.player), int(entry.stack)) for entry in betting.stacks)
@@ -271,6 +287,8 @@ def _infoset_key_for_state(state: GameState, node_type: NodeType) -> tuple[objec
         int(betting.pot.amount),
         stacks_key,
         bets_key,
+        child_count,
+        action_labels,
     )
 
 
