@@ -545,6 +545,16 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
     max_branching = max(branch_counts) if branch_counts else 0
     avg_branching = (sum(branch_counts) / len(branch_counts)) if branch_counts else 0.0
     action_label_variants = len({labels for labels in tree.action_labels if labels is not None})
+    street_node_counts = {
+        "preflop": sum(
+            1
+            for labels in tree.action_labels
+            if labels and not any(label.startswith(("flop_", "turn_", "river_")) for label in labels)
+        ),
+        "flop": sum(1 for labels in tree.action_labels if labels and any(label.startswith("flop_") for label in labels)),
+        "turn": sum(1 for labels in tree.action_labels if labels and any(label.startswith("turn_") for label in labels)),
+        "river": sum(1 for labels in tree.action_labels if labels and any(label.startswith("river_") for label in labels)),
+    }
     chance_branching = [count for node_type, count in zip(tree.node_types, tree.child_count, strict=True) if node_type is NodeType.CHANCE]
     player_branching = [count for node_type, count in zip(tree.node_types, tree.child_count, strict=True) if node_type in {NodeType.PLAYER0, NodeType.PLAYER1}]
     return {
@@ -561,5 +571,6 @@ def _tree_debug_fields(tree: PublicTree, table: DenseInfosetTable) -> dict[str, 
         "tree_player_branching": tuple(player_branching[:16]),
         "tree_root_child_count": tree.child_count[0] if tree.child_count else 0,
         "tree_action_label_variants": action_label_variants,
+        "tree_street_node_counts": street_node_counts,
         "tree_internal_nodes": tree.node_count - terminal_count - leaf_count,
     }

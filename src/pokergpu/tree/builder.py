@@ -6,7 +6,9 @@ from typing import Callable
 
 from pokergpu.abstraction.actions import ActionAbstraction, BaselineActionAbstraction
 from pokergpu.core.actions import Action
+from pokergpu.core.actions import ActionType
 from pokergpu.core.betting import Chips
+from pokergpu.core.board import Street
 from pokergpu.core.state import GameState, HandPhase
 from pokergpu.core.transitions import advance_hand_to_next_street
 from pokergpu.core.transitions import apply_action
@@ -77,6 +79,7 @@ def build_public_tree(
     terminal_payoffs: list[Chips | None] = [_terminal_payoff_for_state(state)]
     node_states: list[GameState] = [state]
     actions_by_node: list[tuple[Action, ...]] = [()]
+    action_labels: list[tuple[str, ...] | None] = [None]
     children: list[ChildLink] = []
 
     queue: deque[tuple[int, int]] = deque([(0, 0)])
@@ -96,6 +99,7 @@ def build_public_tree(
             children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
             node_states.append(child_state)
             actions_by_node.append(())
+            action_labels.append(None)
             child_type = _node_type_for_state(
                 child_state,
                 depth=1,
@@ -133,14 +137,15 @@ def build_public_tree(
             for outcome in chance_outcomes:
                 if len(node_states) >= build_config.max_nodes:
                     break
-                if outcome.probability < 0.0 or outcome.probability > 1.0:
-                    raise ValueError("chance outcome probability must be in [0, 1]")
-                child_state = outcome.state
-                child_node_index = len(node_states)
-                children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
-                node_states.append(child_state)
-                actions_by_node.append(())
-                next_depth = depth + 1
+            if outcome.probability < 0.0 or outcome.probability > 1.0:
+                raise ValueError("chance outcome probability must be in [0, 1]")
+            child_state = outcome.state
+            child_node_index = len(node_states)
+            children.append(ChildLink(child=NodeId(child_node_index), chance_prob=outcome.probability))
+            node_states.append(child_state)
+            actions_by_node.append(())
+            action_labels.append(None)
+            next_depth = depth + 1
                 child_type = _node_type_for_state(
                     child_state,
                     depth=next_depth,
@@ -165,10 +170,12 @@ def build_public_tree(
         if not legal_actions:
             node_types[node_index] = NodeType.LEAF
             actions_by_node[node_index] = ()
+            action_labels[node_index] = None
             child_count[node_index] = 0
             terminal_payoffs[node_index] = _terminal_payoff_for_state(node_state)
             continue
         actions_by_node[node_index] = legal_actions
+        action_labels[node_index] = tuple(_action_label(action, node_state.current_street) for action in legal_actions)
         first_child[node_index] = len(children)
         added_children = 0
 
@@ -182,6 +189,7 @@ def build_public_tree(
             children.append(ChildLink(child=NodeId(child_node_index)))
             node_states.append(child_state)
             actions_by_node.append(())
+            action_labels.append(None)
             next_depth = depth + 1
             child_type = _node_type_for_state(
                 child_state,
@@ -208,6 +216,7 @@ def build_public_tree(
         children=tuple(children),
         infoset_ids=tuple(infoset_ids),
         terminal_payoffs=tuple(terminal_payoffs),
+        action_labels=tuple(action_labels),
     )
     return BuiltPublicTree(
         tree=tree,
@@ -258,6 +267,15 @@ def _infoset_key_for_state(state: GameState, node_type: NodeType) -> tuple[objec
         stacks_key,
         bets_key,
     )
+
+
+def _action_label(action: Action, street: Street) -> str:
+    prefix = "" if street is Street.PREFLOP else f"{street.value}_"
+    if action.action_type in {ActionType.FOLD, ActionType.CHECK, ActionType.CALL}:
+        return f"{prefix}{action.action_type.value}"
+    if action.amount is None:
+        return f"{prefix}{action.action_type.value}"
+    return f"{prefix}{action.action_type.value}:{int(action.amount)}"
 
 
 def _terminal_payoff_for_state(state: GameState) -> Chips | None:
