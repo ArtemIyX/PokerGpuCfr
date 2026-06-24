@@ -4,6 +4,7 @@ from pokergpu.abstraction.actions import BaselineActionAbstraction
 from pokergpu.abstraction.actions import make_compact_profile
 from pokergpu.abstraction.actions import make_holdem_hu_profile
 from pokergpu.core.board import Board
+from pokergpu.core.board import Street
 from pokergpu.core.betting import BettingRoundState
 from pokergpu.core.betting import BlindStructure
 from pokergpu.core.betting import PlayerBet
@@ -13,6 +14,7 @@ from pokergpu.core.betting import Pot
 from pokergpu.core.betting import Chips
 from pokergpu.core.betting import chips
 from pokergpu.core.cards import Card
+from pokergpu.core.cards import make_deck
 from pokergpu.core.state import GameState
 from pokergpu.core.state import HandPhase
 from pokergpu.core.state import PlayerState
@@ -94,13 +96,12 @@ def make_game_public_tree(
 def make_holdem_hu_public_tree(*, compact: bool = False) -> PublicTree:
     state = _make_canonical_holdem_state()
     abstraction = BaselineActionAbstraction(profile=make_compact_profile() if compact else make_holdem_hu_profile())
-    config = TreeBuildConfig(max_depth=1 if compact else 2, max_nodes=256 if compact else 512)
+    config = TreeBuildConfig(max_depth=1 if compact else 6, max_nodes=256 if compact else 1024)
     return build_public_tree(
         state,
         abstraction=abstraction,
         config=config,
-        advance_next_board=_next_holdem_board if not compact else None,
-        expand_chance=_expand_holdem_root_chance if not compact else None,
+        expand_chance=_expand_holdem_chance if not compact else None,
     ).tree
 
 
@@ -128,27 +129,21 @@ def _make_canonical_holdem_state() -> GameState:
     )
 
 
-def _next_holdem_board(state: GameState) -> Board | None:
-    if state.board.is_preflop:
-        return Board.from_str("AhKdTc")
-    if state.board.is_flop:
-        return Board.from_str("AhKdTc9s")
-    if state.board.is_turn:
-        return Board.from_str("AhKdTc9s2d")
-    return None
-
-
-def _expand_holdem_root_chance(state: GameState) -> tuple[ChanceOutcome, ...] | None:
-    if state.board.cards:
-        return None
+def _expand_holdem_chance(state: GameState) -> tuple[ChanceOutcome, ...] | None:
     if state.phase is not HandPhase.IN_PROGRESS:
         return None
-    boards = _holdem_root_board_samples()
+    if state.board.is_preflop:
+        boards = _sample_public_boards(Street.FLOP, limit=4)
+    elif state.board.is_flop:
+        boards = _sample_public_boards(Street.TURN, prefix=state.board.cards, limit=4)
+    elif state.board.is_turn:
+        boards = _sample_public_boards(Street.RIVER, prefix=state.board.cards, limit=4)
+    else:
+        return None
+    if not boards:
+        return None
     probability = 1.0 / len(boards)
-    return tuple(
-        ChanceOutcome(state=_make_holdem_dealt_state(state, board), probability=probability)
-        for board in boards
-    )
+    return tuple(ChanceOutcome(state=_make_holdem_dealt_state(state, board), probability=probability) for board in boards)
 
 
 def _make_holdem_dealt_state(state: GameState, board: Board) -> GameState:
@@ -161,13 +156,28 @@ def _make_holdem_dealt_state(state: GameState, board: Board) -> GameState:
     )
 
 
-def _holdem_root_board_samples() -> tuple[Board, ...]:
-    return (
-        Board.from_str("AhKdTc"),
-        Board.from_str("QsJh9c"),
-        Board.from_str("AsKh7d"),
-        Board.from_str("AdQc8s"),
-    )
+def _sample_public_boards(street: Street, *, prefix: tuple[Card, ...] = (), limit: int = 4) -> tuple[Board, ...]:
+    deck = make_deck()
+    dead_cards = set(prefix)
+    boards: list[Board] = []
+    target_len = {
+        Street.FLOP: 3,
+        Street.TURN: 4,
+        Street.RIVER: 5,
+    }[street]
+    if len(prefix) > target_len:
+        return ()
+    if len(prefix) == target_len:
+        return (Board(cards=prefix),)
+    for card in deck:
+        if card in dead_cards:
+            continue
+        next_cards = prefix + (card,)
+        if len(next_cards) == target_len:
+            boards.append(Board(cards=next_cards))
+            if len(boards) >= limit:
+                break
+    return tuple(boards)
 
 
 def resolve_game_state_spec(spec: GameStateSpec | None) -> GameStateSpec | None:
