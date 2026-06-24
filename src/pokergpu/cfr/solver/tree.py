@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import combinations
+from dataclasses import dataclass
 
 from pokergpu.abstraction.actions import BaselineActionAbstraction
 from pokergpu.abstraction.actions import make_compact_profile
@@ -33,6 +34,12 @@ from pokergpu.tree.public_tree import InfosetId
 from pokergpu.tree.public_tree import NodeId
 from pokergpu.tree.public_tree import NodeType
 from pokergpu.tree.public_tree import PublicTree
+
+
+@dataclass(slots=True, frozen=True)
+class HoldemHuTreeConfig:
+    compact: bool = False
+    board_sample_limit: int = 8
 
 
 def make_toy_public_tree() -> PublicTree:
@@ -79,6 +86,7 @@ def make_game_public_tree(
     compact: bool = False,
     depth_limit: int | None = None,
     state: GameState | None = None,
+    holdem_hu_tree_config: HoldemHuTreeConfig | None = None,
 ) -> PublicTree:
     if game is GameVariant.KUHN:
         return make_kuhn_public_tree()
@@ -88,6 +96,7 @@ def make_game_public_tree(
         return make_holdem_hu_public_tree(
             compact=compact or (depth_limit is not None and depth_limit <= 1),
             state=state,
+            config=holdem_hu_tree_config,
         )
     supported = ", ".join(
         (
@@ -99,15 +108,26 @@ def make_game_public_tree(
     raise NotImplementedError(f"unsupported game variant {game.value!r}; supported variants: {supported}")
 
 
-def make_holdem_hu_public_tree(*, compact: bool = False, state: GameState | None = None) -> PublicTree:
+def make_holdem_hu_public_tree(
+    *,
+    compact: bool = False,
+    state: GameState | None = None,
+    config: HoldemHuTreeConfig | None = None,
+) -> PublicTree:
     state = state or _make_canonical_holdem_state()
-    abstraction = BaselineActionAbstraction(profile=make_compact_profile() if compact else make_holdem_hu_profile())
-    config = TreeBuildConfig(max_depth=1 if compact else 6, max_nodes=256 if compact else 1024)
+    tree_config = config or HoldemHuTreeConfig(compact=compact)
+    effective_compact = compact or tree_config.compact
+    abstraction = BaselineActionAbstraction(
+        profile=make_compact_profile() if effective_compact else make_holdem_hu_profile()
+    )
+    build_config = TreeBuildConfig(max_depth=1 if effective_compact else 6, max_nodes=256 if effective_compact else 1024)
     return build_public_tree(
         state,
         abstraction=abstraction,
-        config=config,
-        expand_chance=_expand_holdem_chance if not compact else None,
+        config=build_config,
+        expand_chance=None
+        if effective_compact
+        else (lambda current_state: _expand_holdem_chance(current_state, board_sample_limit=tree_config.board_sample_limit)),
     ).tree
 
 
@@ -135,15 +155,15 @@ def _make_canonical_holdem_state() -> GameState:
     )
 
 
-def _expand_holdem_chance(state: GameState) -> tuple[ChanceOutcome, ...] | None:
+def _expand_holdem_chance(state: GameState, *, board_sample_limit: int = 8) -> tuple[ChanceOutcome, ...] | None:
     if state.phase is not HandPhase.IN_PROGRESS:
         return None
     if state.board.is_preflop:
-        boards = _sample_public_boards(Street.FLOP, limit=4)
+        boards = _sample_public_boards(Street.FLOP, limit=board_sample_limit)
     elif state.board.is_flop:
-        boards = _sample_public_boards(Street.TURN, prefix=state.board.cards, limit=4)
+        boards = _sample_public_boards(Street.TURN, prefix=state.board.cards, limit=board_sample_limit)
     elif state.board.is_turn:
-        boards = _sample_public_boards(Street.RIVER, prefix=state.board.cards, limit=4)
+        boards = _sample_public_boards(Street.RIVER, prefix=state.board.cards, limit=board_sample_limit)
     else:
         return None
     if not boards:
@@ -176,12 +196,64 @@ def _sample_public_boards(street: Street, *, prefix: tuple[Card, ...] = (), limi
         return (Board(cards=prefix),)
     remaining_cards = [card for card in deck if card not in dead_cards]
     needed_cards = target_len - len(prefix)
+    if needed_cards <= 0:
+        return (Board(cards=prefix),)
     boards: list[Board] = []
-    for extra_cards in combinations(remaining_cards, needed_cards):
+    for extra_cards in _spread_board_samples(remaining_cards, needed_cards, limit):
         boards.append(Board(cards=prefix + extra_cards))
-        if len(boards) >= limit:
-            break
     return tuple(boards)
+
+
+def _spread_board_samples(cards: list[Card], needed_cards: int, limit: int) -> tuple[tuple[Card, ...], ...]:
+    if limit <= 0:
+        return ()
+    if needed_cards == 1:
+        selected_indices = _spread_indices(len(cards), limit)
+        return tuple((cards[index],) for index in selected_indices)
+    if needed_cards == 2:
+        pairs: list[tuple[Card, Card]] = []
+        selected_indices = _spread_indices(len(cards), min(len(cards), max(2, limit * 2)))
+        for left_index, left in enumerate(selected_indices):
+            for right in selected_indices[left_index + 1 :]:
+                pairs.append((cards[left], cards[right]))
+                if len(pairs) >= limit:
+                    return tuple(pairs)
+        if pairs:
+            return tuple(pairs)
+    if needed_cards == 3:
+        triples: list[tuple[Card, Card, Card]] = []
+        selected_indices = _spread_indices(len(cards), min(len(cards), max(3, limit * 2)))
+        for first_index, first in enumerate(selected_indices):
+            for second_index, second in enumerate(selected_indices[first_index + 1 :], start=first_index + 1):
+                for third in selected_indices[second_index + 1 :]:
+                    triples.append((cards[first], cards[second], cards[third]))
+                    if len(triples) >= limit:
+                        return tuple(triples)
+        if triples:
+            return tuple(triples)
+    return tuple(combinations(cards, needed_cards))[:limit]
+
+
+def _spread_indices(length: int, count: int) -> tuple[int, ...]:
+    if length <= 0:
+        return ()
+    if count <= 1:
+        return (0,)
+    if count >= length:
+        return tuple(range(length))
+    step = (length - 1) / float(count - 1)
+    indices: list[int] = []
+    seen: set[int] = set()
+    for position in range(count):
+        index = int(round(position * step))
+        index = min(length - 1, max(0, index))
+        while index in seen and index + 1 < length:
+            index += 1
+        if index in seen:
+            continue
+        seen.add(index)
+        indices.append(index)
+    return tuple(indices)
 
 
 def resolve_game_state_spec(spec: GameStateSpec | None) -> GameStateSpec | None:

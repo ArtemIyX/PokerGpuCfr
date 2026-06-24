@@ -18,6 +18,7 @@ from pokergpu.tree.builder import (
 )
 from pokergpu.tree.public_tree import NodeType
 from pokergpu.cfr.solver.tree import make_holdem_hu_public_tree
+from pokergpu.cfr.solver.tree import HoldemHuTreeConfig
 from pokergpu.cfr.solver.tree import _expand_holdem_chance
 from pokergpu.cfr.solver.tree import _make_canonical_holdem_state
 
@@ -216,3 +217,14 @@ def test_holdem_hu_tree_expands_across_streets() -> None:
 
     assert "flop" in streets
     assert "turn" in streets or "river" in streets
+
+
+def test_holdem_hu_tree_honors_board_sample_limit() -> None:
+    default_tree = make_holdem_hu_public_tree(compact=False)
+    limited_tree = make_holdem_hu_public_tree(
+        compact=False,
+        config=HoldemHuTreeConfig(board_sample_limit=2),
+    )
+
+    assert default_tree.child_count[0] >= limited_tree.child_count[0]
+    assert limited_tree.child_count[0] == 2
